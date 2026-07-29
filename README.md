@@ -96,13 +96,15 @@ streamlit run app.py --server.address 127.0.0.1 --server.port 8763
 
 1. 브라우저에서 Streamlit 주소에 접속합니다.
 2. 실제 WLC IP를 입력합니다.
-3. Protocol, Port, Timeout seconds를 확인합니다.
-4. Username, Password, Enable password를 입력합니다.
+3. `접속 방식`에서 SSH 또는 Telnet을 먼저 선택하고 자동 기본 포트 22/23과 명령 Timeout을 확인합니다.
+4. 장비 ID, 장비 PW, 필요한 경우 Enable password를 입력합니다.
 5. 필요하면 사내 Role 대역표 Excel(`.xlsx` 또는 `.xlsm`)을 업로드합니다.
 6. `수집 실행` 버튼을 누릅니다.
 7. 진행 상태와 로그를 확인합니다.
 8. `정상 완료` 또는 `부분 완료` 상태와 실패 명령·영향 Role/SSID를 확인합니다.
 9. 필요한 파일을 다운로드합니다.
+
+실패하면 오류 코드, 실패 단계, 권장 조치를 먼저 확인합니다. 내부 상태값은 `기술 세부 정보`를 펼쳤을 때만 표시되며 Python traceback과 내부 임시 파일 경로는 일반 결과 화면에 노출하지 않습니다.
 
 다운로드 파일:
 
@@ -380,7 +382,7 @@ python .\tools\verify_combined_release_package.py --dist .\dist
 
 1. `streamlit run app.py`를 실행합니다.
 2. 브라우저에 표시된 로컬 주소로 접속합니다.
-3. 입력 폼, Role 대역 Excel 업로드 영역, `수집 실행` 버튼, 진행 상태 영역, 결과 요약/미리보기 영역이 표시되는지 확인합니다.
+3. 접속 방식 선택, 프로토콜별 기본 포트, 입력 폼, Role 대역 Excel 업로드 영역, `수집 실행` 버튼, 진행 상태 영역, 결과 요약/미리보기 영역이 표시되는지 확인합니다.
 4. 실제 WLC 검증은 서버 PC가 사내망에서 장비에 접근 가능한 환경일 때만 수행합니다.
 
 첫 실행/접속 속도 검증은 Windows 배포 ZIP을 완전히 압축 해제한 뒤 `web\start_webapp.cmd`로 확인합니다. 배포 launcher는 Streamlit 파일 감시와 개발 모드를 끄고, portable 빌드 단계에서 주요 모듈을 미리 컴파일해 첫 실행 지연을 줄입니다.

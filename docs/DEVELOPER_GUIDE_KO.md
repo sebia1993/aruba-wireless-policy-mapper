@@ -140,6 +140,10 @@ CLI collect 종료 코드는 `0=성공`, `1=필수 수집 실패`, `2=입력 오
 
 Streamlit은 `_ACTIVE_TARGETS`와 `_target_collection_slot()`으로 같은 WLC에 대한 중복 수집을 즉시 거부합니다. 기본 launcher 주소는 `127.0.0.1`이며, 원격 HTTP 노출은 기본 동작이 아닙니다. 브라우저 화면에는 Python traceback을 직접 출력하지 않습니다.
 
+`app.py`의 접속 방식 선택은 form 밖에 있습니다. Streamlit form 안의 widget 변경은 제출 전 rerun되지 않기 때문에, SSH/Telnet 변경 시 포트 22/23을 즉시 갱신하려면 이 구조를 유지해야 합니다. 포트 widget key도 프로토콜별로 분리합니다.
+
+`web_logic.run_web_collection()`은 입력 검증을 통과한 뒤 `workspace`, `role_networks`, `collection`, `raw_storage`, `parsing`, `report`, `download` 단계 중 현재 위치를 추적합니다. 예상하지 못한 오류는 원본 예외나 내부 경로 대신 안전한 오류 코드, 실패 단계, 한국어 권장 조치가 담긴 `WebCollectionResult(success=False)`로 반환합니다. 잘못된 Role 대역표와 동일 WLC 중복 실행은 사용자가 직접 수정할 수 있도록 기존 예외 계약을 유지합니다.
+
 CLI, GUI, Web은 모두 `collection_health.assess_collection_results()` 결과를 사용합니다. 같은 `CollectionResult`를 표면마다 다르게 판정하지 않도록 상태 문자열을 별도로 재구현하지 않습니다.
 
 ### `validation.py`와 `collection_health.py`
@@ -379,7 +383,7 @@ mock 관련 파일:
 | 오류 메시지 개선 | `diagnostics.py`, `tests/test_diagnostics.py` |
 | 진단 코드/리포트 변경 | `diagnostic_codes.py`, `diagnostic_mode.py`, `diagnostic_report.py`, `tests/test_diagnostic_*.py` |
 | 파일 저장 안전성 변경 | `atomic_io.py`, `report.py`, `diagnostic_report.py`, `tests/test_atomic_io.py` |
-| Streamlit 동시 실행/접속 범위 변경 | `web_logic.py`, `app.py`, `packaging/streamlit_portable`, `tests/test_web_logic.py` |
+| Streamlit 동시 실행/접속 범위 변경 | `web_logic.py`, `app.py`, `packaging/streamlit_portable`, `tests/test_web_logic.py`, `tests/test_streamlit_app.py` |
 | mock 서버/시나리오 변경 | `mock_server.py`, `mock_scenarios.py`, `config/mock_scenarios`, `tests/test_mock_server.py` |
 | 배포 ZIP 구성 변경 | `build_windows_gui_exe.ps1`, `tests/test_tooling.py` |
 | 사용자 문서 변경 | `docs/USER_GUIDE_KO.md` |

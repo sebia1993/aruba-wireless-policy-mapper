@@ -135,6 +135,116 @@ def test_web_summary_includes_affected_role_and_ssid_for_partial_collection(monk
     assert web_result.summary["affected_ssids"] == "CORP"
 
 
+def test_web_report_failure_returns_safe_structured_result(monkeypatch):
+    fixture_root = Path(__file__).parent / "fixtures"
+    collected = collect_from_offline_raw(
+        Controller(name="sample_controller", host="192.0.2.10"),
+        fixture_root,
+    )
+    monkeypatch.setattr(web_logic, "_collect", lambda *_args, **_kwargs: collected)
+    monkeypatch.setattr(
+        web_logic,
+        "write_reports",
+        lambda **_kwargs: (_ for _ in ()).throw(OSError("disk full at C:\\sensitive\\path")),
+    )
+
+    result = run_web_collection(
+        WebCollectionRequest(
+            host="192.0.2.10",
+            controller_name="sample_controller",
+            username="admin",
+            password="secret",
+        )
+    )
+
+    assert result.success is False
+    assert result.summary["collection_status"] == "failed"
+    assert result.summary["failure_stage"] == "report"
+    assert result.summary["error_code"] == "WLC-RPT-002"
+    assert "sensitive" not in result.error
+    assert not result.artifacts
+
+
+def test_web_parser_failure_returns_parser_code_without_traceback(monkeypatch):
+    fixture_root = Path(__file__).parent / "fixtures"
+    collected = collect_from_offline_raw(
+        Controller(name="sample_controller", host="192.0.2.10"),
+        fixture_root,
+    )
+    monkeypatch.setattr(web_logic, "_collect", lambda *_args, **_kwargs: collected)
+    monkeypatch.setattr(
+        web_logic,
+        "build_parsed_controllers",
+        lambda _results: (_ for _ in ()).throw(ValueError("unsupported private output")),
+    )
+
+    result = run_web_collection(
+        WebCollectionRequest(
+            host="192.0.2.10",
+            controller_name="sample_controller",
+            username="admin",
+            password="secret",
+        )
+    )
+
+    assert result.success is False
+    assert result.summary["failure_stage"] == "parsing"
+    assert result.summary["error_code"] == "WLC-PRS-001"
+    assert "private output" not in result.error
+
+
+def test_web_collection_exception_returns_actionable_auth_code(monkeypatch):
+    monkeypatch.setattr(
+        web_logic,
+        "_collect",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("Authentication failed: bad password")),
+    )
+
+    result = run_web_collection(
+        WebCollectionRequest(
+            host="192.0.2.10",
+            controller_name="sample_controller",
+            username="admin",
+            password="secret",
+        )
+    )
+
+    assert result.success is False
+    assert result.summary["failure_stage"] == "collection"
+    assert result.summary["error_code"] == "WLC-AUTH-001"
+    assert "bad password" not in result.error
+    assert "ID/PW" in result.summary["recommended_action"]
+
+
+def test_web_expected_collection_failure_includes_code_and_specific_action(monkeypatch):
+    failed = web_logic.CollectionResult(
+        controller=Controller(name="sample_controller", host="192.0.2.10"),
+        commands=[
+            CommandOutput(
+                command_id="connect",
+                command="connect",
+                success=False,
+                error="Authentication failed: bad password",
+            )
+        ],
+    )
+    monkeypatch.setattr(web_logic, "_collect", lambda *_args, **_kwargs: failed)
+
+    result = run_web_collection(
+        WebCollectionRequest(
+            host="192.0.2.10",
+            controller_name="sample_controller",
+            username="admin",
+            password="secret",
+        )
+    )
+
+    assert result.success is False
+    assert result.summary["error_code"] == "WLC-AUTH-001"
+    assert result.summary["failure_stage"] == "authentication"
+    assert "ID/PW" in result.summary["recommended_action"]
+
+
 def _role_network_workbook_bytes() -> bytes:
     workbook = Workbook()
     worksheet = workbook.active

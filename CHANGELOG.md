@@ -25,6 +25,7 @@
 - Excel/HTML을 staging 파일로 모두 완성한 뒤 함께 반영하고, 실패 시 기존 파일을 복원하며 `report_status.json`에 파일 상태와 수집 상태를 분리해 기록합니다.
 - 장비 세션 종료 실패를 숨기지 않고 별도 경고로 표시하며, enable password 실패를 로그인 실패와 다른 오류 코드로 분류합니다.
 - GUI와 웹의 주요 실패 제목과 조치 안내를 초급 사용자가 이해하기 쉬운 한국어로 표시합니다.
+- Streamlit에서 SSH/Telnet 선택 시 기본 포트 22/23을 즉시 적용하고, 실패 결과를 오류 코드·단계·권장 조치로 보존합니다.
 - CLI/GUI/Web/HTML이 `collection_health.py`의 공통 상태 모델로 정상 완료, 부분 완료, 수집 실패를 동일하게 표시합니다.
 - 실패한 Role/Alias 명령을 수집된 ACL 관계와 연결해 영향 Role/SSID 및 수집 신뢰도를 관리자 요약에 표시합니다.
 - GUI에 cooperative cancel 버튼을 추가하고, 창 종료 시 non-daemon worker와 장비 세션 정리가 끝날 때까지 기다립니다.

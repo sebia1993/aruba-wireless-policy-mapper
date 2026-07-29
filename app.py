@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from wlc_role_acl_collector.config import default_port_for_protocol
+from wlc_role_acl_collector.diagnostics import classify_error_message
 from wlc_role_acl_collector.web_logic import (
     WebCollectionRequest,
     WebCollectionResult,
@@ -46,26 +47,39 @@ def _render_sidebar_notice() -> None:
 
 
 def _render_input_form() -> tuple[bool, WebCollectionRequest]:
+    st.subheader("수집 대상")
+    protocol = st.radio(
+        "접속 방식",
+        ["ssh", "telnet"],
+        format_func=lambda value: "SSH (기본 포트 22)" if value == "ssh" else "Telnet (기본 포트 23)",
+        horizontal=True,
+        key="connection_protocol",
+    )
     with st.form("collection_form", clear_on_submit=False):
-        st.subheader("수집 대상")
         col1, col2 = st.columns(2)
         with col1:
-            host = st.text_input("WLC IP 또는 Host", placeholder="192.0.2.10")
-            controller_name = st.text_input("보고서 이름", placeholder="sample_controller")
-            protocol = st.selectbox("Protocol", ["ssh", "telnet"], index=0)
+            host = st.text_input("WLC IP", placeholder="192.0.2.10")
+            controller_name = st.text_input("보고서 표시 이름 (선택)", placeholder="sample_controller")
         with col2:
             default_port = default_port_for_protocol(protocol)
-            port = st.number_input("Port", min_value=1, max_value=65535, value=default_port, step=1)
-            timeout = st.number_input("Timeout seconds", min_value=5, max_value=600, value=60, step=5)
+            port = st.number_input(
+                "접속 포트",
+                min_value=1,
+                max_value=65535,
+                value=default_port,
+                step=1,
+                key=f"connection_port_{protocol}",
+            )
+            timeout = st.number_input("명령 Timeout (초)", min_value=5, max_value=600, value=60, step=5)
 
         st.subheader("장비 계정")
         cred1, cred2, cred3 = st.columns(3)
         with cred1:
-            username = st.text_input("Username")
+            username = st.text_input("장비 ID")
         with cred2:
-            password = st.text_input("Password", type="password")
+            password = st.text_input("장비 PW", type="password")
         with cred3:
-            enable_password = st.text_input("Enable password", type="password")
+            enable_password = st.text_input("Enable password (선택)", type="password")
 
         st.subheader("선택 입력 파일")
         role_networks_file = st.file_uploader(
@@ -140,10 +154,17 @@ def _run_collection(request: WebCollectionRequest) -> None:
         status_box.warning(str(exc))
         logs.append(str(exc))
         log_box.code("\n".join(logs[-80:]), language="text")
+    except ValueError as exc:
+        progress_bar.progress(100)
+        status_box.error("입력값을 확인하세요.")
+        logs.append(str(exc))
+        log_box.code("\n".join(logs[-80:]), language="text")
     except Exception as exc:
         progress_bar.progress(100)
-        status_box.error("실행 중 오류가 발생했습니다.")
-        logs.append(f"{type(exc).__name__}: 실행 로그 또는 안전 진단 결과를 확인하세요.")
+        failure = classify_error_message(str(exc))
+        status_box.error(failure.title)
+        logs.append(f"오류 코드: {failure.code}")
+        logs.append(failure.suggestion)
         log_box.code("\n".join(logs[-80:]), language="text")
 
 
@@ -206,8 +227,13 @@ def _render_result(result: WebCollectionResult) -> None:
     else:
         st.error(result.error or "수집에 실패했습니다.")
         if result.summary:
-            st.warning(str(result.summary.get("recommended_action", "접속 정보와 수집 로그를 확인하세요.")))
-            st.json(result.summary)
+            summary = result.summary
+            detail_cols = st.columns(2)
+            detail_cols[0].metric("오류 코드", str(summary.get("error_code", "확인 필요")))
+            detail_cols[1].metric("실패 단계", str(summary.get("failure_stage", "수집")))
+            st.warning(str(summary.get("recommended_action", "접속 정보와 수집 로그를 확인하세요.")))
+            with st.expander("기술 세부 정보"):
+                st.json(summary)
         if result.messages:
             st.write(" / ".join(result.messages))
 

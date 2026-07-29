@@ -224,6 +224,8 @@
     <h3><code>cli.py</code>와 <code>web_logic.py</code></h3>
     <p>CLI collect 종료 코드는 <code>0=성공</code>, <code>1=필수 수집 실패</code>, <code>2=입력 오류</code>, <code>3=선택 명령 일부 실패</code>입니다. 자동화에서 보고서 파일 존재 여부만 보지 말고 종료 코드를 함께 확인해야 합니다.</p>
     <p>Streamlit은 <code>_ACTIVE_TARGETS</code>와 <code>_target_collection_slot()</code>으로 같은 WLC에 대한 중복 수집을 즉시 거부합니다. 기본 launcher 주소는 <code>127.0.0.1</code>이며, 원격 HTTP 노출은 기본 동작이 아닙니다. 브라우저 화면에는 Python traceback을 직접 출력하지 않습니다.</p>
+    <p><code>app.py</code>의 접속 방식 선택은 form 밖에 있습니다. Streamlit form 안의 widget 변경은 제출 전 rerun되지 않기 때문에, SSH/Telnet 변경 시 포트 22/23을 즉시 갱신하려면 이 구조를 유지해야 합니다. 포트 widget key도 프로토콜별로 분리합니다.</p>
+    <p><code>web_logic.run_web_collection()</code>은 입력 검증을 통과한 뒤 <code>workspace</code>, <code>role_networks</code>, <code>collection</code>, <code>raw_storage</code>, <code>parsing</code>, <code>report</code>, <code>download</code> 단계 중 현재 위치를 추적합니다. 예상하지 못한 오류는 원본 예외나 내부 경로 대신 안전한 오류 코드, 실패 단계, 한국어 권장 조치가 담긴 <code>WebCollectionResult(success=False)</code>로 반환합니다. 잘못된 Role 대역표와 동일 WLC 중복 실행은 사용자가 직접 수정할 수 있도록 기존 예외 계약을 유지합니다.</p>
     <p>CLI, GUI, Web은 모두 <code>collection_health.assess_collection_results()</code> 결과를 사용합니다. 같은 <code>CollectionResult</code>를 표면마다 다르게 판정하지 않도록 상태 문자열을 별도로 재구현하지 않습니다.</p>
     <h3><code>validation.py</code>와 <code>collection_health.py</code></h3>
     <p><code>validation.py</code>는 다음 공통 계약을 소유합니다.</p>
@@ -428,7 +430,7 @@ access_history_enabled=False</code></pre>
       <tr><td>오류 메시지 개선</td><td><code>diagnostics.py</code>, <code>tests/test_diagnostics.py</code></td></tr>
       <tr><td>진단 코드/리포트 변경</td><td><code>diagnostic_codes.py</code>, <code>diagnostic_mode.py</code>, <code>diagnostic_report.py</code>, <code>tests/test_diagnostic_*.py</code></td></tr>
       <tr><td>파일 저장 안전성 변경</td><td><code>atomic_io.py</code>, <code>report.py</code>, <code>diagnostic_report.py</code>, <code>tests/test_atomic_io.py</code></td></tr>
-      <tr><td>Streamlit 동시 실행/접속 범위 변경</td><td><code>web_logic.py</code>, <code>app.py</code>, <code>packaging/streamlit_portable</code>, <code>tests/test_web_logic.py</code></td></tr>
+      <tr><td>Streamlit 동시 실행/접속 범위 변경</td><td><code>web_logic.py</code>, <code>app.py</code>, <code>packaging/streamlit_portable</code>, <code>tests/test_web_logic.py</code>, <code>tests/test_streamlit_app.py</code></td></tr>
       <tr><td>mock 서버/시나리오 변경</td><td><code>mock_server.py</code>, <code>mock_scenarios.py</code>, <code>config/mock_scenarios</code>, <code>tests/test_mock_server.py</code></td></tr>
       <tr><td>배포 ZIP 구성 변경</td><td><code>build_windows_gui_exe.ps1</code>, <code>tests/test_tooling.py</code></td></tr>
       <tr><td>사용자 문서 변경</td><td><code>docs/USER_GUIDE_KO.md</code></td></tr>

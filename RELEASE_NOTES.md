@@ -20,6 +20,7 @@ GitHub에 push하거나 Release를 준비하기 전에 아래 문서를 함께 �
 - WLC 주소/Port/Timeout 검증 및 전체 60분 수집 상한
 - Excel/HTML 묶음 저장과 `report_status.json`의 파일/수집 상태 분리
 - disconnect 실패 가시화와 enable 오류 코드 정확성 개선
+- Streamlit 접속 방식별 기본 포트와 단계별 안전 실패 요약
 
 ## GitHub Release 본문에 포함되는 정보
 

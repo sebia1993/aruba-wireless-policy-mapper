@@ -183,6 +183,8 @@ python -m wlc_role_acl_collector.gui_app</code></pre>
     <p>통합 ZIP의 <code>web\start_webapp.cmd</code>를 실행한 뒤 같은 PC에서 <code>http://127.0.0.1:8763</code>을 엽니다. 기본 설정에서는 다른 PC가 접속할 수 없습니다.</p>
     <p>다른 PC 접속을 위해 <code>webapp_settings.cmd</code>를 <code>0.0.0.0</code>으로 바꾸면 장비 ID/PW가 암호화되지 않은 HTTP 구간을 통과합니다. 회사에서 TLS, 접근통제, 사용자 인증을 별도로 승인하고 구성한 경우에만 원격 모드를 사용하십시오.</p>
     <p>같은 WLC에서 다른 웹 수집이 진행 중이면 새 작업은 시작되지 않습니다. 기존 작업이 끝난 뒤 다시 실행합니다.</p>
+    <p>웹 화면에서는 <code>접속 방식</code>을 먼저 선택합니다. SSH는 접속 포트 22, Telnet은 23이 자동 기본값으로 표시됩니다. 그 다음 <code>WLC IP</code>, 선택 항목인 <code>보고서 표시 이름</code>, <code>장비 ID</code>, <code>장비 PW</code>, 필요 시 Enable password를 입력합니다.</p>
+    <p>입력 오류는 <code>입력값을 확인하세요</code>와 함께 잘못된 항목을 표시합니다. 수집·파싱·보고서 생성 중 실패하면 결과 영역에 <code>오류 코드</code>, <code>실패 단계</code>, <code>권장 조치</code>가 먼저 표시되고, 내부 상태값은 <code>기술 세부 정보</code>를 펼쳤을 때만 보입니다. Python traceback이나 내부 파일 경로는 일반 결과 화면에 표시하지 않습니다.</p>
     <h2>5. GUI 입력 항목 설명</h2>
     <p>GUI의 기본 흐름은 <code>접속 정보 입력 → 분석 시작 → 결과 상태 확인 → HTML 보고서 확인</code>입니다.</p>
     <ul>
