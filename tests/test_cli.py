@@ -191,6 +191,13 @@ def test_cli_returns_partial_when_optional_command_failed(monkeypatch, tmp_path,
     assert "partial-wlc:user_table" in capsys.readouterr().err
 
 
+def test_cli_rejects_timeout_outside_supported_range(capsys):
+    exit_code = main(["collect", "--timeout", "1"])
+
+    assert exit_code == cli.COLLECT_EXIT_INPUT_ERROR
+    assert "5에서 600" in capsys.readouterr().err
+
+
 def _write_role_networks(path: Path) -> None:
     workbook = Workbook()
     worksheet = workbook.active

@@ -1,5 +1,6 @@
 import inspect
 import queue
+import threading
 from pathlib import Path
 
 import customtkinter as ctk
@@ -9,6 +10,7 @@ from wlc_role_acl_collector.gui_app import (
     ADVANCED_OPTIONS_HIDE_LABEL,
     ADVANCED_OPTIONS_SHOW_LABEL,
     APP_TITLE,
+    CANCEL_ACTION_LABEL,
     COLLECTION_ACTION_LABEL,
     CUSTOMTKINTER_APPEARANCE_MODE,
     CUSTOMTKINTER_COLOR_THEME,
@@ -132,6 +134,7 @@ def test_gui_stage_labels_support_operational_console_flow():
         "완료",
     ]
     assert STAGE_LABELS["failed"] == "실패"
+    assert STAGE_LABELS["cancelled"] == "취소됨"
     assert STAGE_PROGRESS == {
         "ready": 0,
         "connecting": 20,
@@ -139,6 +142,7 @@ def test_gui_stage_labels_support_operational_console_flow():
         "reporting": 80,
         "completed": 100,
         "failed": 100,
+        "cancelled": 100,
     }
 
 
@@ -152,10 +156,11 @@ def test_gui_collection_runs_in_worker_thread_and_progress_is_bottom_panel():
 
     assert "threading.Thread" in start_source
     assert "target=self._run_collection_worker" in start_source
-    assert "daemon=True" in start_source
+    assert "daemon=False" in start_source
     assert 'self.running_progress_title_var.set("데이터 수집 진행 중")' in start_source
     assert 'self.running_progress_title_var.set("안전 진단 진행 중")' in diagnostic_source
     assert "progress_callback=progress" in worker_source
+    assert "cancel_event=self.cancel_event" in worker_source
     assert 'self.event_queue.put(("stage"' in worker_source
     assert "self._bottom_progress_bar(main)" in layout_source
     assert "CTkProgressBar" in progress_source
@@ -181,6 +186,7 @@ def test_gui_uses_customtkinter_completion_dialog_instead_of_native_info_box():
 
 def test_gui_actions_prioritize_collection_and_html_result():
     assert COLLECTION_ACTION_LABEL == "분석 시작"
+    assert CANCEL_ACTION_LABEL == "실행 취소"
     assert RUN_ACTION_COLOR == "#28A745"
     assert DIAGNOSTIC_ACTION_LABEL == "안전 진단"
     assert ADVANCED_OPTIONS_SHOW_LABEL == "고급 옵션 표시"
@@ -194,6 +200,21 @@ def test_gui_actions_prioritize_collection_and_html_result():
     assert RESULT_HTML_ACTION_TEXT == "[HTML] HTML 보고서 열기"
     assert RESULT_FOLDER_ACTION_TEXT == "[DIR] Excel 결과 폴더 열기"
     assert RESULT_XLSX_ACTION_TEXT == "[XLSX] Excel 열기"
+
+
+def test_gui_cancel_is_cooperative_and_close_waits_for_worker_cleanup():
+    cancel_source = inspect.getsource(WlcRoleAclCollectorGui._request_cancel)
+    close_source = inspect.getsource(WlcRoleAclCollectorGui._on_close)
+    wait_source = inspect.getsource(WlcRoleAclCollectorGui._wait_for_worker_before_close)
+    running_source = inspect.getsource(WlcRoleAclCollectorGui._set_running)
+
+    assert "self.cancel_event.set()" in cancel_source
+    assert "현재 명령 종료 또는 타임아웃" in cancel_source
+    assert "messagebox.askyesno" in close_source
+    assert "self._wait_for_worker_before_close()" in close_source
+    assert "self.worker.is_alive()" in wait_source
+    assert "self.after(150, self._wait_for_worker_before_close)" in wait_source
+    assert "self.cancel_buttons" in running_source
 
 
 def test_report_tab_has_summary_cards_and_large_icon_actions():
@@ -214,8 +235,10 @@ def test_report_tab_has_summary_cards_and_large_icon_actions():
     assert "RESULT_XLSX_ACTION_TEXT" in report_source
     assert "height=58" in action_source
     assert "corner_radius=8" in card_source
-    assert '"summary": _result_report_summary_from_parsed(parsed, role_networks)' in worker_source
-    assert "self._set_result_summary(paths.get(\"summary\"))" in drain_source
+    assert '"summary": summary' in worker_source
+    assert "_result_report_summary_from_parsed(parsed, role_networks, [result])" in worker_source
+    assert 'summary = paths.get("summary")' in drain_source
+    assert "self._set_result_summary(summary)" in drain_source
 
 
 def test_gui_role_network_copy_explains_internal_report_behavior():
@@ -285,12 +308,15 @@ def test_result_report_summary_counts_collection_and_role_network_matches():
     result = collect_from_offline_raw(controller, fixture_root)
     parsed = build_parsed_controllers([result])
 
-    no_mapping_summary = _result_report_summary_from_parsed(parsed, [])
+    no_mapping_summary = _result_report_summary_from_parsed(parsed, [], [result])
 
     assert no_mapping_summary.ssid_count == 2
     assert no_mapping_summary.role_count == 3
     assert no_mapping_summary.matched_count == 0
     assert no_mapping_summary.mismatched_count == 0
+    assert no_mapping_summary.collection_status == "completed"
+    assert no_mapping_summary.collection_status_label == "정상 완료"
+    assert no_mapping_summary.failed_command_count == 0
     assert "사내 Role 대역표" in no_mapping_summary.note
 
     role_networks = [
@@ -299,13 +325,30 @@ def test_result_report_summary_counts_collection_and_role_network_matches():
         RoleNetworkDefinition(role="missing-role", network="10.99.0.0/24", subnet_mask=""),
     ]
 
-    summary = _result_report_summary_from_parsed(parsed, role_networks)
+    summary = _result_report_summary_from_parsed(parsed, role_networks, [result])
 
     assert summary.ssid_count == 2
     assert summary.role_count == 3
     assert summary.matched_count == 1
     assert summary.mismatched_count == 3
     assert "Role 단위" in summary.note
+
+    result.commands.append(
+        CommandOutput(
+            command_id="rights::corp-employee",
+            command="show rights corp-employee",
+            success=False,
+            error="command timed out",
+        )
+    )
+    partial_summary = _result_report_summary_from_parsed(parsed, role_networks, [result])
+
+    assert partial_summary.collection_status == "partial"
+    assert partial_summary.collection_status_label == "부분 완료"
+    assert partial_summary.failed_command_count == 1
+    assert partial_summary.affected_role_count == 1
+    assert partial_summary.affected_ssid_count == 1
+    assert partial_summary.collection_impact_text == "Role 적용 ACL"
 
 
 def test_log_tag_for_line_classifies_operational_log_levels():
@@ -454,6 +497,44 @@ def test_collection_worker_reports_error_when_run_directory_creation_fails(monke
     assert payload["run_dir"] is None
     assert payload["run_log"] is None
     assert "run.log" in payload["message"]
+
+
+def test_collection_worker_emits_cancelled_without_generating_report(monkeypatch, tmp_path):
+    target = build_target_from_gui_input(
+        GuiConnectionInput(host="192.0.2.10", username="admin", password="secret")
+    )
+    app = object.__new__(WlcRoleAclCollectorGui)
+    app.event_queue = queue.Queue()
+    app.cancel_event = threading.Event()
+
+    def fake_collect(*_args, **_kwargs):
+        return CollectionResult(
+            controller=target.controller,
+            commands=[
+                CommandOutput(
+                    command_id="cancelled",
+                    command="cancel",
+                    success=False,
+                    error="Collection cancelled by user.",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(gui_app, "collect_from_controller", fake_collect)
+    monkeypatch.setattr(
+        gui_app,
+        "write_reports",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("report must not be generated")),
+    )
+
+    app._run_collection_worker(target, tmp_path, 60, [])
+
+    events = []
+    while not app.event_queue.empty():
+        events.append(app.event_queue.get_nowait())
+    cancelled_payload = next(payload for event, payload in events if event == "cancelled")
+    assert cancelled_payload["run_dir"].is_dir()
+    assert cancelled_payload["run_log"].exists()
 
 
 def test_format_collection_progress_for_role_command():

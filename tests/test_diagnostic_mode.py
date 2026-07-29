@@ -1,7 +1,10 @@
 import json
+import threading
 from pathlib import Path
 
-from wlc_role_acl_collector.diagnostic_mode import run_diagnostic
+import pytest
+
+from wlc_role_acl_collector.diagnostic_mode import DiagnosticCancelledError, run_diagnostic
 from wlc_role_acl_collector.models import Controller, ControllerTarget
 
 
@@ -35,3 +38,15 @@ def test_run_diagnostic_offline_uses_unique_labeled_run_dirs(monkeypatch, tmp_pa
     assert second.run_dir.name == "20260630_120000_000001_sample_controller_001"
     assert first.report_paths["json"].exists()
     assert second.report_paths["json"].exists()
+
+
+def test_run_diagnostic_honors_preexisting_cancel_request(tmp_path):
+    target = ControllerTarget(controller=Controller(name="sample_controller", host="192.0.2.10"))
+    cancel_event = threading.Event()
+    cancel_event.set()
+
+    with pytest.raises(DiagnosticCancelledError) as caught:
+        run_diagnostic(target, output_root=tmp_path, cancel_event=cancel_event)
+
+    assert caught.value.run_dir.is_dir()
+    assert not list(caught.value.run_dir.glob("diagnostic_summary.*"))

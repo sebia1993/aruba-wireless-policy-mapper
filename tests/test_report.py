@@ -413,6 +413,12 @@ def test_html_does_not_hide_zero_user_roles_when_user_table_failed(tmp_path):
     assert 'id="toggle-zero-user-roles"' not in html
     assert 'data-zero-user-role="true"' not in html
     assert "Role user counts were not available from show user-table" in html
+    assert 'data-status="partial"' in html
+    assert "수집 상태: 부분 완료" in html
+    assert "Role별 관측 사용자 수" in html
+    assert "실패 명령: user_table" in html
+    assert "수집 신뢰도: 제한적" in html
+    assert "영향 Role 2개" in html
 
 
 def test_html_does_not_hide_roles_when_all_roles_have_zero_users(tmp_path):
@@ -424,6 +430,44 @@ def test_html_does_not_hide_roles_when_all_roles_have_zero_users(tmp_path):
     assert 'id="toggle-zero-user-roles"' not in html
     assert 'data-zero-user-role="true"' not in html
     assert "All Roles have 0 observed users" in html
+
+
+def test_html_manager_summary_maps_failed_alias_to_affected_role_and_ssid(tmp_path):
+    html_path = tmp_path / "report.html"
+    frames = _minimal_report_frames(user_table_success=True)
+    frames["SSID_Role_Map"] = pd.DataFrame(
+        [{"controller": "sample", "ssid": "CORP", "role": "active-role"}]
+    )
+    frames["Role_ACL_Detail"] = pd.DataFrame(
+        [
+            {
+                **_acl_row("active-role", "active-role", 1),
+                "controller": "sample",
+                "destination": "alias internal-servers",
+            }
+        ]
+    )
+    frames["Raw_Commands"] = pd.DataFrame(
+        [
+            {
+                "controller": "sample",
+                "command_id": "configuration_effective",
+                "success": True,
+            },
+            {
+                "controller": "sample",
+                "command_id": "netdestination::internal-servers",
+                "success": False,
+            },
+        ]
+    )
+
+    _write_html(html_path, frames)
+    html = html_path.read_text(encoding="utf-8")
+
+    assert "실패 영향 범위" in html
+    assert "영향 Role 1개: active-role" in html
+    assert "영향 SSID 1개: CORP" in html
 
 
 def _minimal_report_frames(*, user_table_success: bool, active_user_count: int = 2) -> dict[str, pd.DataFrame]:

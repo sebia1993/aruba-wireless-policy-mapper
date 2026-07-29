@@ -1,7 +1,9 @@
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
+import wlc_role_acl_collector.collector as collector
 from wlc_role_acl_collector.collector import collect_from_controller
 from wlc_role_acl_collector.models import Controller, ControllerCredentials
 
@@ -132,3 +134,69 @@ def test_collect_records_enable_password_failure_and_continues(monkeypatch):
         for event, payload in events
     )
     assert "show rights corp-employee" in connection.commands
+
+
+def test_collect_cancellation_stops_before_next_command_and_disconnects(monkeypatch):
+    cancel_event = threading.Event()
+
+    class CancellingConnection(FakeConnection):
+        def send_command_timing(self, *, command_string, **kwargs):
+            output = super().send_command_timing(command_string=command_string, **kwargs)
+            if command_string == "show clock":
+                cancel_event.set()
+            return output
+
+    connection = CancellingConnection(
+        responses={
+            "no paging": "",
+            "show clock": "clock output",
+        }
+    )
+    _install_fake_netmiko(monkeypatch, connection)
+    events = []
+
+    result = collect_from_controller(
+        Controller(name="wlc", host="192.0.2.10"),
+        credentials=ControllerCredentials(username="admin", password="secret"),
+        progress_callback=lambda event, payload: events.append((event, payload)),
+        cancel_event=cancel_event,
+    )
+
+    assert connection.commands == ["no paging", "show clock"]
+    assert any(command.command_id == "cancelled" for command in result.commands)
+    assert any(event == "cancelled" for event, _payload in events)
+    assert connection.disconnected is True
+
+
+def test_collect_duration_limit_stops_before_first_command_and_disconnects(monkeypatch):
+    connection = FakeConnection()
+    _install_fake_netmiko(monkeypatch, connection)
+    times = iter((0.0, 2.0))
+    monkeypatch.setattr(collector.time, "monotonic", lambda: next(times))
+    events = []
+
+    result = collect_from_controller(
+        Controller(name="wlc", host="192.0.2.10"),
+        credentials=ControllerCredentials(username="admin", password="secret"),
+        progress_callback=lambda event, payload: events.append((event, payload)),
+        max_duration_seconds=1,
+    )
+
+    duration_failure = next(command for command in result.commands if command.command_id == "duration_limit")
+    assert duration_failure.success is False
+    assert connection.commands == []
+    assert any(event == "duration_limit" for event, _payload in events)
+    assert connection.disconnected is True
+
+
+def test_collect_rejects_timeout_outside_shared_api_contract():
+    try:
+        collect_from_controller(
+            Controller(name="wlc", host="192.0.2.10"),
+            credentials=ControllerCredentials(username="admin", password="secret"),
+            timeout=601,
+        )
+    except ValueError as exc:
+        assert "5에서 600" in str(exc)
+    else:
+        raise AssertionError("Expected timeout validation error")

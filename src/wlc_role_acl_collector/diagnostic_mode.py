@@ -6,10 +6,11 @@ stage/code reports. Raw device output remains in memory and is not persisted.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from .collector import collect_from_controller, collect_from_offline_raw
+from .collector import collection_was_cancelled, collect_from_controller, collect_from_offline_raw
 from .diagnostic_codes import DiagnosticCode, classify_message_to_code, get_diagnostic_code
 from .diagnostic_events import DiagnosticEvent, event_from_code, safe_info_event
 from .diagnostic_report import write_diagnostic_report
@@ -26,15 +27,26 @@ class DiagnosticRun:
     events: list[DiagnosticEvent]
 
 
+class DiagnosticCancelledError(RuntimeError):
+    """Raised after the live device session has been safely closed."""
+
+    def __init__(self, run_dir: Path):
+        super().__init__("Diagnostic cancelled by user.")
+        self.run_dir = run_dir
+
+
 def run_diagnostic(
     target: ControllerTarget,
     *,
     output_root: Path,
     timeout: int = 60,
     offline_raw_dir: Path | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> DiagnosticRun:
     run_dir = create_run_dir(output_root, label=target.controller.name)
     events: list[DiagnosticEvent] = []
+    if cancel_event is not None and cancel_event.is_set():
+        raise DiagnosticCancelledError(run_dir)
 
     def finish(code: str | DiagnosticCode) -> DiagnosticRun:
         diagnostic_code = code if isinstance(code, DiagnosticCode) else get_diagnostic_code(code)
@@ -99,7 +111,13 @@ def run_diagnostic(
             timeout=timeout,
             credentials=target.credentials,
             progress_callback=progress,
+            cancel_event=cancel_event,
         )
+    if collection_was_cancelled(result):
+        raise DiagnosticCancelledError(run_dir)
+    if any(command.command_id == "duration_limit" for command in result.commands):
+        events.append(event_from_code("WLC-CMD-002", command_id="duration_limit"))
+        return finish("WLC-CMD-002")
 
     config_output = result.command_output("configuration_effective")
     if _configuration_output_rejected(config_output):
@@ -137,8 +155,8 @@ def _validate_input(target: ControllerTarget, timeout: int) -> str:
         return "Protocol must be ssh or telnet."
     if not 1 <= int(target.controller.port) <= 65535:
         return "Port must be between 1 and 65535."
-    if timeout < 5:
-        return "Timeout must be at least 5 seconds."
+    if not 5 <= timeout <= 600:
+        return "Timeout must be between 5 and 600 seconds."
     if not str(target.controller.host).strip():
         return "WLC address is required."
     return ""

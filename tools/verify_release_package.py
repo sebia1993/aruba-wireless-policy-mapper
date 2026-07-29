@@ -72,9 +72,13 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _find_latest_zip(dist_dir: Path) -> Path:
-    candidates = sorted(dist_dir.glob("*.zip"), key=lambda path: path.stat().st_mtime, reverse=True)
+    candidates = sorted(
+        dist_dir.glob("WlcRoleAclCollectorGUI*.zip"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
     if not candidates:
-        raise SystemExit(f"No release ZIP was found in {dist_dir}")
+        raise SystemExit(f"No GUI/CLI release ZIP was found in {dist_dir}")
     return candidates[0]
 
 

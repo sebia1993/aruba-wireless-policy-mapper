@@ -5,6 +5,7 @@ from typing import Callable
 
 from .config import default_device_type_for_protocol, default_port_for_protocol
 from .models import Controller, ControllerCredentials, ControllerTarget
+from .validation import validate_wlc_address
 
 
 InputFunc = Callable[[str], str]
@@ -19,7 +20,7 @@ def prompt_controller_targets(
     targets: list[ControllerTarget] = []
 
     while True:
-        host = _prompt_required(input_func, "WLC IP: ")
+        host = _prompt_wlc_address(input_func)
         default_name = f"wlc-{host}"
         name = _prompt_default(input_func, f"Report name [{default_name}]: ", default_name)
         protocol = _prompt_protocol(input_func)
@@ -60,6 +61,15 @@ def _prompt_required(input_func: InputFunc, prompt: str) -> str:
         if value:
             return value
         print("Value is required.")
+
+
+def _prompt_wlc_address(input_func: InputFunc) -> str:
+    while True:
+        value = _prompt_required(input_func, "WLC IP: ")
+        try:
+            return validate_wlc_address(value)
+        except ValueError as exc:
+            print(str(exc))
 
 
 def _prompt_default(input_func: InputFunc, prompt: str, default: str) -> str:

@@ -22,6 +22,11 @@
 
 최근 안정성 개선:
 
+- CLI/GUI/Web/HTML이 `collection_health.py`의 공통 상태 모델로 정상 완료, 부분 완료, 수집 실패를 동일하게 표시합니다.
+- 실패한 Role/Alias 명령을 수집된 ACL 관계와 연결해 영향 Role/SSID 및 수집 신뢰도를 관리자 요약에 표시합니다.
+- GUI에 cooperative cancel 버튼을 추가하고, 창 종료 시 non-daemon worker와 장비 세션 정리가 끝날 때까지 기다립니다.
+- WLC 주소, Port, Timeout 입력 검증을 공통화하고 명령 Timeout을 5~600초로 제한합니다.
+- 전체 live 수집에 60분 상한을 적용하고 남은 전체 시간보다 긴 명령 Timeout을 사용하지 않습니다.
 - Access Check가 불완전한 선행 Alias/name 규칙을 건너뛰어 뒤 규칙으로 오판하지 않고 `판정 불가`로 중단합니다.
 - GUI 결과 폴더 생성 실패도 worker에서 UI 오류 이벤트로 전달합니다.
 - CLI collect가 성공, 필수 수집 실패, 입력 오류, 부분 완료를 서로 다른 종료 코드로 반환합니다.

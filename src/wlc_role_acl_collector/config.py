@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from .models import Controller, ControllerCredentials
+from .validation import validate_port, validate_wlc_address
 
 
 def default_port_for_protocol(protocol: str) -> int:
@@ -24,9 +25,18 @@ def load_controllers(path: Path) -> list[Controller]:
             host = (row.get("host") or "").strip()
             if not name or not host:
                 raise ValueError(f"controllers CSV row {row_number}: name and host are required")
+            try:
+                host = validate_wlc_address(host)
+            except ValueError as exc:
+                raise ValueError(f"controllers CSV row {row_number}: {exc}") from exc
             protocol = (row.get("protocol") or "ssh").strip().lower()
+            if protocol not in {"ssh", "telnet"}:
+                raise ValueError(f"controllers CSV row {row_number}: protocol must be ssh or telnet")
             port_value = (row.get("port") or "").strip()
-            port = int(port_value) if port_value else default_port_for_protocol(protocol)
+            try:
+                port = validate_port(port_value) if port_value else default_port_for_protocol(protocol)
+            except ValueError as exc:
+                raise ValueError(f"controllers CSV row {row_number}: {exc}") from exc
             device_type = (row.get("device_type") or "").strip()
             controllers.append(
                 Controller(

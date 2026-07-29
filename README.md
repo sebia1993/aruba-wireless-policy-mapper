@@ -101,7 +101,7 @@ streamlit run app.py --server.address 127.0.0.1 --server.port 8763
 5. 필요하면 사내 Role 대역표 Excel(`.xlsx` 또는 `.xlsm`)을 업로드합니다.
 6. `수집 실행` 버튼을 누릅니다.
 7. 진행 상태와 로그를 확인합니다.
-8. 결과 요약과 SSID/Role 미리보기를 확인합니다.
+8. `정상 완료` 또는 `부분 완료` 상태와 실패 명령·영향 Role/SSID를 확인합니다.
 9. 필요한 파일을 다운로드합니다.
 
 다운로드 파일:
@@ -180,11 +180,15 @@ GUI 입력 항목:
 - 고급 옵션의 사내 Role 대역표: 선택 사항입니다. `Role 이름`, `네트워크 대역` 컬럼을 가진 Excel 파일을 넣으면 내부용 HTML/Excel 보고서에 로컬 기준 Role 대역과 WLC 추정값 비교 결과가 표시됩니다. CIDR(`10.40.1.0/24`) 입력을 권장하며, CIDR을 쓰지 않을 때만 `서브넷마스크` 컬럼이 필요합니다.
 - 고급 옵션의 Timeout seconds
 
+Timeout seconds는 명령 하나당 5~600초 범위이며 기본값은 60초입니다. 전체 수집은 최대 60분으로 제한되어 반복 Timeout이 계속되면 `duration_limit`을 기록하고 가능한 결과까지만 부분 완료로 생성합니다.
+
 사내 Role 대역표는 실제 Excel 통합 문서 형식(`.xlsx` 또는 `.xlsm`)이어야 합니다. CSV, HTML, 구형 `.xls` 파일의 확장자만 `.xlsx`로 바꾸면 열 수 없습니다. GUI의 `작성법` 버튼에서 앱 내부 작성 가이드를 볼 수 있고, `샘플 열기` 버튼으로 제공된 `config\role_networks.example.xlsx`를 열 수 있습니다. 샘플 파일의 `Role_Networks` 시트를 복사/수정해서 사용하고, `작성가이드` 시트에서 예시와 주의사항을 확인하세요. 프로그램은 `Role_Networks` Sheet가 있으면 Sheet 순서와 관계없이 그 Sheet를 우선 읽고, 없을 때만 첫 번째 Sheet를 읽으며 화면에 fallback 안내를 표시합니다.
 
-기본 화면은 `접속 정보 입력 → 수집 시작 → 결과 확인` 순서입니다. 사내 Role 대역표, Timeout seconds, 안전 진단은 `고급 옵션 표시`를 눌렀을 때 나타납니다.
+기본 화면은 `접속 정보 입력 → 분석 시작 → 수집 상태 확인 → 결과 확인` 순서입니다. 사내 Role 대역표, Timeout seconds, 안전 진단은 `고급 옵션 표시`를 눌렀을 때 나타납니다.
 
-`수집 시작`을 누르면 WLC 접속부터 명령 수집, 보고서 생성까지 순서대로 진행합니다. 완료 후에는 `HTML 보고서 열기`를 먼저 확인하고, 필요할 때 `Excel 열기` 또는 `결과 폴더 열기`를 사용합니다. 접속에 실패하면 오류창에 원인이 표시되며, `수집 로그 표시`를 눌러 현재 실행 중인 명령, Role 진행 번호, 실패 명령을 확인할 수 있습니다.
+`분석 시작`을 누르면 WLC 접속부터 명령 수집, 보고서 생성까지 순서대로 진행합니다. `실행 취소`는 현재 명령의 응답 또는 Timeout 후 다음 명령을 실행하지 않고 세션을 닫습니다. 프로그램 창을 닫을 때도 worker와 장비 세션 정리가 끝난 뒤 종료합니다.
+
+완료 후에는 `정상 완료`, `부분 완료`, `수집 실패` 상태를 먼저 확인합니다. 부분 완료이면 실패 명령, 영향 영역, 영향 Role/SSID를 확인하고 해당 정보는 재수집 전까지 확정된 값으로 사용하지 않습니다. HTML 첫 화면에는 수집 신뢰도와 실패 영향 범위가 함께 표시됩니다.
 
 ACL에 `alias <이름>`이 있으면 자동으로 `show netdestination <이름>`을 실행합니다. 보고서의 `Role_ACL_Detail`에는 source/destination 상세가 붙고, `Alias_Detail` 시트에는 alias 내부 host/network/range/name 목록이 정리됩니다.
 
@@ -200,11 +204,15 @@ ACL에 `alias <이름>`이 있으면 자동으로 `show netdestination <이름>`
 - `raw\<controller>.txt`
 - `report_status.json`: `writing`, `completed`, `failed` 중 하나로 보고서 저장 상태 표시
 
+`report_status.json`은 파일 저장 완료 여부이고, 화면/HTML의 수집 상태는 장비 명령 완전성입니다. 파일 저장이 `completed`여도 선택 명령 실패가 있으면 수집 상태는 `partial`일 수 있습니다.
+
 ## 실패 진단
 
 - `Authentication failed`: ID/PW 오류, 계정 잠금, WLC 로그인 권한을 확인합니다.
 - `Connection timed out or was refused`: IP, SSH/Telnet 포트, 방화벽, WLC SSH/Telnet 활성화 여부를 확인합니다.
 - `Command failed after login`: 로그인은 되었지만 `show configuration effective` 또는 Role별 명령 권한/지원 여부를 확인합니다.
+- `부분 완료`: 실패 명령과 영향 Role/SSID를 확인하고 해당 영역을 재수집 전 확정 판단하지 않습니다.
+- `duration_limit`: 전체 60분 상한에 도달했습니다. 반복 Timeout 대상과 장비 부하를 확인한 뒤 재실행합니다.
 
 실패 메시지에는 가능한 경우 실패 명령 ID, 실제 명령어, `run.log` 경로가 함께 표시됩니다.
 

@@ -21,6 +21,13 @@ from openpyxl.utils import get_column_letter
 from .acl_evaluator import access_rule_id, build_access_check_data
 from .aos8_parser import parse_controller_config
 from .atomic_io import atomic_output_path, atomic_write_text
+from .collection_health import (
+    COLLECTION_COMPLETED,
+    COLLECTION_FAILED,
+    COLLECTION_PARTIAL,
+    assess_command_status_rows,
+    infer_collection_impact_scope,
+)
 from .models import CollectionResult, ParsedController, RoleNetworkDefinition
 
 
@@ -634,6 +641,7 @@ def _write_html(
         role_items,
         local_network_rows,
         unresolved_count=unresolved_count,
+        raw_command_rows=raw_command_rows,
     )
     zero_user_hiding_enabled = (
         user_table_counts_reliable
@@ -860,9 +868,40 @@ def _write_html(
       font-size: 12px;
       line-height: 1.5;
     }}
+    .summary-item > span {{
+      display: block;
+    }}
     .summary-item ul {{
       margin: 0;
       padding-left: 18px;
+    }}
+    .summary-item.collection-status {{
+      border-width: 2px;
+    }}
+    .summary-item.collection-status[data-status="completed"] {{
+      background: var(--success-soft);
+      border-color: #abefc6;
+    }}
+    .summary-item.collection-status[data-status="partial"] {{
+      background: var(--warning-soft);
+      border-color: #fedf89;
+    }}
+    .summary-item.collection-status[data-status="failed"] {{
+      background: var(--danger-soft);
+      border-color: #fecdca;
+    }}
+    .summary-item.report-confidence[data-confidence="high"] {{
+      background: var(--success-soft);
+      border-color: #abefc6;
+    }}
+    .summary-item.report-confidence[data-confidence="limited"],
+    .summary-item.report-confidence[data-confidence="caution"] {{
+      background: var(--warning-soft);
+      border-color: #fedf89;
+    }}
+    .summary-item.report-confidence[data-confidence="unusable"] {{
+      background: var(--danger-soft);
+      border-color: #fecdca;
     }}
     .internal-network-banner {{
       background: #fff7ed;
@@ -2124,8 +2163,12 @@ def _executive_summary_html(
     local_network_rows: list[dict[str, Any]],
     *,
     unresolved_count: int,
+    raw_command_rows: list[dict[str, Any]],
 ) -> str:
+    collection_health = assess_command_status_rows(raw_command_rows)
     ssid_rows = frames.get("SSID_Role_Map", pd.DataFrame()).to_dict(orient="records")
+    acl_rows = frames.get("Role_ACL_Detail", pd.DataFrame()).to_dict(orient="records")
+    impact_scope = infer_collection_impact_scope(raw_command_rows, acl_rows, ssid_rows)
     dynamic_roles = {
         str(row.get("role", "")).strip()
         for row in ssid_rows
@@ -2141,7 +2184,12 @@ def _executive_summary_html(
         if str(row.get("role", "")).strip()
         and str(row.get("status", "")).strip() in local_attention_statuses
     }
-    attention_count = unresolved_count + len(dynamic_roles) + len(local_attention_roles)
+    attention_count = (
+        unresolved_count
+        + len(dynamic_roles)
+        + len(local_attention_roles)
+        + collection_health.failed_command_count
+    )
     top_roles = [
         item
         for item in role_items[:3]
@@ -2168,11 +2216,59 @@ def _executive_summary_html(
         if local_network_rows
         else "사내 Role 대역표를 선택하지 않아 내부 대역 비교는 생략되었습니다."
     )
-    conclusion_text = (
-        "확인 필요 항목이 있습니다. 아래 Role ACL Detail을 먼저 확인하세요."
-        if attention_count
-        else "즉시 확인할 고위험 요약 항목은 없습니다. 세부 ACL은 아래 Role ACL Detail에서 확인하세요."
+    if collection_health.status == COLLECTION_FAILED:
+        conclusion_text = "필수 수집 데이터가 없어 이 보고서를 정책 판단에 사용하면 안 됩니다. 재수집이 필요합니다."
+    elif collection_health.status == COLLECTION_PARTIAL:
+        conclusion_text = "일부 수집 데이터가 누락되었습니다. 영향 영역과 실패 명령을 확인한 뒤 제한적으로 사용하세요."
+    elif attention_count:
+        conclusion_text = "확인 필요 항목이 있습니다. 아래 Role ACL Detail을 먼저 확인하세요."
+    else:
+        conclusion_text = "즉시 확인할 고위험 요약 항목은 없습니다. 세부 ACL은 아래 Role ACL Detail에서 확인하세요."
+
+    failed_command_text = (
+        ", ".join(collection_health.failed_command_ids[:5])
+        if collection_health.failed_command_ids
+        else "없음"
     )
+    if len(collection_health.failed_command_ids) > 5:
+        failed_command_text += f" 외 {len(collection_health.failed_command_ids) - 5}건"
+    collection_detail = (
+        f"실패 명령 {collection_health.failed_command_count}건 · "
+        f"영향: {collection_health.impact_text_ko} · "
+        f"{collection_health.recommended_action_ko}"
+    )
+    if collection_health.status == COLLECTION_FAILED:
+        confidence_key = "unusable"
+        confidence_label = "사용 불가"
+        confidence_detail = "필수 수집 데이터가 없어 정책 판단 근거로 사용할 수 없습니다."
+    elif collection_health.status == COLLECTION_PARTIAL:
+        confidence_key = "limited"
+        confidence_label = "제한적"
+        confidence_detail = "실패 명령의 영향 영역을 제외하고 제한적으로 검토해야 합니다."
+    elif unresolved_count:
+        confidence_key = "caution"
+        confidence_label = "주의"
+        confidence_detail = "수집 명령은 완료됐지만 해석되지 않은 항목이 남아 있습니다."
+    else:
+        confidence_key = "high"
+        confidence_label = "높음"
+        confidence_detail = "수집 완전성 기준입니다. 실제 정책의 적절성을 보증하지는 않습니다."
+
+    role_scope_text = _summary_entity_list(impact_scope.affected_roles)
+    ssid_scope_text = _summary_entity_list(impact_scope.affected_ssids)
+    if collection_health.status == COLLECTION_COMPLETED:
+        scope_detail = "실패 명령 기준으로 영향받은 Role 또는 SSID가 없습니다."
+    elif impact_scope.role_count or impact_scope.ssid_count:
+        scope_detail = (
+            f"영향 Role {impact_scope.role_count}개: {role_scope_text} · "
+            f"영향 SSID {impact_scope.ssid_count}개: {ssid_scope_text}"
+        )
+        if impact_scope.identification_incomplete:
+            scope_detail += " · 수집 중단으로 추가 영향 대상이 있을 수 있습니다."
+    elif impact_scope.identification_incomplete:
+        scope_detail = "수집 데이터가 부족해 영향 Role/SSID를 자동 식별할 수 없습니다."
+    else:
+        scope_detail = "실패 항목이 Role/SSID 데이터에 직접 영향을 주는 명령은 아닙니다."
 
     return f"""
     <section class="executive-summary" aria-label="Report conclusion summary">
@@ -2184,6 +2280,19 @@ def _executive_summary_html(
         <span class="attention-badge">확인 필요 {attention_count}건</span>
       </div>
       <div class="summary-grid">
+        <div class="summary-item collection-status" data-status="{escape(collection_health.status)}">
+          <strong>수집 상태: {escape(collection_health.label_ko)}</strong>
+          <span>{escape(collection_detail)}</span>
+          <span>실패 명령: {escape(failed_command_text)}</span>
+        </div>
+        <div class="summary-item report-confidence" data-confidence="{escape(confidence_key)}">
+          <strong>수집 신뢰도: {escape(confidence_label)}</strong>
+          <span>{escape(confidence_detail)}</span>
+        </div>
+        <div class="summary-item">
+          <strong>실패 영향 범위</strong>
+          <span>{escape(scope_detail)}</span>
+        </div>
         <div class="summary-item">
           <strong>Unresolved {unresolved_count}건</strong>
           <span>Alias, ACL, Role 해석이 불완전한 항목입니다.</span>
@@ -3163,6 +3272,15 @@ def _role_description_html(role: str) -> str:
       <div id="{escape(description_id)}-print" class="role-description-print">입력된 설명이 없습니다.</div>
     </div>
     """
+
+
+def _summary_entity_list(values: tuple[str, ...], *, limit: int = 5) -> str:
+    if not values:
+        return "없음"
+    text = ", ".join(values[:limit])
+    if len(values) > limit:
+        text += f" 외 {len(values) - limit}개"
+    return text
 
 
 def _local_role_network_html(rows: list[dict[str, Any]], enabled: bool) -> str:

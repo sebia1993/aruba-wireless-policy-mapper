@@ -6,14 +6,20 @@ CollectionResult objects instead of calling SSH/Telnet commands directly.
 
 from __future__ import annotations
 
+import math
+import threading
+import time
 from pathlib import Path
 from typing import Callable
 
 from .aos8_parser import discover_aliases_from_config, discover_roles_from_config
 from .config import resolve_credentials
 from .models import CollectionResult, CommandOutput, Controller, ControllerCredentials
+from .validation import MAX_COLLECTION_DURATION_SECONDS, validate_timeout_seconds
 
 ProgressCallback = Callable[[str, dict[str, object]], None]
+CANCELLED_COMMAND_ID = "cancelled"
+DURATION_LIMIT_COMMAND_ID = "duration_limit"
 
 
 BASE_COMMANDS = (
@@ -32,9 +38,15 @@ def collect_from_controller(
     timeout: int = 60,
     credentials: ControllerCredentials | None = None,
     progress_callback: ProgressCallback | None = None,
+    cancel_event: threading.Event | None = None,
+    max_duration_seconds: int = MAX_COLLECTION_DURATION_SECONDS,
 ) -> CollectionResult:
+    if max_duration_seconds <= 0:
+        raise ValueError("max_duration_seconds must be greater than zero")
+    timeout = validate_timeout_seconds(timeout)
     credentials = credentials or resolve_credentials(controller)
     result = CollectionResult(controller=controller)
+    deadline = time.monotonic() + max_duration_seconds
 
     try:
         from netmiko import ConnectHandler
@@ -43,13 +55,24 @@ def collect_from_controller(
 
     # 여기서부터가 실제 장비와 통신하는 유일한 구간입니다.
     # 이후 단계는 CollectionResult에 담긴 텍스트만 보고 동작하게 분리해 둡니다.
-    params = _build_connect_params(controller=controller, credentials=credentials, timeout=timeout)
+    connection_timeout = min(timeout, max_duration_seconds)
+    params = _build_connect_params(
+        controller=controller,
+        credentials=credentials,
+        timeout=connection_timeout,
+    )
 
     connection = None
     try:
+        if _cancel_requested(cancel_event):
+            return _mark_cancelled(result, progress_callback)
         _emit(progress_callback, "connect", host=controller.host, protocol=controller.protocol, port=controller.port)
         connection = ConnectHandler(**params)
         _emit(progress_callback, "connect_done", host=controller.host)
+        if _cancel_requested(cancel_event):
+            return _mark_cancelled(result, progress_callback)
+        if _next_command_timeout(timeout, deadline) is None:
+            return _mark_duration_limit(result, progress_callback, max_duration_seconds)
         if credentials.enable_password:
             try:
                 connection.enable()
@@ -60,13 +83,26 @@ def collect_from_controller(
                     CommandOutput(command_id="enable", command="enable", success=False, error=str(exc))
                 )
                 _emit(progress_callback, "command_error", command_id="enable", command="enable", error=str(exc))
+            if _cancel_requested(cancel_event):
+                return _mark_cancelled(result, progress_callback)
 
         # 기본 명령은 보고서 생성에 필요한 최소 입력값입니다.
         # 특히 configuration_effective가 없으면 Role/ACL/Alias 탐색을 계속할 수 없습니다.
         for command_id, command in BASE_COMMANDS:
-            _emit(progress_callback, "command_start", command_id=command_id, command=command, timeout=timeout)
+            if _cancel_requested(cancel_event):
+                return _mark_cancelled(result, progress_callback)
+            command_timeout = _next_command_timeout(timeout, deadline)
+            if command_timeout is None:
+                return _mark_duration_limit(result, progress_callback, max_duration_seconds)
+            _emit(
+                progress_callback,
+                "command_start",
+                command_id=command_id,
+                command=command,
+                timeout=command_timeout,
+            )
             try:
-                output = _run_command(connection, command, timeout=timeout)
+                output = _run_command(connection, command, timeout=command_timeout)
             except Exception as exc:
                 result.commands.append(
                     CommandOutput(command_id=command_id, command=command, success=False, error=str(exc))
@@ -80,6 +116,8 @@ def collect_from_controller(
                 )
                 if command_id == "configuration_effective":
                     return result
+                if _cancel_requested(cancel_event):
+                    return _mark_cancelled(result, progress_callback)
                 continue
 
             result.commands.append(CommandOutput(command_id=command_id, command=command, output=output))
@@ -90,6 +128,8 @@ def collect_from_controller(
                 command=command,
                 output_length=len(output),
             )
+            if _cancel_requested(cancel_event):
+                return _mark_cancelled(result, progress_callback)
 
         config_output = result.command_output("configuration_effective")
         if not config_output:
@@ -106,6 +146,11 @@ def collect_from_controller(
         aliases = discover_aliases_from_config(config_output)
         _emit(progress_callback, "aliases_discovered", total=len(aliases))
         for index, alias in enumerate(aliases, start=1):
+            if _cancel_requested(cancel_event):
+                return _mark_cancelled(result, progress_callback)
+            command_timeout = _next_command_timeout(timeout, deadline)
+            if command_timeout is None:
+                return _mark_duration_limit(result, progress_callback, max_duration_seconds)
             command = f'show netdestination "{alias}"' if " " in alias else f"show netdestination {alias}"
             _emit(
                 progress_callback,
@@ -115,10 +160,10 @@ def collect_from_controller(
                 alias=alias,
                 index=index,
                 total=len(aliases),
-                timeout=timeout,
+                timeout=command_timeout,
             )
             try:
-                output = _run_command(connection, command, timeout=timeout)
+                output = _run_command(connection, command, timeout=command_timeout)
                 result.commands.append(
                     CommandOutput(command_id=f"netdestination::{alias}", command=command, output=output)
                 )
@@ -151,11 +196,18 @@ def collect_from_controller(
                     total=len(aliases),
                     error=str(exc),
                 )
+            if _cancel_requested(cancel_event):
+                return _mark_cancelled(result, progress_callback)
 
         # Role 이름도 설정에서 먼저 찾은 뒤 show rights로 실제 적용 ACL을 보강합니다.
         roles = discover_roles_from_config(config_output)
         _emit(progress_callback, "roles_discovered", total=len(roles))
         for index, role in enumerate(roles, start=1):
+            if _cancel_requested(cancel_event):
+                return _mark_cancelled(result, progress_callback)
+            command_timeout = _next_command_timeout(timeout, deadline)
+            if command_timeout is None:
+                return _mark_duration_limit(result, progress_callback, max_duration_seconds)
             command = f'show rights "{role}"' if " " in role else f"show rights {role}"
             _emit(
                 progress_callback,
@@ -165,10 +217,10 @@ def collect_from_controller(
                 role=role,
                 index=index,
                 total=len(roles),
-                timeout=timeout,
+                timeout=command_timeout,
             )
             try:
-                output = _run_command(connection, command, timeout=timeout)
+                output = _run_command(connection, command, timeout=command_timeout)
                 result.commands.append(
                     CommandOutput(command_id=f"rights::{role}", command=command, output=output)
                 )
@@ -201,6 +253,8 @@ def collect_from_controller(
                     total=len(roles),
                     error=str(exc),
                 )
+            if _cancel_requested(cancel_event):
+                return _mark_cancelled(result, progress_callback)
         _emit(progress_callback, "complete", command_count=len(result.commands))
     except Exception as exc:
         result.commands.append(
@@ -218,6 +272,61 @@ def collect_from_controller(
                 connection.disconnect()
             except Exception:
                 pass
+    return result
+
+
+def collection_was_cancelled(result: CollectionResult) -> bool:
+    return any(command.command_id == CANCELLED_COMMAND_ID for command in result.commands)
+
+
+def _cancel_requested(cancel_event: threading.Event | None) -> bool:
+    return bool(cancel_event is not None and cancel_event.is_set())
+
+
+def _mark_cancelled(
+    result: CollectionResult,
+    progress_callback: ProgressCallback | None,
+) -> CollectionResult:
+    if not collection_was_cancelled(result):
+        result.commands.append(
+            CommandOutput(
+                command_id=CANCELLED_COMMAND_ID,
+                command="cancel",
+                success=False,
+                error="Collection cancelled by user.",
+            )
+        )
+    _emit(progress_callback, "cancelled", command_count=len(result.commands))
+    return result
+
+
+def _next_command_timeout(timeout: int, deadline: float) -> int | None:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return None
+    return max(1, min(int(timeout), math.ceil(remaining)))
+
+
+def _mark_duration_limit(
+    result: CollectionResult,
+    progress_callback: ProgressCallback | None,
+    max_duration_seconds: int,
+) -> CollectionResult:
+    if not any(command.command_id == DURATION_LIMIT_COMMAND_ID for command in result.commands):
+        result.commands.append(
+            CommandOutput(
+                command_id=DURATION_LIMIT_COMMAND_ID,
+                command="collection duration limit",
+                success=False,
+                error=f"Collection exceeded the {max_duration_seconds}-second duration limit.",
+            )
+        )
+    _emit(
+        progress_callback,
+        "duration_limit",
+        command_count=len(result.commands),
+        max_duration_seconds=max_duration_seconds,
+    )
     return result
 
 

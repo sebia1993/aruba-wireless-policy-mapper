@@ -5,6 +5,11 @@ import sys
 from pathlib import Path
 
 from .collector import collect_from_controller, collect_from_offline_raw
+from .collection_health import (
+    COLLECTION_FAILED,
+    COLLECTION_PARTIAL,
+    assess_collection_results,
+)
 from .config import load_controllers
 from .diagnostic_mode import run_diagnostic
 from .interactive import prompt_controller_targets
@@ -12,6 +17,7 @@ from .mock_server import run_mock_server
 from .models import CollectionResult, ControllerTarget
 from .report import build_parsed_controllers, create_run_dir, write_raw_result, write_reports
 from .role_networks import RoleNetworkDefinitionError, load_role_network_definitions
+from .validation import validate_timeout_seconds
 
 
 COLLECT_EXIT_OK = 0
@@ -84,6 +90,11 @@ def main(argv: list[str] | None = None) -> int:
 
 def _collect(args: argparse.Namespace) -> int:
     try:
+        timeout = validate_timeout_seconds(args.timeout)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return COLLECT_EXIT_INPUT_ERROR
+    try:
         local_role_networks = load_role_network_definitions(args.role_networks) if args.role_networks else []
     except RoleNetworkDefinitionError as exc:
         print(f"Role network Excel error: {exc}", file=sys.stderr)
@@ -105,7 +116,7 @@ def _collect(args: argparse.Namespace) -> int:
         else:
             result = collect_from_controller(
                 controller,
-                timeout=args.timeout,
+                timeout=timeout,
                 credentials=target.credentials,
             )
         write_raw_result(result, raw_dir)
@@ -151,9 +162,10 @@ def _collect(args: argparse.Namespace) -> int:
 
 
 def _collection_exit_code(results: list[CollectionResult]) -> int:
-    if any(not result.command_output("configuration_effective") for result in results):
+    health = assess_collection_results(results)
+    if health.status == COLLECTION_FAILED:
         return COLLECT_EXIT_FAILED
-    if any(not command.success for result in results for command in result.commands):
+    if health.status == COLLECTION_PARTIAL:
         return COLLECT_EXIT_PARTIAL
     return COLLECT_EXIT_OK
 
@@ -165,13 +177,18 @@ def _resolve_targets(args: argparse.Namespace) -> list[ControllerTarget]:
 
 
 def _diagnose(args: argparse.Namespace) -> int:
+    try:
+        timeout = validate_timeout_seconds(args.timeout)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return COLLECT_EXIT_INPUT_ERROR
     targets = _resolve_targets(args)
     exit_code = 0
     for target in targets:
         diagnostic = run_diagnostic(
             target,
             output_root=args.output_dir,
-            timeout=args.timeout,
+            timeout=timeout,
             offline_raw_dir=args.offline_raw_dir,
         )
         print(f"Diagnostic output directory: {diagnostic.run_dir}")

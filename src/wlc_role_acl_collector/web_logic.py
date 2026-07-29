@@ -19,11 +19,13 @@ from pathlib import Path
 from typing import Callable
 
 from .collector import collect_from_controller, collect_from_offline_raw
+from .collection_health import assess_collection_results, infer_collection_impact_scope_for_parsed
 from .config import default_device_type_for_protocol
 from .diagnostics import summarize_collection_failure
 from .models import CollectionResult, Controller, ControllerCredentials, ParsedController
 from .report import build_parsed_controllers, create_run_dir, write_raw_result, write_reports
 from .role_networks import RoleNetworkLoadSummary, load_role_network_definitions_with_summary
+from .validation import validate_port, validate_timeout_seconds, validate_wlc_address
 
 ProgressCallback = Callable[[str, dict[str, object]], None]
 _ACTIVE_TARGETS: set[str] = set()
@@ -176,6 +178,11 @@ def format_web_progress(event: str, payload: dict[str, object]) -> tuple[str, st
         return "Role 발견", f"ROLES {payload.get('total', 0)}"
     if event == "complete":
         return "수집 완료", f"COMMANDS COMPLETE {payload.get('command_count', 0)}"
+    if event == "duration_limit":
+        return (
+            "전체 실행 시간 상한 도달",
+            f"DURATION LIMIT {payload.get('max_duration_seconds', 0)} seconds",
+        )
     return "", ""
 
 
@@ -197,14 +204,11 @@ def _target_collection_slot(host: str):
 
 def _validate_request(request: WebCollectionRequest) -> None:
     protocol = request.protocol.strip().lower()
-    if not request.host.strip():
-        raise ValueError("WLC IP 또는 Host를 입력하세요.")
+    validate_wlc_address(request.host)
     if protocol not in {"ssh", "telnet"}:
         raise ValueError("Protocol은 ssh 또는 telnet이어야 합니다.")
-    if not 1 <= int(request.port) <= 65535:
-        raise ValueError("Port는 1에서 65535 사이여야 합니다.")
-    if int(request.timeout) < 5:
-        raise ValueError("Timeout은 5초 이상이어야 합니다.")
+    validate_port(request.port)
+    validate_timeout_seconds(request.timeout)
     if not request.offline_raw_dir:
         if not request.username.strip():
             raise ValueError("Username을 입력하세요.")
@@ -269,7 +273,8 @@ def _build_success_summary(
     role_count = sum(len(item.role_policies) for item in parsed)
     acl_rule_count = sum(len(policy.rules) for item in parsed for policy in item.role_policies.values())
     alias_count = sum(len(item.netdestination_aliases) for item in parsed)
-    failed_commands = [command.command_id for command in result.commands if not command.success]
+    health = assess_collection_results([result])
+    impact_scope = infer_collection_impact_scope_for_parsed([result], parsed)
     return {
         "controller": result.controller.name,
         "host": result.controller.host,
@@ -277,8 +282,17 @@ def _build_success_summary(
         "role_count": role_count,
         "acl_rule_count": acl_rule_count,
         "alias_count": alias_count,
-        "failed_command_count": len(failed_commands),
-        "failed_commands": ", ".join(failed_commands),
+        "collection_status": health.status,
+        "collection_status_label": health.label_ko,
+        "failed_command_count": health.failed_command_count,
+        "failed_commands": ", ".join(health.failed_command_ids),
+        "collection_impacts": health.impact_text_ko,
+        "affected_role_count": impact_scope.role_count,
+        "affected_roles": ", ".join(impact_scope.affected_roles),
+        "affected_ssid_count": impact_scope.ssid_count,
+        "affected_ssids": ", ".join(impact_scope.affected_ssids),
+        "impact_scope_incomplete": impact_scope.identification_incomplete,
+        "recommended_action": health.recommended_action_ko,
         "role_network_rows": role_network_summary.network_count if role_network_summary else 0,
     }
 
@@ -287,12 +301,16 @@ def _build_failure_summary(
     result: CollectionResult,
     role_network_summary: RoleNetworkLoadSummary | None,
 ) -> dict[str, object]:
-    failed_commands = [command.command_id for command in result.commands if not command.success]
+    health = assess_collection_results([result])
     return {
         "controller": result.controller.name,
         "host": result.controller.host,
-        "failed_command_count": len(failed_commands),
-        "failed_commands": ", ".join(failed_commands),
+        "collection_status": health.status,
+        "collection_status_label": health.label_ko,
+        "failed_command_count": health.failed_command_count,
+        "failed_commands": ", ".join(health.failed_command_ids),
+        "collection_impacts": health.impact_text_ko,
+        "recommended_action": health.recommended_action_ko,
         "role_network_rows": role_network_summary.network_count if role_network_summary else 0,
     }
 

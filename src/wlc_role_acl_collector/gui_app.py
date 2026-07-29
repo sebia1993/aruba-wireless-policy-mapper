@@ -21,13 +21,22 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from .atomic_io import atomic_write_text
-from .collector import collect_from_controller
-from .diagnostic_mode import run_diagnostic
+from .collector import collection_was_cancelled, collect_from_controller
+from .collection_health import (
+    COLLECTION_COMPLETED,
+    COLLECTION_FAILED,
+    COLLECTION_PARTIAL,
+    CollectionHealth,
+    assess_collection_results,
+    infer_collection_impact_scope_for_parsed,
+)
+from .diagnostic_mode import DiagnosticCancelledError, run_diagnostic
 from .diagnostics import classify_error_message, summarize_collection_failure
 from .gui_support import GuiConnectionInput, build_target_from_gui_input, default_gui_output_dir
 from .models import CollectionResult, CommandOutput, ParsedController, RoleNetworkDefinition
 from .report import build_parsed_controllers, create_run_dir, write_raw_result, write_reports
 from .role_networks import RoleNetworkDefinitionError, RoleNetworkLoadSummary, load_role_network_definitions_with_summary
+from .validation import MAX_COLLECTION_DURATION_SECONDS, validate_timeout_seconds
 
 
 APP_TITLE = "Aruba WLC Ops Analyzer v2.0"
@@ -93,6 +102,7 @@ WLC_IP_LABEL = "WLC IP"
 REPORT_NAME_LABEL = "보고서 이름(선택)"
 WLC_TARGET_NOTICE = "Mobility Master(MM)가 아니라 실제 WLC 컨트롤러 IP를 입력하세요."
 COLLECTION_ACTION_LABEL = "분석 시작"
+CANCEL_ACTION_LABEL = "실행 취소"
 DIAGNOSTIC_ACTION_LABEL = "안전 진단"
 ADVANCED_OPTIONS_SHOW_LABEL = "고급 옵션 표시"
 ADVANCED_OPTIONS_HIDE_LABEL = "고급 옵션 숨김"
@@ -157,6 +167,7 @@ STAGE_LABELS = {
     "reporting": "보고서 생성",
     "completed": "완료",
     "failed": "실패",
+    "cancelled": "취소됨",
 }
 STAGE_PROGRESS = {
     "ready": 0,
@@ -165,6 +176,7 @@ STAGE_PROGRESS = {
     "reporting": 80,
     "completed": 100,
     "failed": 100,
+    "cancelled": 100,
 }
 
 
@@ -174,7 +186,29 @@ class ResultReportSummary:
     role_count: int = 0
     matched_count: int = 0
     mismatched_count: int = 0
+    collection_status: str = "idle"
+    collection_status_label: str = "대기"
+    failed_command_count: int = 0
+    affected_role_count: int = 0
+    affected_ssid_count: int = 0
+    collection_impact_text: str = "수집 완료 후 확인됩니다."
+    recommended_action: str = ""
     note: str = "수집 완료 후 표시됩니다."
+
+
+def _failed_result_report_summary() -> ResultReportSummary:
+    health = CollectionHealth(
+        status=COLLECTION_FAILED,
+        impact_areas=("필수 수집 결과",),
+    )
+    return ResultReportSummary(
+        collection_status=health.status,
+        collection_status_label=health.label_ko,
+        failed_command_count=health.failed_command_count,
+        collection_impact_text=health.impact_text_ko,
+        recommended_action=health.recommended_action_ko,
+        note="실패했습니다. 수집 로그를 확인하세요.",
+    )
 
 
 def _enable_windows_dpi_awareness() -> None:
@@ -254,6 +288,8 @@ class WlcRoleAclCollectorGui(ctk.CTk):
         # 백그라운드 수집 스레드는 event_queue에 메시지만 넣고, _drain_events가 화면을 갱신합니다.
         self.event_queue: "queue.Queue[tuple[str, object]]" = queue.Queue()
         self.worker: threading.Thread | None = None
+        self.cancel_event = threading.Event()
+        self.close_requested = False
         self.is_running = False
         self.advanced_options_visible = False
         self.log_visible = False
@@ -261,6 +297,7 @@ class WlcRoleAclCollectorGui(ctk.CTk):
         self.stage_label_widgets: dict[str, ctk.CTkLabel] = {}
         self.sidebar_menu_buttons: dict[str, ctk.CTkButton] = {}
         self.start_buttons: list[ctk.CTkButton] = []
+        self.cancel_buttons: list[ctk.CTkButton] = []
         self.last_run_dir: Path | None = None
         self.last_html: Path | None = None
         self.last_xlsx: Path | None = None
@@ -285,6 +322,9 @@ class WlcRoleAclCollectorGui(ctk.CTk):
         self.result_role_count_var = tk.StringVar(value="0")
         self.result_matched_count_var = tk.StringVar(value="0")
         self.result_mismatched_count_var = tk.StringVar(value="0")
+        self.result_collection_status_var = tk.StringVar(value="대기")
+        self.result_failed_command_count_var = tk.StringVar(value="0")
+        self.result_collection_guidance_var = tk.StringVar(value="수집 완료 후 데이터 완전성을 확인합니다.")
         self.result_summary_note_var = tk.StringVar(value="수집 완료 후 표시됩니다.")
 
         self._style()
@@ -294,6 +334,7 @@ class WlcRoleAclCollectorGui(ctk.CTk):
         self.bind("<Configure>", self._schedule_fit_to_monitor)
         self.after(300, self._fit_to_monitor)
         self.after(150, self._drain_events)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _style(self) -> None:
         ctk.set_appearance_mode(CUSTOMTKINTER_APPEARANCE_MODE)
@@ -628,7 +669,9 @@ class WlcRoleAclCollectorGui(ctk.CTk):
         content = ctk.CTkFrame(group, fg_color="transparent")
         content.grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 14))
         content.grid_columnconfigure(0, weight=1)
-        self._start_action_button(content).grid(row=0, column=0, sticky="ew")
+        content.grid_columnconfigure(1, weight=0)
+        self._start_action_button(content).grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self._cancel_action_button(content).grid(row=0, column=1, sticky="ew")
 
     def _build_collection_tab(self, parent: tk.Widget) -> None:
         content = ctk.CTkFrame(parent, fg_color="transparent")
@@ -982,8 +1025,10 @@ class WlcRoleAclCollectorGui(ctk.CTk):
         actions = ctk.CTkFrame(parent, fg_color="transparent")
         actions.pack(fill="x", padx=16, pady=(12, 0))
         actions.grid_columnconfigure(0, weight=1)
+        actions.grid_columnconfigure(1, weight=0)
 
-        self._start_action_button(actions).grid(row=0, column=0, sticky="ew")
+        self._start_action_button(actions).grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self._cancel_action_button(actions).grid(row=0, column=1, sticky="ew")
 
     def _start_action_button(self, parent: tk.Widget) -> ctk.CTkButton:
         button = self._button(
@@ -994,6 +1039,22 @@ class WlcRoleAclCollectorGui(ctk.CTk):
         )
         self.start_buttons.append(button)
         self.start_button = button
+        return button
+
+    def _cancel_action_button(self, parent: tk.Widget) -> ctk.CTkButton:
+        button = self._button(
+            parent,
+            text=CANCEL_ACTION_LABEL,
+            command=self._request_cancel,
+            state="disabled",
+        )
+        button.configure(
+            fg_color=DANGER_SOFT_BG,
+            hover_color="#7f1d1d",
+            text_color=DANGER_COLOR,
+            width=112,
+        )
+        self.cancel_buttons.append(button)
         return button
 
     def _report_panel(self, parent: tk.Widget) -> None:
@@ -1041,6 +1102,58 @@ class WlcRoleAclCollectorGui(ctk.CTk):
             caption="누락 포함",
             accent_color=WARNING_COLOR,
         ).grid(row=0, column=3, sticky="ew", padx=(6, 0))
+
+        health_strip = ctk.CTkFrame(
+            parent,
+            fg_color=PANEL_SUBTLE_BG,
+            border_width=1,
+            border_color=LINE_STRONG_COLOR,
+            corner_radius=8,
+        )
+        health_strip.pack(fill="x", padx=16, pady=(10, 0))
+        health_strip.grid_columnconfigure(2, weight=1)
+
+        ctk.CTkLabel(
+            health_strip,
+            text="수집 상태",
+            text_color=MUTED_COLOR,
+            font=("Segoe UI Semibold", 9),
+        ).grid(row=0, column=0, sticky="w", padx=(12, 8), pady=(9, 1))
+        ctk.CTkLabel(
+            health_strip,
+            text="실패 명령",
+            text_color=MUTED_COLOR,
+            font=("Segoe UI Semibold", 9),
+        ).grid(row=0, column=1, sticky="w", padx=8, pady=(9, 1))
+        ctk.CTkLabel(
+            health_strip,
+            text="판단 안내",
+            text_color=MUTED_COLOR,
+            font=("Segoe UI Semibold", 9),
+        ).grid(row=0, column=2, sticky="w", padx=(8, 12), pady=(9, 1))
+
+        self.result_collection_status_label = ctk.CTkLabel(
+            health_strip,
+            textvariable=self.result_collection_status_var,
+            text_color=TEXT_COLOR,
+            font=("Segoe UI Semibold", 11),
+        )
+        self.result_collection_status_label.grid(row=1, column=0, sticky="w", padx=(12, 8), pady=(0, 10))
+        ctk.CTkLabel(
+            health_strip,
+            textvariable=self.result_failed_command_count_var,
+            text_color=TEXT_COLOR,
+            font=("Segoe UI Semibold", 11),
+        ).grid(row=1, column=1, sticky="w", padx=8, pady=(0, 10))
+        ctk.CTkLabel(
+            health_strip,
+            textvariable=self.result_collection_guidance_var,
+            text_color=TEXT_COLOR,
+            font=("Segoe UI", 9),
+            anchor="w",
+            justify="left",
+            wraplength=510,
+        ).grid(row=1, column=2, sticky="ew", padx=(8, 12), pady=(0, 10))
 
         ctk.CTkLabel(
             parent,
@@ -1274,6 +1387,16 @@ class WlcRoleAclCollectorGui(ctk.CTk):
             border_color=LINE_STRONG_COLOR,
             text_color=TEXT_COLOR,
         ).pack(anchor="w", pady=(3, 0))
+        ctk.CTkLabel(
+            row,
+            text=(
+                "명령당 5~600초 · 전체 수집은 최대 "
+                f"{MAX_COLLECTION_DURATION_SECONDS // 60}분 후 안전 중단"
+            ),
+            text_color=MUTED_COLOR,
+            font=("Segoe UI", 8),
+            anchor="w",
+        ).pack(anchor="w", pady=(4, 0))
 
     def _role_networks_row(self, parent: tk.Widget) -> None:
         row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -1437,7 +1560,7 @@ class WlcRoleAclCollectorGui(ctk.CTk):
             widget = self.stage_label_widgets.get(step)
             if widget is None:
                 continue
-            if stage == "failed":
+            if stage in {"failed", "cancelled"}:
                 widget.configure(fg_color=PANEL_SUBTLE_BG, text_color=MUTED_COLOR)
             elif index < active_index:
                 widget.configure(fg_color=SUCCESS_SOFT_BG, text_color=SUCCESS_COLOR)
@@ -1461,6 +1584,9 @@ class WlcRoleAclCollectorGui(ctk.CTk):
         elif stage == "failed":
             status_text = "실패"
             status_color = DANGER_COLOR
+        elif stage == "cancelled":
+            status_text = "취소됨"
+            status_color = WARNING_COLOR
         else:
             status_text = "대기"
             status_color = MUTED_COLOR
@@ -1492,13 +1618,14 @@ class WlcRoleAclCollectorGui(ctk.CTk):
             return
 
         output_dir = Path(self.output_dir_var.get().strip() or "outputs")
+        self.cancel_event.clear()
         self.running_progress_title_var.set("데이터 수집 진행 중")
         self._set_running(True)
         self._log("수집을 시작합니다.")
         self.worker = threading.Thread(
             target=self._run_collection_worker,
             args=(target, output_dir, timeout, role_networks),
-            daemon=True,
+            daemon=False,
         )
         self.worker.start()
 
@@ -1513,13 +1640,14 @@ class WlcRoleAclCollectorGui(ctk.CTk):
             return
 
         output_dir = Path(self.output_dir_var.get().strip() or "outputs")
+        self.cancel_event.clear()
         self.running_progress_title_var.set("안전 진단 진행 중")
         self._set_running(True)
         self._log("안전 진단을 시작합니다.")
         self.worker = threading.Thread(
             target=self._run_diagnostic_worker,
             args=(target, output_dir, timeout),
-            daemon=True,
+            daemon=False,
         )
         self.worker.start()
 
@@ -1536,9 +1664,10 @@ class WlcRoleAclCollectorGui(ctk.CTk):
 
     def _read_timeout(self) -> int:
         try:
-            return max(5, int(self.timeout_var.get()))
-        except (tk.TclError, ValueError) as exc:
+            value = self.timeout_var.get()
+        except tk.TclError as exc:
             raise ValueError("Timeout seconds는 숫자로 입력하세요.") from exc
+        return validate_timeout_seconds(value)
 
     def _run_collection_worker(self, target, output_dir: Path, timeout: int, role_networks) -> None:
         # 일반 수집 모드는 문제 분석을 위해 raw 명령 결과를 로컬 run_dir 아래에 저장합니다.
@@ -1580,10 +1709,24 @@ class WlcRoleAclCollectorGui(ctk.CTk):
                 timeout=timeout,
                 credentials=target.credentials,
                 progress_callback=progress,
+                cancel_event=self.cancel_event,
             )
             write_raw_result(result, run_dir / "raw")
             self.event_queue.put(("log", f"Raw saved: {result.raw_file}"))
             log_lines.append(f"Raw file: {result.raw_file}")
+            if collection_was_cancelled(result):
+                log_lines.append("Status: cancelled")
+                run_log = _write_run_log(run_dir, log_lines)
+                self.event_queue.put(
+                    (
+                        "cancelled",
+                        {
+                            "run_dir": run_dir,
+                            "run_log": run_log,
+                        },
+                    )
+                )
+                return
             if not result.command_output("configuration_effective"):
                 failure = summarize_collection_failure(result)
                 log_lines.extend([f"Failure category: {failure.category}", failure.as_text()])
@@ -1612,13 +1755,22 @@ class WlcRoleAclCollectorGui(ctk.CTk):
                 export_local_role_networks=bool(role_networks),
                 access_history_enabled=False,
             )
-            log_lines.extend(["Status: completed", f"Excel: {files['xlsx']}", f"HTML: {files['html']}"])
+            summary = _result_report_summary_from_parsed(parsed, role_networks, [result])
+            log_lines.extend(
+                [
+                    f"Status: {summary.collection_status}",
+                    f"Failed commands: {summary.failed_command_count}",
+                    f"Collection impact: {summary.collection_impact_text}",
+                    f"Excel: {files['xlsx']}",
+                    f"HTML: {files['html']}",
+                ]
+            )
             _write_run_log(run_dir, log_lines)
             payload = {
                 "run_dir": run_dir,
                 "html": files["html"],
                 "xlsx": files["xlsx"],
-                "summary": _result_report_summary_from_parsed(parsed, role_networks),
+                "summary": summary,
             }
             self.event_queue.put(("done", payload))
         except Exception as exc:
@@ -1646,7 +1798,12 @@ class WlcRoleAclCollectorGui(ctk.CTk):
             self.event_queue.put(("stage", "connecting"))
             self.event_queue.put(("status", "안전 진단을 실행 중입니다."))
             self.event_queue.put(("log", "Safe diagnostic mode does not save raw device output."))
-            diagnostic = run_diagnostic(target, output_root=output_dir, timeout=timeout)
+            diagnostic = run_diagnostic(
+                target,
+                output_root=output_dir,
+                timeout=timeout,
+                cancel_event=self.cancel_event,
+            )
             for line in format_diagnostic_progress(diagnostic.primary_code, diagnostic.report_paths, diagnostic.events):
                 self.event_queue.put(("log", line))
             self.event_queue.put(
@@ -1657,6 +1814,16 @@ class WlcRoleAclCollectorGui(ctk.CTk):
                         "html": diagnostic.report_paths.get("html"),
                         "json": diagnostic.report_paths.get("json"),
                         "primary_code": diagnostic.primary_code,
+                    },
+                )
+            )
+        except DiagnosticCancelledError as exc:
+            self.event_queue.put(
+                (
+                    "cancelled",
+                    {
+                        "run_dir": exc.run_dir,
+                        "run_log": None,
                     },
                 )
             )
@@ -1685,15 +1852,28 @@ class WlcRoleAclCollectorGui(ctk.CTk):
                     self._log(str(payload))
                 elif event == "done":
                     paths = payload
+                    summary = paths.get("summary")
                     self.last_run_dir = paths["run_dir"]
                     self.last_html = paths["html"]
                     self.last_xlsx = paths["xlsx"]
                     self._log(f"Excel: {self.last_xlsx}")
                     self._log(f"HTML: {self.last_html}")
-                    self.status_var.set("완료되었습니다. HTML 보고서를 먼저 확인하세요.")
+                    if (
+                        isinstance(summary, ResultReportSummary)
+                        and summary.collection_status == COLLECTION_PARTIAL
+                    ):
+                        self.status_var.set(
+                            f"부분 완료: 실패 명령 {summary.failed_command_count}건을 확인하세요."
+                        )
+                        self._log(
+                            f"[WARNING] 부분 완료 | 실패 명령 {summary.failed_command_count}건 | "
+                            f"영향: {summary.collection_impact_text}"
+                        )
+                    else:
+                        self.status_var.set("완료되었습니다. HTML 보고서를 먼저 확인하세요.")
                     self._set_stage("completed")
                     self._set_running(False)
-                    self._set_result_summary(paths.get("summary"))
+                    self._set_result_summary(summary)
                     self._set_result_buttons(folder_enabled=True, report_enabled=True)
                     self._show_report_complete_dialog(paths)
                 elif event == "diagnostic_done":
@@ -1704,7 +1884,13 @@ class WlcRoleAclCollectorGui(ctk.CTk):
                     self.last_xlsx = None
                     self.last_diagnostic_json = paths.get("json")
                     self._set_result_summary(
-                        ResultReportSummary(note="안전 진단 결과입니다. SSID/Role 요약은 일반 수집 완료 후 표시됩니다.")
+                        ResultReportSummary(
+                            collection_status="diagnostic",
+                            collection_status_label="진단 완료" if primary_code == "OK" else "진단 확인 필요",
+                            collection_impact_text=f"Primary code: {primary_code}",
+                            recommended_action="진단 HTML에서 단계별 결과를 확인하세요.",
+                            note="안전 진단 결과입니다. SSID/Role 요약은 일반 수집 완료 후 표시됩니다.",
+                        )
                     )
                     self.status_var.set(f"안전 진단 완료: {primary_code}")
                     self._set_stage("completed" if primary_code == "OK" else "failed")
@@ -1718,6 +1904,34 @@ class WlcRoleAclCollectorGui(ctk.CTk):
                         messagebox.showinfo("안전 진단 완료", message)
                     else:
                         messagebox.showwarning("안전 진단 코드 확인", message)
+                elif event == "cancelled":
+                    paths = payload if isinstance(payload, dict) else {}
+                    self.last_run_dir = paths.get("run_dir")
+                    self.last_html = None
+                    self.last_xlsx = None
+                    self.last_diagnostic_json = None
+                    self._set_stage("cancelled")
+                    self._set_running(False)
+                    self._set_result_summary(
+                        ResultReportSummary(
+                            collection_status="cancelled",
+                            collection_status_label="사용자 취소",
+                            collection_impact_text="완료되지 않은 수집 결과",
+                            recommended_action="필요한 경우 처음부터 다시 실행하세요.",
+                            note="사용자 요청으로 중단했습니다. 부분 수집 데이터는 정책 판단에 사용하지 마세요.",
+                        )
+                    )
+                    self.status_var.set("취소되었습니다. 장비 접속 세션을 종료했습니다.")
+                    self._log("[WARNING] 사용자 요청으로 수집을 취소했습니다.")
+                    if paths.get("run_log"):
+                        self._log(f"Run log: {paths['run_log']}")
+                    self._set_result_buttons(folder_enabled=bool(self.last_run_dir), report_enabled=False)
+                    if not self.close_requested:
+                        messagebox.showinfo(
+                            "실행 취소",
+                            "작업을 취소하고 장비 접속 세션을 종료했습니다.\n"
+                            "부분 수집 데이터는 정책 판단에 사용하지 마세요.",
+                        )
                 elif event == "error":
                     self._set_stage("failed")
                     if isinstance(payload, dict):
@@ -1725,14 +1939,14 @@ class WlcRoleAclCollectorGui(ctk.CTk):
                         self.last_run_dir = payload.get("run_dir")
                         self.last_html = None
                         self.last_xlsx = None
-                        self._set_result_summary(ResultReportSummary(note="실패했습니다. 수집 로그를 확인하세요."))
+                        self._set_result_summary(_failed_result_report_summary())
                         self._log(f"ERROR: {message}")
                         if payload.get("run_log"):
                             self._log(f"Run log: {payload['run_log']}")
                         self._set_result_buttons(folder_enabled=bool(self.last_run_dir), report_enabled=False)
                     else:
                         message = str(payload)
-                        self._set_result_summary(ResultReportSummary(note="실패했습니다. 수집 로그를 확인하세요."))
+                        self._set_result_summary(_failed_result_report_summary())
                         self._log(f"ERROR: {message}")
                         self._set_result_buttons(folder_enabled=False, report_enabled=False)
                     self.status_var.set("실패했습니다. 오류 메시지와 수집 로그를 확인하세요.")
@@ -1748,17 +1962,78 @@ class WlcRoleAclCollectorGui(ctk.CTk):
         for button in self.start_buttons:
             button.configure(state="disabled" if running else "normal")
         self.diagnostic_button.configure(state="disabled" if running else "normal")
+        for button in self.cancel_buttons:
+            button.configure(state="normal" if running else "disabled")
         if running:
             self._set_stage("connecting")
-            self._set_result_summary(ResultReportSummary(note="수집 중입니다. 완료 후 요약 수치가 표시됩니다."))
+            self._set_result_summary(
+                ResultReportSummary(
+                    collection_status="running",
+                    collection_status_label="수집 중",
+                    collection_impact_text="장비 명령을 수집하고 있습니다.",
+                    recommended_action="완료 또는 실패 상태가 표시될 때까지 기다리세요.",
+                    note="수집 중입니다. 완료 후 요약 수치가 표시됩니다.",
+                )
+            )
             self._set_result_buttons(folder_enabled=False, report_enabled=False)
         else:
-            if self.stage_var.get() not in {STAGE_LABELS["completed"], STAGE_LABELS["failed"]}:
+            if self.stage_var.get() not in {
+                STAGE_LABELS["completed"],
+                STAGE_LABELS["failed"],
+                STAGE_LABELS["cancelled"],
+            }:
                 self._set_stage("ready")
 
-    def _show_report_complete_dialog(self, paths: dict[str, Path]) -> None:
+    def _request_cancel(self) -> None:
+        if not self.is_running or self.cancel_event.is_set():
+            return
+        self.cancel_event.set()
+        self.running_progress_title_var.set("취소 요청 처리 중")
+        self.status_var.set("취소 요청됨: 현재 명령이 끝나면 세션을 종료합니다.")
+        self._log("[WARNING] 취소 요청됨 | 현재 명령 종료 또는 타임아웃까지 기다립니다.")
+        for button in self.cancel_buttons:
+            button.configure(state="disabled")
+
+    def _on_close(self) -> None:
+        worker_running = bool(self.worker is not None and self.worker.is_alive())
+        if self.is_running and worker_running:
+            close_now = messagebox.askyesno(
+                "실행 중 작업 종료",
+                "현재 수집 작업을 취소하고 프로그램을 종료할까요?\n"
+                "장비 세션이 안전하게 닫힐 때까지 현재 창이 유지됩니다.",
+            )
+            if not close_now:
+                return
+            self.close_requested = True
+            self._request_cancel()
+            self._wait_for_worker_before_close()
+            return
+        self._finalize_close()
+
+    def _wait_for_worker_before_close(self) -> None:
+        if self.worker is not None and self.worker.is_alive():
+            self.status_var.set("종료 준비 중: 장비 세션과 파일 작업을 정리하고 있습니다.")
+            self.after(150, self._wait_for_worker_before_close)
+            return
+        self._finalize_close()
+
+    def _finalize_close(self) -> None:
+        if self._fit_after_id is not None:
+            try:
+                self.after_cancel(self._fit_after_id)
+            except tk.TclError:
+                pass
+            self._fit_after_id = None
+        self.destroy()
+
+    def _show_report_complete_dialog(self, paths: dict[str, object]) -> None:
+        summary = paths.get("summary")
+        partial = (
+            isinstance(summary, ResultReportSummary)
+            and summary.collection_status == COLLECTION_PARTIAL
+        )
         window = ctk.CTkToplevel(self)
-        window.title(REPORT_COMPLETE_TITLE)
+        window.title("보고서 부분 완료" if partial else REPORT_COMPLETE_TITLE)
         window.configure(fg_color=APP_BG)
         window.transient(self)
         window.resizable(False, False)
@@ -1774,9 +2049,9 @@ class WlcRoleAclCollectorGui(ctk.CTk):
 
         badge = ctk.CTkLabel(
             container,
-            text="완료",
-            fg_color=SUCCESS_SOFT_BG,
-            text_color=SUCCESS_COLOR,
+            text="부분 완료" if partial else "완료",
+            fg_color=WARNING_SOFT_BG if partial else SUCCESS_SOFT_BG,
+            text_color=WARNING_COLOR if partial else SUCCESS_COLOR,
             font=("Segoe UI Semibold", 10),
             height=30,
             corner_radius=6,
@@ -1785,17 +2060,23 @@ class WlcRoleAclCollectorGui(ctk.CTk):
 
         ctk.CTkLabel(
             container,
-            text=REPORT_COMPLETE_MESSAGE,
+            text="보고서는 생성되었지만 일부 수집 명령이 실패했습니다" if partial else REPORT_COMPLETE_MESSAGE,
             text_color=TEXT_COLOR,
             font=("Segoe UI Semibold", 17),
             anchor="w",
         ).pack(anchor="w", fill="x", padx=18)
         ctk.CTkLabel(
             container,
-            text="HTML 보고서를 먼저 확인하고, 필요하면 Excel 파일과 결과 폴더를 함께 검토하세요.",
+            text=(
+                f"실패 명령 {summary.failed_command_count}건 · 영향: {summary.collection_impact_text}\n"
+                f"영향 범위: Role {summary.affected_role_count}개 / SSID {summary.affected_ssid_count}개\n"
+                f"{summary.recommended_action}"
+                if partial and isinstance(summary, ResultReportSummary)
+                else "HTML 보고서를 먼저 확인하고, 필요하면 Excel 파일과 결과 폴더를 함께 검토하세요."
+            ),
             text_color=MUTED_COLOR,
             font=("Segoe UI", 10),
-            wraplength=420,
+            wraplength=450,
             justify="left",
             anchor="w",
         ).pack(anchor="w", fill="x", padx=18, pady=(6, 16))
@@ -1823,7 +2104,7 @@ class WlcRoleAclCollectorGui(ctk.CTk):
 
         window.update_idletasks()
         width = 500
-        height = 245
+        height = 300 if partial else 245
         x = self.winfo_x() + max(0, (self.winfo_width() - width) // 2)
         y = self.winfo_y() + max(0, (self.winfo_height() - height) // 2)
         window.geometry(f"{width}x{height}+{x}+{y}")
@@ -1850,7 +2131,26 @@ class WlcRoleAclCollectorGui(ctk.CTk):
         self.result_role_count_var.set(str(summary.role_count))
         self.result_matched_count_var.set(str(summary.matched_count))
         self.result_mismatched_count_var.set(str(summary.mismatched_count))
+        self.result_collection_status_var.set(summary.collection_status_label)
+        self.result_failed_command_count_var.set(str(summary.failed_command_count))
+        guidance = summary.collection_impact_text
+        if summary.failed_command_count:
+            guidance += (
+                f" · 영향 Role {summary.affected_role_count}개"
+                f" / SSID {summary.affected_ssid_count}개"
+            )
+        if summary.recommended_action:
+            guidance = f"{guidance} · {summary.recommended_action}"
+        self.result_collection_guidance_var.set(guidance)
         self.result_summary_note_var.set(summary.note)
+        status_color = {
+            COLLECTION_COMPLETED: SUCCESS_COLOR,
+            COLLECTION_PARTIAL: WARNING_COLOR,
+            COLLECTION_FAILED: DANGER_COLOR,
+            "running": ACCENT_DARK_COLOR,
+            "diagnostic": ACCENT_DARK_COLOR,
+        }.get(summary.collection_status, TEXT_COLOR)
+        self.result_collection_status_label.configure(text_color=status_color)
 
     def _log(self, text: str) -> None:
         self.log_text.configure(state="normal")
@@ -1976,6 +2276,14 @@ def format_collection_progress(event: str, payload: dict[str, object]) -> tuple[
     if event == "complete":
         count = payload.get("command_count", 0)
         return "수집 명령이 완료되었습니다.", [f"COMMANDS COMPLETE: {count} command result(s)"]
+    if event == "cancelled":
+        return "취소 요청을 확인했습니다.", ["[WARNING] CANCEL: collection stopped at a command boundary"]
+    if event == "duration_limit":
+        seconds = int(payload.get("max_duration_seconds", MAX_COLLECTION_DURATION_SECONDS))
+        return (
+            "전체 실행 시간 상한에 도달해 수집을 중단했습니다.",
+            [f"[WARNING] DURATION LIMIT: stopped after {seconds} seconds"],
+        )
     return "", []
 
 
@@ -2058,7 +2366,18 @@ def _find_role_network_template() -> Path | None:
 def _result_report_summary_from_parsed(
     parsed_controllers: list[ParsedController],
     role_networks: list[RoleNetworkDefinition] | None,
+    collection_results: list[CollectionResult] | None = None,
 ) -> ResultReportSummary:
+    health = (
+        assess_collection_results(collection_results)
+        if collection_results is not None
+        else CollectionHealth(status=COLLECTION_COMPLETED)
+    )
+    impact_scope = (
+        infer_collection_impact_scope_for_parsed(collection_results, parsed_controllers)
+        if collection_results is not None
+        else None
+    )
     ssids: set[tuple[str, str]] = set()
     roles: set[tuple[str, str]] = set()
     collected_role_names: set[str] = set()
@@ -2086,6 +2405,13 @@ def _result_report_summary_from_parsed(
         return ResultReportSummary(
             ssid_count=len(ssids),
             role_count=len(roles),
+            collection_status=health.status,
+            collection_status_label=health.label_ko,
+            failed_command_count=health.failed_command_count,
+            affected_role_count=impact_scope.role_count if impact_scope else 0,
+            affected_ssid_count=impact_scope.ssid_count if impact_scope else 0,
+            collection_impact_text=health.impact_text_ko,
+            recommended_action=health.recommended_action_ko,
             note="사내 Role 대역표를 선택하면 일치/불일치 항목 수가 함께 표시됩니다.",
         )
 
@@ -2111,6 +2437,13 @@ def _result_report_summary_from_parsed(
         role_count=len(roles),
         matched_count=matched_count,
         mismatched_count=mismatched_count,
+        collection_status=health.status,
+        collection_status_label=health.label_ko,
+        failed_command_count=health.failed_command_count,
+        affected_role_count=impact_scope.role_count if impact_scope else 0,
+        affected_ssid_count=impact_scope.ssid_count if impact_scope else 0,
+        collection_impact_text=health.impact_text_ko,
+        recommended_action=health.recommended_action_ko,
         note="일치/불일치는 사내 Role 대역표와 WLC 수집 대역을 Role 단위로 비교한 값입니다.",
     )
 

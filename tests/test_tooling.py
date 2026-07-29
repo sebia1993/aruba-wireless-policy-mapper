@@ -1,4 +1,5 @@
 import hashlib
+import runpy
 import subprocess
 import sys
 import zipfile
@@ -167,6 +168,18 @@ def test_verify_release_package_checks_zip_contents_and_checksum(tmp_path):
         check=True,
         cwd=repo_root,
     )
+
+
+def test_verify_release_package_auto_selects_only_gui_zip(tmp_path):
+    script = Path(__file__).parents[1] / "tools" / "verify_release_package.py"
+    gui_zip = tmp_path / "WlcRoleAclCollectorGUI_v0.1.0.zip"
+    combined_zip = tmp_path / "WlcRoleAclCollectorWindows_v0.1.0.zip"
+    gui_zip.write_bytes(b"gui")
+    combined_zip.write_bytes(b"newer combined")
+
+    namespace = runpy.run_path(str(script))
+
+    assert namespace["_find_latest_zip"](tmp_path) == gui_zip
 
 
 def test_verify_streamlit_portable_package_checks_zip_contents_and_checksum(tmp_path):

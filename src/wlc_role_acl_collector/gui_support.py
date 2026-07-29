@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .config import default_device_type_for_protocol, default_port_for_protocol
 from .models import Controller, ControllerCredentials, ControllerTarget
+from .validation import validate_port, validate_wlc_address
 
 
 @dataclass(frozen=True)
@@ -19,9 +20,7 @@ class GuiConnectionInput:
 
 
 def build_target_from_gui_input(values: GuiConnectionInput) -> ControllerTarget:
-    host = values.host.strip()
-    if not host:
-        raise ValueError("WLC IP를 입력하세요.")
+    host = validate_wlc_address(values.host)
 
     protocol = values.protocol.strip().lower() or "ssh"
     if protocol not in {"ssh", "telnet"}:
@@ -29,12 +28,7 @@ def build_target_from_gui_input(values: GuiConnectionInput) -> ControllerTarget:
 
     port_text = values.port.strip()
     if port_text:
-        try:
-            port = int(port_text)
-        except ValueError as exc:
-            raise ValueError("Port는 숫자로 입력하세요.") from exc
-        if not 1 <= port <= 65535:
-            raise ValueError("Port는 1에서 65535 사이여야 합니다.")
+        port = validate_port(port_text)
     else:
         port = default_port_for_protocol(protocol)
 

@@ -116,9 +116,11 @@
     </ol>
     <h2>2. 전체 데이터 흐름</h2>
     <pre><code>GUI/CLI 입력
+  -&gt; validation.py 입력 검증
   -&gt; WLC 접속 정보 생성
   -&gt; collector.py
   -&gt; raw command output
+  -&gt; collection_health.py 완료/부분 완료/실패 판정
   -&gt; aos8_parser.py
   -&gt; ParsedController dataclass
   -&gt; report.py
@@ -131,6 +133,10 @@
       <li>Windows GUI로 WLC IP, 계정, 비밀번호, 출력 폴더 입력</li>
       <li>SSH 기본 포트 22, Telnet 기본 포트 23 지원</li>
       <li>WLC 명령어 자동 수집</li>
+      <li>명령별 5~600초 Timeout 검증과 전체 수집 60분 상한</li>
+      <li>GUI cooperative cancel과 창 종료 시 worker/session 정리 대기</li>
+      <li>정상 완료, 부분 완료, 수집 실패 상태의 공통 판정</li>
+      <li>실패 명령 기준 영향 Role/SSID 추적</li>
       <li>Role 목록 자동 탐색 후 Role별 <code>show rights &lt;role&gt;</code> 실행</li>
       <li>ACL 안의 <code>alias &lt;name&gt;</code> 탐색 후 <code>show netdestination &lt;name&gt;</code> 실행</li>
       <li>SSID, AAA Profile, 기본 Role 관계 파악</li>
@@ -158,6 +164,8 @@
     cli.py              CLI 명령어 진입점
     web_logic.py        Streamlit 수집 흐름, 동일 WLC 동시 실행 제한
     atomic_io.py        임시 파일과 os.replace를 이용한 원자 저장
+    validation.py       WLC 주소, Port, Timeout 공통 검증과 시간 상한
+    collection_health.py 수집 완전성, 영향 영역, 영향 Role/SSID 판정
     collector.py        WLC 접속 및 show 명령어 실행
     aos8_parser.py      Aruba AOS8 설정/명령 출력 파싱
     acl_evaluator.py    Source/Destination/Service 기준 ACL 매칭 판단
@@ -190,6 +198,8 @@
       <li>수집 시작 버튼 처리</li>
       <li>안전 진단 버튼 처리</li>
       <li>백그라운드 스레드에서 수집 실행</li>
+      <li><code>threading.Event</code> 기반 실행 취소 요청</li>
+      <li>창 종료 시 worker가 끝날 때까지 기다린 뒤 <code>destroy()</code></li>
       <li>백그라운드 스레드에서 원본 raw 저장 없는 진단 실행</li>
       <li>완료 후 HTML/Excel 열기 버튼 활성화</li>
       <li>진단 완료 후 진단 HTML과 결과 폴더 열기 버튼 활성화</li>
@@ -208,10 +218,30 @@
       <li>Windows 다중 모니터와 DPI 배율 차이를 고려해 창 위치/크기를 작업영역 안으로 보정합니다.</li>
       <li>GUI 색상, 단계 라벨, 주요 문구는 <code>gui_app.py</code> 상단 상수에서 관리합니다.</li>
       <li>worker 전체를 예외 경계 안에 두어 결과 폴더 생성이 실패해도 반드시 <code>error</code> 이벤트를 UI queue에 보냅니다.</li>
+      <li>worker는 non-daemon으로 실행합니다. <code>_on_close()</code>는 실행 중 종료 요청을 확인하고 <code>_wait_for_worker_before_close()</code>로 세션 정리가 끝날 때까지 기다립니다.</li>
+      <li><code>_request_cancel()</code>은 스레드를 강제 종료하지 않고 <code>cancel_event</code>만 설정합니다. 현재 Netmiko 명령은 응답 또는 read timeout 후 중단됩니다.</li>
     </ul>
     <h3><code>cli.py</code>와 <code>web_logic.py</code></h3>
     <p>CLI collect 종료 코드는 <code>0=성공</code>, <code>1=필수 수집 실패</code>, <code>2=입력 오류</code>, <code>3=선택 명령 일부 실패</code>입니다. 자동화에서 보고서 파일 존재 여부만 보지 말고 종료 코드를 함께 확인해야 합니다.</p>
     <p>Streamlit은 <code>_ACTIVE_TARGETS</code>와 <code>_target_collection_slot()</code>으로 같은 WLC에 대한 중복 수집을 즉시 거부합니다. 기본 launcher 주소는 <code>127.0.0.1</code>이며, 원격 HTTP 노출은 기본 동작이 아닙니다. 브라우저 화면에는 Python traceback을 직접 출력하지 않습니다.</p>
+    <p>CLI, GUI, Web은 모두 <code>collection_health.assess_collection_results()</code> 결과를 사용합니다. 같은 <code>CollectionResult</code>를 표면마다 다르게 판정하지 않도록 상태 문자열을 별도로 재구현하지 않습니다.</p>
+    <h3><code>validation.py</code>와 <code>collection_health.py</code></h3>
+    <p><code>validation.py</code>는 다음 공통 계약을 소유합니다.</p>
+    <ul>
+      <li>WLC 주소는 IP 또는 호환성을 위한 정상 DNS Host 형식</li>
+      <li>Port는 1~65535</li>
+      <li>명령 Timeout은 5~600초</li>
+      <li>전체 live 수집 상한은 <code>MAX_COLLECTION_DURATION_SECONDS=3600</code></li>
+    </ul>
+    <p><code>collection_health.py</code>는 다음을 계산합니다.</p>
+    <ul>
+      <li><code>completed</code>: 필수/선택 명령 모두 성공</li>
+      <li><code>partial</code>: 필수 설정은 있지만 선택 명령 실패</li>
+      <li><code>failed</code>: <code>configuration_effective</code> 출력 없음</li>
+      <li>실패 명령별 영향 영역</li>
+      <li><code>rights::&lt;Role&gt;</code> 및 <code>netdestination::&lt;Alias&gt;</code>를 ACL/SSID 행과 연결한 영향 범위</li>
+    </ul>
+    <p>영향 범위는 보고서에 이미 수집된 데이터로만 계산합니다. <code>identification_incomplete=True</code>이면 수집 중단 때문에 알려지지 않은 추가 대상이 있을 수 있다는 뜻입니다.</p>
     <h3><code>collector.py</code></h3>
     <p>실제 WLC에 접속하는 계층입니다.</p>
     <p>기본 수집 명령어:</p>
@@ -230,6 +260,10 @@ show user-table</code></pre>
     <ul>
       <li><code>show configuration effective</code>가 실패하면 보고서 생성에 필요한 핵심 데이터가 없으므로 실패 처리합니다.</li>
       <li>일부 Role이나 Alias 명령이 실패해도 가능한 범위에서 보고서를 생성합니다.</li>
+      <li><code>cancel_event</code>는 각 명령 전후에 확인하고, 취소 시 <code>cancelled</code> CommandOutput을 추가한 뒤 <code>finally</code>에서 <code>disconnect()</code>합니다.</li>
+      <li>각 명령의 <code>read_timeout</code>은 전체 마감까지 남은 시간보다 길 수 없습니다.</li>
+      <li>전체 60분 상한에 도달하면 <code>duration_limit</code> CommandOutput을 추가하고 다음 명령을 실행하지 않습니다.</li>
+      <li>스레드 강제 종료나 비동기 예외 주입은 사용하지 않습니다.</li>
     </ul>
     <h3><code>aos8_parser.py</code></h3>
     <p>WLC 텍스트 출력을 구조화된 데이터로 바꾸는 파일입니다.</p>
@@ -377,6 +411,9 @@ access_history_enabled=False</code></pre>
       <thead><tr><th>요구사항</th><th>주로 수정할 파일</th></tr></thead>
       <tbody>
       <tr><td>GUI 입력 필드 추가/삭제</td><td><code>gui_app.py</code>, <code>gui_support.py</code></td></tr>
+      <tr><td>주소/Port/Timeout 범위 변경</td><td><code>validation.py</code>, <code>gui_support.py</code>, <code>web_logic.py</code>, <code>config.py</code></td></tr>
+      <tr><td>수집 상태/실패 영향 판정 변경</td><td><code>collection_health.py</code>, <code>gui_app.py</code>, <code>web_logic.py</code>, <code>report.py</code></td></tr>
+      <tr><td>취소/창 종료 동작 변경</td><td><code>collector.py</code>, <code>diagnostic_mode.py</code>, <code>gui_app.py</code></td></tr>
       <tr><td>WLC 수집 명령 추가</td><td><code>collector.py</code></td></tr>
       <tr><td>WLC 출력 파싱 방식 변경</td><td><code>aos8_parser.py</code>, <code>models.py</code></td></tr>
       <tr><td>Excel 시트/컬럼 변경</td><td><code>report.py</code>, <code>tests/test_report.py</code></td></tr>
@@ -421,7 +458,8 @@ access_history_enabled=False</code></pre>
     <p>부분 테스트:</p>
     <pre><code>python -m pytest tests\test_report.py
 python -m pytest tests\test_acl_evaluator.py
-python -m pytest tests\test_role_networks.py</code></pre>
+python -m pytest tests\test_role_networks.py
+python -m pytest tests\test_collection_health.py tests\test_validation.py tests\test_collector.py</code></pre>
     <p>기능을 바꾸면 최소한 관련 테스트는 실행해야 합니다. 보고서나 Access Check를 바꿨다면 가능하면 전체 검증을 실행합니다.</p>
     <h2>9. 빌드와 배포</h2>
     <p>Windows GUI EXE와 ZIP 생성:</p>
@@ -481,6 +519,10 @@ git commit -m &quot;Add developer guide&quot;</code></pre>
     <p>GUI에서는 사내 Role 대역표를 선택하면 내부용 보고서에 실제 대역을 표시합니다. CLI는 자동화/외부 검증 흐름을 고려해 기본적으로 저장하지 않으며, 내부 보관용으로 반드시 넣어야 한다면 <code>--export-local-role-networks</code> 옵션을 명시적으로 사용해야 합니다.</p>
     <h3><code>show user-table</code>은 참고용입니다.</h3>
     <p>현재 접속한 사용자 수와 관측 VLAN/Network를 알 수 있지만, Role의 공식 네트워크 대역이라고 단정하면 안 됩니다.</p>
+    <h3><code>report_status.json</code>과 수집 상태는 다른 값입니다.</h3>
+    <p><code>report_status.json</code>의 <code>writing/completed/failed</code>는 파일 저장 트랜잭션 상태입니다. <code>collection_health.py</code>의 <code>completed/partial/failed</code>는 장비 명령 수집 완전성입니다. 파일 저장은 완료됐어도 장비 선택 명령 실패 때문에 수집 상태는 <code>partial</code>일 수 있습니다.</p>
+    <h3>취소는 즉시 스레드 종료가 아닙니다.</h3>
+    <p>Netmiko 호출 중 Python 스레드를 강제로 죽이면 세션과 파일 정리를 보장하기 어렵습니다. 현재 구현은 <code>threading.Event</code>를 사용하고, 진행 중 명령의 응답 또는 Timeout 이후 다음 명령 경계에서 멈춥니다.</p>
     <h2>13. 새 기능을 넣을 때 문서도 같이 바꿀 기준</h2>
     <p>아래 중 하나라도 해당하면 문서를 같이 수정합니다.</p>
     <ul>
@@ -498,6 +540,8 @@ git commit -m &quot;Add developer guide&quot;</code></pre>
 운영자가 보기 쉬운 HTML/Excel 보고서를 만드는 도구입니다.
 
 collector.py가 장비에서 명령어 결과를 가져오고,
+validation.py가 입력 범위를 통일하고,
+collection_health.py가 완료/부분 완료/실패와 영향 Role/SSID를 계산하고,
 aos8_parser.py가 그 텍스트를 구조화하고,
 report.py가 HTML/Excel을 만들고,
 acl_evaluator.py가 HTML Access Check 판정 데이터를 준비합니다.

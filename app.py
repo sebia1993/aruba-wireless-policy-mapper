@@ -129,7 +129,10 @@ def _run_collection(request: WebCollectionRequest) -> None:
         progress_bar.progress(100)
         st.session_state["last_result"] = result
         if result.success:
-            status_box.success("보고서 생성이 완료되었습니다.")
+            if result.summary.get("collection_status") == "partial":
+                status_box.warning("보고서는 생성되었지만 일부 수집 명령이 실패했습니다.")
+            else:
+                status_box.success("보고서 생성이 완료되었습니다.")
         else:
             status_box.error("수집에 실패했습니다. 오류 내용을 확인하세요.")
     except WebCollectionBusyError as exc:
@@ -149,6 +152,13 @@ def _render_result(result: WebCollectionResult) -> None:
     st.subheader("결과 요약")
     if result.success:
         summary = result.summary
+        if summary.get("collection_status") == "partial":
+            st.warning(
+                f"{summary.get('collection_status_label', '부분 완료')}: "
+                f"{summary.get('recommended_action', '실패 명령을 확인하세요.')}"
+            )
+        else:
+            st.success(str(summary.get("collection_status_label", "정상 완료")))
         metric_cols = st.columns(5)
         metric_cols[0].metric("SSID", int(summary.get("ssid_count", 0)))
         metric_cols[1].metric("Role", int(summary.get("role_count", 0)))
@@ -159,6 +169,16 @@ def _render_result(result: WebCollectionResult) -> None:
             st.write(" / ".join(result.messages))
         if summary.get("failed_commands"):
             st.warning(f"실패 명령: {summary['failed_commands']}")
+            st.info(f"영향 영역: {summary.get('collection_impacts', '일부 수집 항목')}")
+            st.info(
+                "영향 범위: "
+                f"Role {int(summary.get('affected_role_count', 0))}개"
+                f" ({summary.get('affected_roles') or '자동 식별 없음'}), "
+                f"SSID {int(summary.get('affected_ssid_count', 0))}개"
+                f" ({summary.get('affected_ssids') or '자동 식별 없음'})"
+            )
+            if summary.get("impact_scope_incomplete"):
+                st.warning("수집 누락으로 자동 식별되지 않은 추가 영향 대상이 있을 수 있습니다.")
 
         st.subheader("SSID / Role 미리보기")
         if result.preview_rows:
@@ -186,6 +206,7 @@ def _render_result(result: WebCollectionResult) -> None:
     else:
         st.error(result.error or "수집에 실패했습니다.")
         if result.summary:
+            st.warning(str(result.summary.get("recommended_action", "접속 정보와 수집 로그를 확인하세요.")))
             st.json(result.summary)
         if result.messages:
             st.write(" / ".join(result.messages))
