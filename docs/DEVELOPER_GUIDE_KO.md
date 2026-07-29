@@ -496,6 +496,17 @@ python .\tools\generate_doc_html.py
 
 빌드 스크립트는 PyInstaller가 만든 EXE를 ZIP에 넣기 전에 파일이 읽기 가능한 상태인지 확인하고, 압축 과정에서 일시적인 파일 잠김이 발생하면 재시도합니다. Windows 보안 검사나 백신이 새 EXE를 잠시 잡는 경우를 줄이기 위한 처리입니다.
 
+Streamlit portable과 통합 ZIP 생성:
+
+```powershell
+.\build_windows_streamlit_portable.ps1
+.\build_windows_combined_release.ps1
+```
+
+`packaging\streamlit_portable\*.cmd`는 Windows `cmd.exe`가 안정적으로 읽도록 UTF-8 BOM 없이 CRLF 줄바꿈만 사용해야 합니다. `.gitattributes`의 `*.cmd text eol=crlf` 규칙을 제거하지 마십시오. `start_webapp.cmd`는 실행 초기에 code page 65001을 적용합니다. LF가 섞이면 한글 `rem` 주석 일부를 명령으로 오해하면서도 마지막 smoke 명령이 성공해 종료 코드 0이 될 수 있으므로, `tests/test_tooling.py`가 두 배치 파일의 BOM과 줄바꿈을 검사합니다.
+
+portable 빌드와 `tools\verify_streamlit_portable_package.py --smoke`는 stdout이 `STREAMLIT_PORTABLE_OK` 한 줄인지, stderr가 비어 있는지까지 확인합니다. 종료 코드 0만으로 성공 처리하지 않습니다.
+
 ## 10. 개발 작업 순서
 
 요구사항이 들어오면 아래 순서로 처리하는 것을 권장합니다.

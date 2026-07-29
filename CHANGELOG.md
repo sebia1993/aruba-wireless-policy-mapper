@@ -57,6 +57,7 @@
 - 특수문자가 다른 Role 이름이 같은 HTML ID로 충돌하지 않도록 안정 해시 접미사를 적용합니다.
 - 60개 Role·1,200개 ACL 자동 회귀 테스트와 100개 Role·4,000개 ACL 실제 Chromium 검증을 수행했습니다.
 - 전체 검증 스크립트가 로컬 `.venv`를 자동 선택하고 사용한 Python 경로를 표시합니다.
+- Streamlit 배치 런처를 UTF-8 BOM 없는 CRLF로 고정하고, smoke가 예상 밖 stdout/stderr를 남기면 종료 코드 0이어도 실패 처리합니다.
 
 현재 제외된 항목:
 

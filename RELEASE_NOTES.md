@@ -27,6 +27,7 @@ GitHub에 push하거나 Release를 준비하기 전에 아래 문서를 함께 �
 - 좁은 화면 ACL 표 가로 스크롤과 특수문자 Role HTML ID 충돌 방지
 - 대량 Role/ACL 보고서 생성·렌더링 회귀 검증
 - 전체 검증 시 로컬 `.venv` 자동 선택과 Python 경로 표시
+- Streamlit 배치 파일 CRLF 고정과 예상 밖 smoke 출력 차단
 
 ## GitHub Release 본문에 포함되는 정보
 

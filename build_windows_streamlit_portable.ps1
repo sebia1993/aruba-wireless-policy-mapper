@@ -170,9 +170,23 @@ if ($precompileTargets.Count -gt 0) {
 Write-Host "Running portable web app smoke test..."
 Push-Location $releaseRoot
 try {
-    & cmd.exe /c ".\start_webapp.cmd --smoke"
-    if ($LASTEXITCODE -ne 0) {
-        throw "Portable Streamlit smoke test failed with exit code $LASTEXITCODE"
+    $smokeOutput = @(& cmd.exe /d /c ".\start_webapp.cmd --smoke" 2>&1)
+    $smokeExitCode = $LASTEXITCODE
+    $smokeLines = @(
+        $smokeOutput |
+            ForEach-Object { "$_".Trim() } |
+            Where-Object { $_ }
+    )
+    $smokeLines | ForEach-Object { Write-Host $_ }
+    if ($smokeExitCode -ne 0) {
+        throw "Portable Streamlit smoke test failed with exit code $smokeExitCode"
+    }
+    if ($smokeLines -notcontains "STREAMLIT_PORTABLE_OK") {
+        throw "Portable Streamlit smoke test did not return STREAMLIT_PORTABLE_OK."
+    }
+    $unexpectedSmokeLines = @($smokeLines | Where-Object { $_ -ne "STREAMLIT_PORTABLE_OK" })
+    if ($unexpectedSmokeLines.Count -gt 0) {
+        throw "Portable Streamlit smoke test returned unexpected output: $($unexpectedSmokeLines -join ' | ')"
     }
 }
 finally {

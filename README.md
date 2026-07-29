@@ -254,7 +254,7 @@ python .\tools\verify_combined_release_package.py --dist .\dist --smoke
 ```
 
 `--smoke-cli`는 Windows에서 ZIP을 풀고 `WlcRoleAclCollectorCLI.exe --help`를 실행합니다. Windows가 아닌 환경에서는 CLI smoke 실행을 건너뛰고 ZIP 구조 검증만 수행합니다.
-`--smoke`는 Windows에서 Streamlit portable ZIP을 풀고 `start_webapp.cmd --smoke`로 내장 Python, Streamlit, 앱 모듈 import를 확인합니다.
+`--smoke`는 Windows에서 Streamlit portable ZIP을 풀고 `start_webapp.cmd --smoke`로 내장 Python, Streamlit, 앱 모듈 import를 확인합니다. 성공 출력 한 줄 외의 stdout이나 stderr가 있으면 배치 파일이 종료 코드 0을 반환하더라도 실패 처리합니다.
 
 ## GitHub Release 자동 배포
 

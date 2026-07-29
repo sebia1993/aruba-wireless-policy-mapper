@@ -150,8 +150,17 @@ def _smoke_webapp(zip_path: Path, *, require: bool) -> None:
             raise SystemExit(
                 f"Streamlit portable smoke command failed with exit code {completed.returncode}:\n{output.strip()}"
             )
-        if "STREAMLIT_PORTABLE_OK" not in output:
-            raise SystemExit("Streamlit portable smoke output did not include STREAMLIT_PORTABLE_OK.")
+        stdout_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+        if stdout_lines != ["STREAMLIT_PORTABLE_OK"]:
+            raise SystemExit(
+                "Streamlit portable smoke output was not clean:\n"
+                + (completed.stdout.strip() or "<no stdout>")
+            )
+        if completed.stderr.strip():
+            raise SystemExit(
+                "Streamlit portable smoke wrote unexpected stderr output:\n"
+                + completed.stderr.strip()
+            )
 
 
 if __name__ == "__main__":

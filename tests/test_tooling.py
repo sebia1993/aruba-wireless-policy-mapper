@@ -59,6 +59,7 @@ def test_release_zip_includes_guides():
 
 def test_streamlit_portable_build_contract():
     repo_root = Path(__file__).parents[1]
+    attributes = (repo_root / ".gitattributes").read_text(encoding="utf-8")
     build_script = (repo_root / "build_windows_streamlit_portable.ps1").read_text(encoding="utf-8")
     verifier = (repo_root / "tools" / "verify_streamlit_portable_package.py").read_text(encoding="utf-8")
     launcher = (repo_root / "packaging" / "streamlit_portable" / "start_webapp.cmd").read_text(encoding="utf-8")
@@ -68,10 +69,12 @@ def test_streamlit_portable_build_contract():
     )
 
     assert "python-$EmbeddedPythonVersion-embed-amd64.zip" in build_script
+    assert "*.cmd text eol=crlf" in attributes
     assert "https://www.python.org/ftp/python/$EmbeddedPythonVersion" in build_script
     assert '"--target", $sitePackages, ".[web]"' in build_script
     assert "WlcRoleAclCollectorWeb_v${version}.zip" in build_script
     assert "start_webapp.cmd --smoke" in build_script
+    assert "unexpectedSmokeLines" in build_script
     assert "python.exe" in build_script
     assert "compileall" in build_script
     assert "Portable module precompile failed." in build_script
@@ -86,6 +89,7 @@ def test_streamlit_portable_build_contract():
     assert "python/Lib/site-packages/streamlit/" in verifier
     assert "python/Lib/site-packages/wlc_role_acl_collector/" in verifier
     assert "STREAMLIT_PORTABLE_OK" in verifier
+    assert "completed.stderr.strip()" in verifier
     assert "Get-FileHash" not in verifier
 
     assert "--server.address" in launcher
@@ -97,6 +101,7 @@ def test_streamlit_portable_build_contract():
     assert "--client.toolbarMode minimal" in launcher
     assert "--browser.gatherUsageStats false" in launcher
     assert "--smoke" in launcher
+    assert "chcp 65001 >nul" in launcher
     assert "STREAMLIT_PORTABLE_OK" in launcher
     assert "python\\python.exe" in launcher
     assert "WLC_WEB_ADDRESS=127.0.0.1" in settings
@@ -104,6 +109,14 @@ def test_streamlit_portable_build_contract():
     assert "Python을 별도로 설치하지 않고" in guide
     assert "첫 실행" in guide
     assert "start_webapp.cmd" in guide
+
+    for batch_file in (
+        repo_root / "packaging" / "streamlit_portable" / "start_webapp.cmd",
+        repo_root / "packaging" / "streamlit_portable" / "webapp_settings.cmd",
+    ):
+        data = batch_file.read_bytes()
+        assert not data.startswith(b"\xef\xbb\xbf")
+        assert all(index > 0 and data[index - 1] == 13 for index, byte in enumerate(data) if byte == 10)
 
 
 def test_combined_release_build_contract():
