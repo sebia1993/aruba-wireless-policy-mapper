@@ -190,7 +190,7 @@ Timeout seconds는 명령 하나당 5~600초 범위이며 기본값은 60초입�
 
 `분석 시작`을 누르면 WLC 접속부터 명령 수집, 보고서 생성까지 순서대로 진행합니다. `실행 취소`는 현재 명령의 응답 또는 Timeout 후 다음 명령을 실행하지 않고 세션을 닫습니다. 프로그램 창을 닫을 때도 worker와 장비 세션 정리가 끝난 뒤 종료합니다.
 
-완료 후에는 `정상 완료`, `부분 완료`, `수집 실패` 상태를 먼저 확인합니다. 부분 완료이면 실패 명령, 영향 영역, 영향 Role/SSID를 확인하고 해당 정보는 재수집 전까지 확정된 값으로 사용하지 않습니다. HTML 첫 화면에는 수집 신뢰도와 실패 영향 범위가 함께 표시됩니다.
+완료 후에는 `정상 완료`, `부분 완료`, `수집 실패` 상태를 먼저 확인합니다. 부분 완료이면 실패 명령, 영향 영역, 영향 Role/SSID를 확인하고 해당 정보는 재수집 전까지 확정된 값으로 사용하지 않습니다. HTML 첫 화면에는 수집 신뢰도, 실패 영향 범위, 권장 조치가 함께 표시됩니다. 동적 Role 가능성은 장애 건수와 분리된 참고 정보로 표시합니다.
 
 ACL에 `alias <이름>`이 있으면 자동으로 `show netdestination <이름>`을 실행합니다. 보고서의 `Role_ACL_Detail`에는 source/destination 상세가 붙고, `Alias_Detail` 시트에는 alias 내부 host/network/range/name 목록이 정리됩니다.
 
@@ -370,6 +370,8 @@ git log --oneline -n 5
 ```powershell
 .\tools\validate.ps1
 ```
+
+스크립트는 저장소의 `.venv\Scripts\python.exe`가 있으면 자동으로 우선 사용하고, 없으면 PATH의 Python을 사용합니다. 다른 Python을 명시하려면 `.\tools\validate.ps1 -PythonExe C:\path\to\python.exe` 형식으로 실행합니다.
 
 Streamlit 전환 관련 로컬 검증은 실제 WLC 접속 없이 fixture/offline 테스트로 확인합니다.
 

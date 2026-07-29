@@ -11,8 +11,10 @@ def test_validate_script_runs_local_checks():
 
     text = script.read_text(encoding="utf-8")
 
-    assert "python -m pytest -q" in text
-    assert "python -m compileall -q app.py src tests tools" in text
+    assert '[string]$PythonExe = ""' in text
+    assert '.venv\\Scripts\\python.exe' in text
+    assert "& $resolvedPythonExe -m pytest -q" in text
+    assert "& $resolvedPythonExe -m compileall -q app.py src tests tools" in text
     assert "node --check" in text
     assert "_role_image_export_script" in text
     assert "Path(sys.argv[1]).write_text" in text
@@ -325,6 +327,9 @@ def test_generate_doc_html_outputs_browser_files(tmp_path):
     assert "<html lang=\"ko\">" in user_html
     assert "WLC Role ACL Collector 사용자 설명서" in user_html
     assert "<table>" in user_html
+    assert 'class="table-scroll" role="region" tabindex="0"' in user_html
+    assert "overflow-wrap: anywhere;" in user_html
+    assert "@media (max-width: 600px)" in user_html
     assert "WLC Role ACL Collector 개발자 설명서" in developer_html
     assert "WLC Role ACL Collector 오류 코드" in error_codes_html
     assert "WLC Role ACL Collector 진단 모드" in diagnostic_html

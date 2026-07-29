@@ -84,6 +84,7 @@ def render_document(markdown: str, title: str) -> str:
       box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
       margin: 0 auto;
       max-width: 1120px;
+      min-width: 0;
       padding: 34px;
     }}
     h1, h2, h3 {{ line-height: 1.3; }}
@@ -109,12 +110,15 @@ def render_document(markdown: str, title: str) -> str:
       border: 1px solid #d8e2ed;
       border-radius: 5px;
       font-family: Consolas, "Cascadia Mono", monospace;
+      overflow-wrap: anywhere;
       padding: 1px 5px;
+      word-break: break-word;
     }}
     pre {{
       background: var(--code-bg);
       border-radius: 8px;
       color: var(--code-text);
+      max-width: 100%;
       overflow-x: auto;
       padding: 14px 16px;
     }}
@@ -126,8 +130,18 @@ def render_document(markdown: str, title: str) -> str:
     }}
     table {{
       border-collapse: collapse;
-      margin: 14px 0 22px;
+      min-width: 620px;
       width: 100%;
+    }}
+    .table-scroll {{
+      margin: 14px 0 22px;
+      max-width: 100%;
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+    }}
+    .table-scroll:focus-visible {{
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }}
     th, td {{
       border: 1px solid var(--line);
@@ -146,6 +160,12 @@ def render_document(markdown: str, title: str) -> str:
       color: var(--muted);
       font-size: 12px;
       margin-top: 34px;
+    }}
+    @media (max-width: 600px) {{
+      body {{ padding: 12px; }}
+      main {{ padding: 20px; }}
+      h1 {{ font-size: 26px; }}
+      h2 {{ font-size: 21px; }}
     }}
     @media print {{
       body {{ background: #ffffff; padding: 0; }}
@@ -272,12 +292,14 @@ def render_table(lines: list[str]) -> str:
         body_rows.append(f"      <tr>{cells}</tr>")
     return "\n".join(
         [
-            "    <table>",
+            '    <div class="table-scroll" role="region" tabindex="0" aria-label="문서 표">',
+            "      <table>",
             f"      <thead><tr>{thead}</tr></thead>",
             "      <tbody>",
             *body_rows,
             "      </tbody>",
-            "    </table>",
+            "      </table>",
+            "    </div>",
         ]
     )
 

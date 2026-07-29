@@ -6,6 +6,7 @@ as not embedding local Role network mappings unless explicit export is enabled.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from datetime import datetime
@@ -725,12 +726,15 @@ def _write_html(
           {_role_description_html(str(item['role']))}
           {_local_role_network_html(local_network_lookup.get(str(item['role']), []), local_role_networks_enabled)}
           {_other_acl_toggle_html(str(item['panel_id']), int(item['other_acl_count']))}
-          <table>
-            <thead><tr><th>ACL</th><th>#</th><th>Action</th><th>Source</th><th>Destination</th><th>Service</th><th class="raw-column">Raw</th><th>Comment</th></tr></thead>
-            <tbody>
-              {_acl_rows_html(str(item['role']), item['rows'], alias_lookup)}
-            </tbody>
-          </table>
+          <div class="acl-table-scroll" role="region" tabindex="0"
+            aria-label="{escape(str(item['role']))} ACL table">
+            <table>
+              <thead><tr><th>ACL</th><th>#</th><th>Action</th><th>Source</th><th>Destination</th><th>Service</th><th class="raw-column">Raw</th><th>Comment</th></tr></thead>
+              <tbody>
+                {_acl_rows_html(str(item['role']), item['rows'], alias_lookup)}
+              </tbody>
+            </table>
+          </div>
         </section>
         """
         for index, item in enumerate(role_items, start=1)
@@ -869,6 +873,16 @@ def _write_html(
       font-size: 12px;
       font-weight: 800;
       padding: 6px 10px;
+    }}
+    .attention-badge[data-status="normal"] {{
+      background: var(--success-soft);
+      border-color: #abefc6;
+      color: var(--success);
+    }}
+    .attention-badge[data-status="failed"] {{
+      background: var(--danger-soft);
+      border-color: #fecdca;
+      color: var(--danger);
     }}
     .summary-grid {{
       display: grid;
@@ -1159,6 +1173,15 @@ def _write_html(
     }}
     .other-acl-rule[hidden] {{ display: none; }}
     table {{ width: 100%; border-collapse: separate; border-spacing: 0; background: var(--panel); }}
+    .acl-table-scroll {{
+      max-width: 100%;
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+    }}
+    .acl-table-scroll:focus-visible {{
+      outline: 2px solid var(--accent);
+      outline-offset: -2px;
+    }}
     th, td {{ border-bottom: 1px solid var(--line); padding: 9px 10px; text-align: left; vertical-align: top; font-size: 13px; }}
     th {{
       background: #213b59;
@@ -1347,6 +1370,9 @@ def _write_html(
       th, td {{
         padding: 8px;
       }}
+      .acl-table-scroll table {{
+        min-width: 608px;
+      }}
     }}
     @media print {{
       body {{ background: #ffffff; }}
@@ -1359,6 +1385,7 @@ def _write_html(
         box-shadow: none;
       }}
       .acl-section {{ break-inside: auto; }}
+      .acl-table-scroll {{ overflow: visible; }}
       th {{ position: static; }}
       .alias-link {{
         background: transparent;
@@ -2208,9 +2235,8 @@ def _executive_summary_html(
         if str(row.get("role", "")).strip()
         and str(row.get("status", "")).strip() in local_attention_statuses
     }
-    attention_count = (
+    action_attention_count = (
         unresolved_count
-        + len(dynamic_roles)
         + len(local_attention_roles)
         + collection_health.failed_command_count
     )
@@ -2231,7 +2257,7 @@ def _executive_summary_html(
         top_role_html = "<li>확인 가능한 Role 없음</li>"
 
     dynamic_text = (
-        f"{len(dynamic_roles)}개 Role에서 동적 Role 가능성이 표시되었습니다."
+        f"참고 {len(dynamic_roles)}건 · 동적 Role 가능성은 장애나 정책 위반을 의미하지 않습니다."
         if dynamic_roles
         else "현재 보고서 기준 동적 Role 가능성이 표시된 항목은 없습니다."
     )
@@ -2242,12 +2268,27 @@ def _executive_summary_html(
     )
     if collection_health.status == COLLECTION_FAILED:
         conclusion_text = "필수 수집 데이터가 없어 이 보고서를 정책 판단에 사용하면 안 됩니다. 재수집이 필요합니다."
+        badge_status = "failed"
+        badge_text = f"재수집 필요 {max(action_attention_count, 1)}건"
     elif collection_health.status == COLLECTION_PARTIAL:
         conclusion_text = "일부 수집 데이터가 누락되었습니다. 영향 영역과 실패 명령을 확인한 뒤 제한적으로 사용하세요."
-    elif attention_count:
+        badge_status = "warning"
+        badge_text = f"제한적 사용 {max(action_attention_count, 1)}건"
+    elif action_attention_count:
         conclusion_text = "확인 필요 항목이 있습니다. 아래 Role ACL Detail을 먼저 확인하세요."
+        badge_status = "warning"
+        badge_text = f"검토 필요 {action_attention_count}건"
+    elif dynamic_roles:
+        conclusion_text = (
+            "수집 결과는 정상입니다. 동적 Role 가능성은 정책 이상이 아닌 참고 정보이며, "
+            "세부 ACL은 아래 Role ACL Detail에서 확인하세요."
+        )
+        badge_status = "normal"
+        badge_text = "수집 정상"
     else:
         conclusion_text = "즉시 확인할 고위험 요약 항목은 없습니다. 세부 ACL은 아래 Role ACL Detail에서 확인하세요."
+        badge_status = "normal"
+        badge_text = "수집 정상"
 
     failed_command_text = (
         ", ".join(collection_health.failed_command_ids[:5])
@@ -2294,6 +2335,15 @@ def _executive_summary_html(
     else:
         scope_detail = "실패 항목이 Role/SSID 데이터에 직접 영향을 주는 명령은 아닙니다."
 
+    if collection_health.status == COLLECTION_FAILED:
+        recommended_action = "이 보고서 사용을 중지하고 실패 원인을 해결한 뒤 WLC에서 다시 수집하세요."
+    elif collection_health.status == COLLECTION_PARTIAL:
+        recommended_action = "실패 영향 범위를 제외하고 검토하며, 가능하면 실패 원인을 해결한 뒤 다시 수집하세요."
+    elif unresolved_count or local_attention_roles:
+        recommended_action = "Unresolved 및 사내 Role 대역 비교 항목을 확인하고 검토 결과를 보고용 설명에 기록하세요."
+    else:
+        recommended_action = "추가 재수집 조치는 없습니다. 상급 보고 전 Role ACL Detail의 허용·차단 정책을 검토하세요."
+
     return f"""
     <section class="executive-summary" aria-label="Report conclusion summary">
       <div class="executive-summary-header">
@@ -2301,7 +2351,7 @@ def _executive_summary_html(
           <h2>결론 요약</h2>
           <p>{escape(conclusion_text)}</p>
         </div>
-        <span class="attention-badge">확인 필요 {attention_count}건</span>
+        <span class="attention-badge" data-status="{escape(badge_status)}">{escape(badge_text)}</span>
       </div>
       <div class="summary-grid">
         <div class="summary-item collection-status" data-status="{escape(collection_health.status)}">
@@ -2326,7 +2376,7 @@ def _executive_summary_html(
           <ul>{top_role_html}</ul>
         </div>
         <div class="summary-item">
-          <strong>동적 Role 가능성</strong>
+          <strong>동적 Role 참고</strong>
           <span>{escape(dynamic_text)}</span>
         </div>
         <div class="summary-item">
@@ -2334,8 +2384,9 @@ def _executive_summary_html(
           <span>{escape(local_text)}</span>
         </div>
         <div class="summary-item">
-          <strong>Access Check 판정 제한 있음</strong>
-          <span>선택한 Role 이름과 정확히 같은 ACL만 보조 판정합니다. 실제 정책 검토는 Role ACL Detail을 기준으로 확인하세요.</span>
+          <strong>권장 조치</strong>
+          <span>{escape(recommended_action)}</span>
+          <span>Access Check는 선택한 Role 이름과 정확히 같은 ACL만 보조 판정합니다.</span>
         </div>
       </div>
     </section>
@@ -3422,7 +3473,12 @@ def _int_value(value: Any) -> int:
 
 
 def _safe_dom_id(value: str) -> str:
-    return "".join(ch if ch.isalnum() else "-" for ch in value).strip("-") or "item"
+    raw = str(value).strip()
+    safe = "".join(ch if ch.isalnum() else "-" for ch in raw).strip("-") or "item"
+    if safe == raw:
+        return safe
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:8]
+    return f"{safe}-{digest}"
 
 
 def _safe_file_name(value: str) -> str:

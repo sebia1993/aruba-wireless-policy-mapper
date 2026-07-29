@@ -6,6 +6,7 @@ Access Check data so the browser report follows the server-side expectations.
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import shlex
 from typing import Any
@@ -19,8 +20,17 @@ EXACT_ROLE_ACL_WARNING = (
 
 
 def access_rule_id(role: str, index: int) -> str:
-    safe_role = "".join(ch if ch.isalnum() else "-" for ch in role).strip("-") or "role"
+    safe_role = _stable_dom_token(role, fallback="role")
     return f"access-rule-{safe_role}-{index}"
+
+
+def _stable_dom_token(value: str, *, fallback: str) -> str:
+    raw = str(value).strip()
+    safe = "".join(ch if ch.isalnum() else "-" for ch in raw).strip("-") or fallback
+    if safe == raw:
+        return safe
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:8]
+    return f"{safe}-{digest}"
 
 
 def build_access_check_data(

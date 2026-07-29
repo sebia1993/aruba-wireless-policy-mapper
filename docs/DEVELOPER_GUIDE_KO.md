@@ -247,13 +247,15 @@ Excel과 HTML 보고서를 만드는 파일입니다. 이 프로젝트에서 가
 - 파싱 결과를 DataFrame으로 변환
 - Excel 시트 생성
 - HTML 문자열 생성
+- 관리자용 결론 요약에서 수집 상태, 신뢰도, 영향 범위, 조치 필요 항목과 참고 항목을 분리
 - Role 탭, ACL 표, Alias 상세, Comment UI 생성
+- 좁은 화면에서 ACL 표만 가로 스크롤되도록 `.acl-table-scroll` 영역 생성
 - Role별 보고 설명 자동저장과 선택 Role PNG 생성
 - Access Check에 필요한 JSON 생성
 - Role 탭 선택과 Access Check Role 선택값 동기화
 - 보안모드에서 민감 데이터 export 차단
 - raw는 `atomic_io.py`를 통해 같은 폴더의 임시 파일을 완성한 뒤 교체
-- Excel/HTML은 둘 다 staging 파일로 완성한 뒤 `_commit_report_artifacts()`에서 최종 파일명으로 반영
+- Excel/HTML은 둘 다 staging 파일로 완성한 뒤 `atomic_io.commit_staged_files()`에서 최종 파일명으로 반영
 - 두 파일 반영 중 하나가 실패하면 새 파일을 제거하고 기존 파일 백업을 복원
 - DataFrame 생성 단계부터 예외 경계에 포함해 모든 생성 실패를 `report_status.json`의 `failed`로 기록
 - `report_status.json`에 파일 `status`, 장비 `collection_status`, `failed_command_count`를 분리해 기록
@@ -283,6 +285,19 @@ PNG 변환은 인터넷이 없는 사내망에서도 동작해야 하므로 `src
 - 분할 파일명에 `_part_XX_of_YY` 추가
 
 PyInstaller 빌드는 `collect_data_files('wlc_role_acl_collector')`로 정적 JavaScript와 라이선스를 포함합니다. `pyproject.toml`의 package data 설정도 유지해야 wheel이나 editable 설치에서 리소스를 찾을 수 있습니다.
+
+#### HTML 요소 ID와 대량 보고서
+
+Role 이름은 주석, Alias 상세, Access Check 행을 연결하는 HTML ID 일부로 사용됩니다. `report._safe_dom_id()`와 `acl_evaluator.access_rule_id()`는 일반적인 `guest-logon` 같은 이름은 그대로 유지하고, `/`, 공백 등 치환이 필요한 이름에는 SHA-256 기반 8자리 접미사를 붙입니다. 따라서 `branch/a`와 `branch a`처럼 화면용 문자열이 같아지는 Role도 서로 다른 ID를 가져야 합니다.
+
+ACL 표는 `.acl-section`의 바깥 레이아웃을 넓히지 않고 `.acl-table-scroll` 내부에서만 좌우 스크롤됩니다. 모바일 CSS를 수정할 때 `overflow: hidden` 때문에 Service·Comment 열이 접근 불가능해지지 않는지 실제 브라우저에서 확인합니다.
+
+`tests/test_report.py::test_large_html_report_keeps_role_order_visibility_and_unique_ids`는 60개 Role과 1,200개 ACL을 생성해 다음을 검증합니다.
+
+- 관측 사용자 수가 많은 Role 우선 정렬
+- 사용자 0명 Role과 비관련 ACL의 기본 숨김
+- 모든 ACL 행과 Comment 상태 ID의 유일성
+- 대량 HTML 생성이 10초 안에 완료되는 넉넉한 회귀 상한
 
 ### `acl_evaluator.py`
 
@@ -422,6 +437,8 @@ mock 서버는 실행 중 중복 `start()`를 거부하고 `run_mock_server()`�
 ```powershell
 .\tools\validate.ps1
 ```
+
+저장소에 `.venv\Scripts\python.exe`가 있으면 검증 스크립트가 자동으로 그 환경을 사용합니다. 없으면 PATH의 Python을 사용하며, 별도 환경은 `-PythonExe C:\path\to\python.exe`로 지정할 수 있습니다. 시스템 Python을 잘못 선택해 의존성 누락으로 오판하지 않도록 검증 출력 첫 줄의 Python 경로를 확인합니다.
 
 이 스크립트는 다음을 실행합니다.
 

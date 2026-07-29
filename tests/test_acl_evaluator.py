@@ -3,9 +3,16 @@ import pytest
 from wlc_role_acl_collector.acl_evaluator import (
     EXACT_ROLE_ACL_WARNING,
     NO_MATCHING_ROLE_ACL_VERDICT,
+    access_rule_id,
     build_access_check_data,
     evaluate_access,
 )
+
+
+def test_access_rule_ids_do_not_collide_after_special_character_normalization():
+    assert access_rule_id("guest-logon", 1) == "access-rule-guest-logon-1"
+    assert access_rule_id("branch/a", 1) != access_rule_id("branch a", 1)
+    assert access_rule_id("branch/a", 1) == access_rule_id("branch/a", 1)
 
 
 @pytest.mark.parametrize(("first_action", "second_action"), [("deny", "permit"), ("permit", "deny")])

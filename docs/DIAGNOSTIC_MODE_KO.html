@@ -31,6 +31,7 @@
       box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
       margin: 0 auto;
       max-width: 1120px;
+      min-width: 0;
       padding: 34px;
     }
     h1, h2, h3 { line-height: 1.3; }
@@ -56,12 +57,15 @@
       border: 1px solid #d8e2ed;
       border-radius: 5px;
       font-family: Consolas, "Cascadia Mono", monospace;
+      overflow-wrap: anywhere;
       padding: 1px 5px;
+      word-break: break-word;
     }
     pre {
       background: var(--code-bg);
       border-radius: 8px;
       color: var(--code-text);
+      max-width: 100%;
       overflow-x: auto;
       padding: 14px 16px;
     }
@@ -73,8 +77,18 @@
     }
     table {
       border-collapse: collapse;
-      margin: 14px 0 22px;
+      min-width: 620px;
       width: 100%;
+    }
+    .table-scroll {
+      margin: 14px 0 22px;
+      max-width: 100%;
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+    }
+    .table-scroll:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
     th, td {
       border: 1px solid var(--line);
@@ -93,6 +107,12 @@
       color: var(--muted);
       font-size: 12px;
       margin-top: 34px;
+    }
+    @media (max-width: 600px) {
+      body { padding: 12px; }
+      main { padding: 20px; }
+      h1 { font-size: 26px; }
+      h2 { font-size: 21px; }
     }
     @media print {
       body { background: #ffffff; padding: 0; }
@@ -133,7 +153,8 @@
     </ul>
     <p><code>diagnostic_status.json</code>은 세 진단 파일의 묶음 저장 상태를 기록합니다. <code>status=completed</code>일 때만 완료본이며, <code>writing</code> 또는 <code>failed</code> 상태의 JSON/HTML/log는 외부 분석 자료로 사용하지 않습니다.</p>
     <h2>단계</h2>
-    <table>
+    <div class="table-scroll" role="region" tabindex="0" aria-label="문서 표">
+      <table>
       <thead><tr><th>단계</th><th>의미</th></tr></thead>
       <tbody>
       <tr><td>DGN-BOOT</td><td>프로그램 실행 환경 확인</td></tr>
@@ -146,7 +167,8 @@
       <tr><td>DGN-REPORT</td><td>안전 진단 리포트 생성</td></tr>
       <tr><td>DGN-SEC</td><td>민감정보 마스킹 self-test</td></tr>
       </tbody>
-    </table>
+      </table>
+    </div>
     <h2>Mock 서버 사용</h2>
     <p>실제 장비 없이 개발 PC에서 테스트할 때:</p>
     <pre><code>WlcRoleAclCollectorCLI.exe mock-server --protocol telnet --scenario config\mock_scenarios\success_minimal.json</code></pre>

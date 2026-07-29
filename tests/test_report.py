@@ -1,5 +1,7 @@
 import json
+import re
 from pathlib import Path
+from time import perf_counter
 
 import pandas as pd
 import pytest
@@ -10,6 +12,7 @@ from wlc_role_acl_collector.models import CommandOutput, Controller, RoleNetwork
 from wlc_role_acl_collector.report import (
     _access_check_script,
     _acl_rows_html,
+    _build_frames,
     _html2canvas_source,
     _is_role_related_acl,
     _role_image_export_script,
@@ -135,6 +138,12 @@ def test_write_excel_and_html_report(tmp_path):
     assert "Alias Detail" not in html
     assert 'class="alias-link"' in html
     assert 'class="alias-detail-row" hidden' in html
+    assert 'class="acl-table-scroll" role="region" tabindex="0"' in html
+    assert 'aria-label="guest-logon ACL table"' in html
+    assert ".acl-table-scroll {" in html
+    assert "overflow-x: auto;" in html
+    assert ".acl-table-scroll table {" in html
+    assert "min-width: 608px;" in html
     assert "<th>Comment</th>" in html
     assert 'class="comment-input"' in html
     assert 'class="comment-status"' in html
@@ -182,9 +191,14 @@ def test_write_excel_and_html_report(tmp_path):
     assert "report-summary-pill" in html
     assert 'class="executive-summary"' in html
     assert "결론 요약" in html
-    assert "확인 필요" in html
+    assert 'class="attention-badge" data-status="normal">수집 정상</span>' in html
+    assert "동적 Role 참고" in html
+    assert "동적 Role 가능성은 장애나 정책 위반을 의미하지 않습니다." in html
+    assert "확인 필요 3건" not in html
     assert "사용자 많은 Role TOP 3" in html
-    assert "Access Check 판정 제한 있음" in html
+    assert "권장 조치" in html
+    assert "추가 재수집 조치는 없습니다." in html
+    assert "Access Check는 선택한 Role 이름과 정확히 같은 ACL만 보조 판정합니다." in html
     assert html.index("결론 요약") < html.index('class="report-actions no-print"')
     assert html.index("결론 요약") < html.index('class="access-check no-print"')
     assert html.index("Role ACL Detail") < html.index('class="access-check no-print"')
@@ -303,6 +317,9 @@ def test_write_reports_records_collection_health_separately_from_file_status(tmp
     assert status["status"] == "completed"
     assert status["collection_status"] == "partial"
     assert status["failed_command_count"] == 1
+    html = files["html"].read_text(encoding="utf-8")
+    assert 'class="attention-badge" data-status="warning">제한적 사용 1건</span>' in html
+    assert "실패 영향 범위를 제외하고 검토하며" in html
 
 
 def test_role_image_export_script_preserves_visible_state_and_splits_safely():
@@ -455,6 +472,64 @@ def test_html_hides_zero_user_roles_when_user_table_is_reliable(tmp_path):
     assert 'class="role-tab zero-user-role"' in html
     assert "syncZeroUserRoles" in html
     assert "document.querySelectorAll('.zero-user-role')" in html
+
+
+def test_large_html_report_keeps_role_order_visibility_and_unique_ids(tmp_path):
+    fixture_root = Path(__file__).parent / "fixtures"
+    result = collect_from_offline_raw(
+        Controller(name="sample_controller", host="192.0.2.10"),
+        fixture_root,
+    )
+    frames = _build_frames(build_parsed_controllers([result]), [result])
+    base_acl = frames["Role_ACL_Detail"].iloc[0].to_dict()
+    base_context = frames["Role_Network_Context"].iloc[0].to_dict()
+    roles = ["branch/a", "branch a", *(f"role-{index:03d}" for index in range(58))]
+    acl_rows = []
+    context_rows = []
+
+    for role_index, role in enumerate(roles):
+        context = dict(base_context)
+        context.update(role=role, observed_user_count=max(0, 45 - role_index))
+        context_rows.append(context)
+        for sequence in range(1, 21):
+            row = dict(base_acl)
+            row.update(
+                role=role,
+                acl=role if sequence <= 12 else "shared-policy",
+                sequence=sequence,
+                action="deny" if sequence % 3 == 0 else "permit",
+                source="any",
+                destination="any",
+                service="any",
+                raw_rule=f"synthetic rule {sequence}",
+            )
+            acl_rows.append(row)
+
+    frames["Role_Network_Context"] = pd.DataFrame(context_rows)
+    frames["Role_ACL_Detail"] = pd.DataFrame(acl_rows)
+    html_path = tmp_path / "large-report.html"
+
+    started_at = perf_counter()
+    _write_html(html_path, frames)
+    elapsed = perf_counter() - started_at
+    html = html_path.read_text(encoding="utf-8")
+
+    assert elapsed < 10
+    assert html.count('role="tab"') == 60
+    assert html.count('class="acl-section role-panel') == 60
+    assert html.index('data-role="branch/a"') < html.index('data-role="branch a"')
+    assert html.index('data-role="branch a"') < html.index('data-role="role-000"')
+    assert 'data-zero-user-role-count="15"' in html
+    assert html.count('class="role-tab zero-user-role"') == 15
+    assert html.count('data-other-acl-count="8"') == 60
+    assert html.count('data-other-acl="true" hidden') == 60 * 8
+
+    rule_ids = re.findall(r'data-rule-id="([^"]+)"', html)
+    comment_status_ids = re.findall(r'id="(acl-comment-[^"]+-status)"', html)
+    assert len(rule_ids) == 60 * 20
+    assert len(rule_ids) == len(set(rule_ids))
+    assert len(comment_status_ids) == 60 * 20
+    assert len(comment_status_ids) == len(set(comment_status_ids))
 
 
 def test_html_does_not_hide_zero_user_roles_when_user_table_failed(tmp_path):

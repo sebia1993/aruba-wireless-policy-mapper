@@ -52,6 +52,11 @@
 - collect, diagnose, GUI 수집 결과 폴더가 같은 시간에 생성되어도 충돌하지 않도록 run directory 생성 방식을 개선했습니다.
 - `enable password` 적용 실패를 조용히 무시하지 않고 수집 결과와 진행 이벤트에 기록합니다.
 - Windows 배포 ZIP 검증에서 GUI/CLI exe, 문서, config, mock scenario, CLI `--help`, SHA256 sidecar를 확인합니다.
+- HTML 관리자 요약에서 동적 Role 가능성을 장애·조치 필요 건수와 분리하고, 상태별 권장 조치를 바로 표시합니다.
+- 좁은 화면에서도 ACL 표의 Service·Raw·Comment 열을 표 내부 가로 스크롤로 확인할 수 있습니다.
+- 특수문자가 다른 Role 이름이 같은 HTML ID로 충돌하지 않도록 안정 해시 접미사를 적용합니다.
+- 60개 Role·1,200개 ACL 자동 회귀 테스트와 100개 Role·4,000개 ACL 실제 Chromium 검증을 수행했습니다.
+- 전체 검증 스크립트가 로컬 `.venv`를 자동 선택하고 사용한 Python 경로를 표시합니다.
 
 현재 제외된 항목:
 
