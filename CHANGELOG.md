@@ -28,6 +28,8 @@
 - Streamlit에서 SSH/Telnet 선택 시 기본 포트 22/23을 즉시 적용하고, 실패 결과를 오류 코드·단계·권장 조치로 보존합니다.
 - CLI에서 대상 설정·수집·파싱·저장 예외를 traceback 없이 처리하고, 다중 WLC 중 한 대상 실패 후에도 나머지 대상을 계속 수집합니다.
 - 다중 컨트롤러 실패 영향 범위를 해당 컨트롤러의 Role/SSID로 제한합니다.
+- 안전 진단 JSON/HTML/log를 묶음 staging/rollback 방식으로 저장하고 `diagnostic_status.json`에 완료 여부를 기록합니다.
+- 웹 반복 실행의 임시 폴더/동시 실행 슬롯 정리와 mock 서버 반복 start/stop을 자동 테스트합니다.
 - CLI/GUI/Web/HTML이 `collection_health.py`의 공통 상태 모델로 정상 완료, 부분 완료, 수집 실패를 동일하게 표시합니다.
 - 실패한 Role/Alias 명령을 수집된 ACL 관계와 연결해 영향 Role/SSID 및 수집 신뢰도를 관리자 요약에 표시합니다.
 - GUI에 cooperative cancel 버튼을 추가하고, 창 종료 시 non-daemon worker와 장비 세션 정리가 끝날 때까지 기다립니다.

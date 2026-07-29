@@ -337,8 +337,10 @@ WlcRoleAclCollectorCLI.exe diagnose --controllers config\controllers.example.csv
 - `diagnostic_summary.json`
 - `diagnostic_summary.html`
 - `diagnostic_run.log`
+- `diagnostic_status.json`
 
 진단 파일에는 원본 장비 출력 대신 단계, 오류 코드, command_id, 안전 메시지만 저장합니다.
+`diagnostic_status.json`의 `status`가 `completed`일 때만 JSON, HTML, log 세 파일을 같은 실행의 완료본으로 사용합니다. `writing` 또는 `failed`이면 저장이 끝나지 않았거나 일부 파일 생성에 실패한 상태입니다.
 
 외부 분석 요청 시에는 먼저 아래 값만 전달합니다.
 

@@ -401,8 +401,9 @@ python -m wlc_role_acl_collector.gui_app</code></pre>
       <li><code>diagnostic_summary.json</code></li>
       <li><code>diagnostic_summary.html</code></li>
       <li><code>diagnostic_run.log</code></li>
+      <li><code>diagnostic_status.json</code></li>
     </ul>
-    <p>진단 파일에는 원본 장비 출력 대신 단계, 오류 코드, command_id, 안전 메시지만 저장합니다.</p>
+    <p>진단 파일에는 원본 장비 출력 대신 단계, 오류 코드, command_id, 안전 메시지만 저장합니다. <code>diagnostic_status.json</code>의 <code>status</code>가 <code>completed</code>일 때만 JSON, HTML, log 세 파일을 같은 실행의 완료본으로 사용합니다. <code>writing</code> 또는 <code>failed</code>이면 저장이 끝나지 않았거나 일부 파일 생성에 실패한 상태입니다.</p>
     <p>외부 분석 요청 시에는 먼저 아래 값만 전달합니다.</p>
     <ul>
       <li><code>primary_code</code></li>

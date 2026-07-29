@@ -36,7 +36,25 @@ def test_telnet_mock_server_returns_synthetic_command_output():
             response = _recv_until(sock, "(mock-wlc) #")
             assert "MOCK-WLC" in response
     finally:
+        worker = server._thread
         server.stop()
+    assert worker is not None
+    assert not worker.is_alive()
+    server.stop()
+
+
+def test_mock_server_rejects_duplicate_start_and_can_restart_cleanly():
+    scenario = load_mock_scenario(Path("config/mock_scenarios/success_minimal.json"))
+    server = MockWlcServer("telnet", scenario)
+
+    for _index in range(3):
+        server.start()
+        worker = server._thread
+        with pytest.raises(RuntimeError, match="already running"):
+            server.start()
+        server.stop()
+        assert worker is not None
+        assert not worker.is_alive()
 
 
 def test_ssh_mock_server_accepts_shell_commands():

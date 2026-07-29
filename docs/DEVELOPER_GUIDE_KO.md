@@ -127,7 +127,7 @@ wlc_role_acl_collector/
 - 사내 Role 대역표를 선택하면 GUI 보고서는 내부용 HTML/Excel에 실제 Role 대역을 포함합니다.
 - 샘플 Excel은 배포본의 실행 파일 옆 `config\role_networks.example.xlsx` 또는 소스 repo의 `config\role_networks.example.xlsx`에서 찾습니다.
 - Role network Excel 전체 경로와 내부 대역은 run.log에 남기지 않습니다.
-- 진단 모드는 `diagnostic_summary.json/html`, `diagnostic_run.log`만 생성하고 raw 폴더를 만들지 않습니다.
+- 진단 모드는 `diagnostic_summary.json/html`, `diagnostic_run.log`, `diagnostic_status.json`만 생성하고 raw 폴더를 만들지 않습니다.
 - Windows 다중 모니터와 DPI 배율 차이를 고려해 창 위치/크기를 작업영역 안으로 보정합니다.
 - GUI 색상, 단계 라벨, 주요 문구는 `gui_app.py` 상단 상수에서 관리합니다.
 - worker 전체를 예외 경계 안에 두어 결과 폴더 생성이 실패해도 반드시 `error` 이벤트를 UI queue에 보냅니다.
@@ -361,14 +361,18 @@ Service 미선택 동작:
 - `diagnostic_codes.py`: `WLC-영역-번호` 코드, 단계, 원인, 조치 정의
 - `diagnostic_events.py`: `DGN-*` 단계 이벤트 모델
 - `diagnostic_mode.py`: live/offline 진단 실행과 primary code 결정
-- `diagnostic_report.py`: `diagnostic_summary.json/html`, `diagnostic_run.log` 생성
+- `diagnostic_report.py`: `diagnostic_summary.json/html`, `diagnostic_run.log`, `diagnostic_status.json` 생성
 - `redaction.py`: IP, MAC, 호스트명, secret 계열 값 마스킹
+
+진단 JSON/HTML/log도 `atomic_io.commit_staged_files()`로 한 묶음처럼 반영합니다. 중간 파일 생성이나 최종 교체가 실패하면 이전 완료 파일을 복원하고 `diagnostic_status.json`을 `failed`로 기록합니다. `report.py`의 Excel/HTML도 같은 공통 helper를 사용하므로 다중 파일 저장 규칙을 바꿀 때 두 경로를 함께 테스트합니다.
 
 mock 관련 파일:
 
 - `mock_scenarios.py`: JSON 시나리오 로드
 - `mock_server.py`: 로컬 Telnet/SSH mock WLC 서버
 - `config/mock_scenarios/*.json`: 실제 장비 출력이 아닌 synthetic 응답
+
+mock 서버는 실행 중 중복 `start()`를 거부하고 `run_mock_server()`의 `finally`에서 항상 `stop()`을 호출합니다. Telnet handler와 SSH client worker는 daemon thread로 두어 테스트 프로세스 종료를 막지 않으며, 반복 start/stop 테스트로 listener thread 종료를 확인합니다.
 
 ## 6. 요구사항별 수정 위치
 

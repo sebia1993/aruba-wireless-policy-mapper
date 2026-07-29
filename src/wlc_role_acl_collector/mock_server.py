@@ -37,6 +37,9 @@ class MockWlcServer:
     def start(self) -> MockServerEndpoint:
         # 같은 scenario JSON을 Telnet/SSH 양쪽 프로토콜에서 재사용합니다.
         # 그래서 파서와 진단 로직은 실제 장비 없이도 동일한 명령 응답 흐름을 테스트할 수 있습니다.
+        if self._thread is not None and self._thread.is_alive():
+            raise RuntimeError("Mock WLC server is already running.")
+        self._stop_event.clear()
         if self.protocol == "telnet":
             self._start_telnet()
         elif self.protocol == "ssh":
@@ -61,8 +64,11 @@ class MockWlcServer:
                 self._server.server_close()
             except Exception:
                 pass
-        if self._thread is not None:
-            self._thread.join(timeout=2)
+        worker = self._thread
+        if worker is not None:
+            worker.join(timeout=2)
+        self._server = None
+        self._thread = worker if worker is not None and worker.is_alive() else None
 
     def _start_telnet(self) -> None:
         scenario = self.scenario
@@ -138,12 +144,16 @@ def run_mock_server(protocol: str, scenario_path: Path, *, host: str = "127.0.0.
         while True:
             threading.Event().wait(3600)
     except KeyboardInterrupt:
+        pass
+    finally:
         server.stop()
     return server
 
 
 class _ThreadingTcpServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
+    daemon_threads = True
+    block_on_close = False
 
 
 class _SocketWrapper:
@@ -184,8 +194,9 @@ def _serve_ssh_client(client: socket.socket, host_key, scenario: MockScenario) -
         def check_channel_pty_request(self, channel, term, width, height, pixelwidth, pixelheight, modes) -> bool:
             return True
 
-    transport = paramiko.Transport(client)
+    transport = None
     try:
+        transport = paramiko.Transport(client)
         transport.add_server_key(host_key)
         server = Server()
         transport.start_server(server=server)
@@ -196,10 +207,13 @@ def _serve_ssh_client(client: socket.socket, host_key, scenario: MockScenario) -
         channel.send(f"{scenario.prompt}")
         _ssh_command_loop(channel, scenario)
     finally:
-        try:
-            transport.close()
-        except Exception:
-            pass
+        if transport is not None:
+            try:
+                transport.close()
+            except Exception:
+                pass
+        else:
+            client.close()
 
 
 def _ssh_command_loop(channel, scenario: MockScenario) -> None:

@@ -31,6 +31,7 @@ outputs\<timestamp>\
   diagnostic_summary.json
   diagnostic_summary.html
   diagnostic_run.log
+  diagnostic_status.json
 ```
 
 진단 산출물에는 다음을 저장하지 않습니다.
@@ -40,6 +41,8 @@ outputs\<timestamp>\
 - 실제 호스트명
 - 계정, 비밀번호, secret, token
 - 사용자 MAC 주소
+
+`diagnostic_status.json`은 세 진단 파일의 묶음 저장 상태를 기록합니다. `status=completed`일 때만 완료본이며, `writing` 또는 `failed` 상태의 JSON/HTML/log는 외부 분석 자료로 사용하지 않습니다.
 
 ## 단계
 
@@ -64,3 +67,5 @@ WlcRoleAclCollectorCLI.exe mock-server --protocol telnet --scenario config\mock_
 ```
 
 다른 터미널에서 해당 로컬 포트를 대상으로 수집 또는 진단을 실행합니다.
+
+같은 `MockWlcServer` 객체를 중복 시작할 수 없으며, 종료 시 listener와 worker thread를 정리합니다. 반복 테스트에서는 `start()`와 `stop()`을 한 쌍으로 사용하십시오.

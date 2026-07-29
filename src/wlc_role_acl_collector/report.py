@@ -7,7 +7,6 @@ as not embedding local Role network mappings unless explicit export is enabled.
 from __future__ import annotations
 
 import json
-import shutil
 import uuid
 from datetime import datetime
 from functools import lru_cache
@@ -22,7 +21,7 @@ from openpyxl.utils import get_column_letter
 
 from .acl_evaluator import access_rule_id, build_access_check_data
 from .aos8_parser import parse_controller_config
-from .atomic_io import atomic_output_path, atomic_write_text
+from .atomic_io import atomic_output_path, atomic_write_text, commit_staged_files
 from .collection_health import (
     COLLECTION_COMPLETED,
     COLLECTION_FAILED,
@@ -175,7 +174,7 @@ def write_reports(
             local_role_networks_enabled=bool(local_role_networks) and export_local_role_networks,
             access_history_enabled=access_history_enabled,
         )
-        _commit_report_artifacts(
+        commit_staged_files(
             (
                 (staging_workbook_path, workbook_path),
                 (staging_html_path, html_path),
@@ -222,52 +221,6 @@ def write_reports(
         + "\n",
     )
     return {"xlsx": workbook_path, "html": html_path, "status": status_path}
-
-
-def _commit_report_artifacts(
-    artifacts: tuple[tuple[Path, Path], ...],
-    *,
-    transaction_id: str,
-) -> None:
-    """Replace a report pair and restore previous files if a replacement fails."""
-
-    backups: dict[Path, Path] = {}
-    committed: list[Path] = []
-    preserved_backups: set[Path] = set()
-    try:
-        for _staging, destination in artifacts:
-            if destination.exists():
-                backup = destination.with_name(
-                    f".{destination.stem}.{transaction_id}.backup{destination.suffix}"
-                )
-                shutil.copy2(destination, backup)
-                backups[destination] = backup
-
-        for staging, destination in artifacts:
-            staging.replace(destination)
-            committed.append(destination)
-    except Exception as exc:
-        restore_errors: list[str] = []
-        for destination in reversed(committed):
-            backup = backups.get(destination)
-            try:
-                if backup is not None and backup.exists():
-                    backup.replace(destination)
-                else:
-                    destination.unlink(missing_ok=True)
-            except OSError as restore_exc:
-                restore_errors.append(f"{destination.name}: {restore_exc}")
-                if backup is not None and backup.exists():
-                    preserved_backups.add(backup)
-        if restore_errors:
-            exc.add_note("Unable to restore previous report files: " + "; ".join(restore_errors))
-        raise
-    finally:
-        for staging, _destination in artifacts:
-            staging.unlink(missing_ok=True)
-        for backup in backups.values():
-            if backup not in preserved_backups:
-                backup.unlink(missing_ok=True)
 
 
 def _build_frames(

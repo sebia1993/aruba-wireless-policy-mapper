@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .atomic_io import atomic_write_text
+from .atomic_io import atomic_write_text, commit_staged_files
 from .diagnostic_codes import DiagnosticCode, get_diagnostic_code
 from .diagnostic_events import DiagnosticEvent
 from .redaction import redact_payload, redact_sensitive_text
@@ -29,11 +30,71 @@ def write_diagnostic_report(
     json_path = output_dir / "diagnostic_summary.json"
     html_path = output_dir / "diagnostic_summary.html"
     log_path = output_dir / "diagnostic_run.log"
+    status_path = output_dir / "diagnostic_status.json"
+    transaction_id = uuid.uuid4().hex
+    staged_json = output_dir / f".diagnostic_summary.{transaction_id}.staging.json"
+    staged_html = output_dir / f".diagnostic_summary.{transaction_id}.staging.html"
+    staged_log = output_dir / f".diagnostic_run.{transaction_id}.staging.log"
+    started_at = datetime.now(timezone.utc).isoformat()
+    files = [json_path.name, html_path.name, log_path.name]
 
-    atomic_write_text(json_path, json.dumps(payload, indent=2, ensure_ascii=False))
-    atomic_write_text(html_path, _diagnostic_html(payload))
-    atomic_write_text(log_path, _diagnostic_log(payload))
-    return {"json": json_path, "html": html_path, "log": log_path}
+    atomic_write_text(
+        status_path,
+        json.dumps(
+            {"status": "writing", "started_at": started_at, "files": files},
+            indent=2,
+            ensure_ascii=False,
+        ),
+    )
+    try:
+        atomic_write_text(staged_json, json.dumps(payload, indent=2, ensure_ascii=False))
+        atomic_write_text(staged_html, _diagnostic_html(payload))
+        atomic_write_text(staged_log, _diagnostic_log(payload))
+        commit_staged_files(
+            (
+                (staged_json, json_path),
+                (staged_html, html_path),
+                (staged_log, log_path),
+            ),
+            transaction_id=transaction_id,
+        )
+    except Exception as exc:
+        staged_json.unlink(missing_ok=True)
+        staged_html.unlink(missing_ok=True)
+        staged_log.unlink(missing_ok=True)
+        try:
+            atomic_write_text(
+                status_path,
+                json.dumps(
+                    {
+                        "status": "failed",
+                        "started_at": started_at,
+                        "failed_at": datetime.now(timezone.utc).isoformat(),
+                        "error_type": type(exc).__name__,
+                        "files": files,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+            )
+        except Exception as status_exc:
+            exc.add_note(f"Unable to update {status_path.name}: {status_exc}")
+        raise
+
+    atomic_write_text(
+        status_path,
+        json.dumps(
+            {
+                "status": "completed",
+                "started_at": started_at,
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "files": files,
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+    )
+    return {"json": json_path, "html": html_path, "log": log_path, "status": status_path}
 
 
 def _diagnostic_payload(

@@ -1,6 +1,7 @@
 from io import BytesIO
 from pathlib import Path
 import threading
+import tempfile
 
 from openpyxl import Workbook
 import pytest
@@ -243,6 +244,60 @@ def test_web_expected_collection_failure_includes_code_and_specific_action(monke
     assert result.summary["error_code"] == "WLC-AUTH-001"
     assert result.summary["failure_stage"] == "authentication"
     assert "ID/PW" in result.summary["recommended_action"]
+
+
+def test_web_releases_target_slot_after_unexpected_collection_failure(monkeypatch):
+    fixture_root = Path(__file__).parent / "fixtures"
+    original_collect = web_logic._collect
+    call_count = 0
+
+    def fail_once(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("unexpected transport failure")
+        return original_collect(*args, **kwargs)
+
+    monkeypatch.setattr(web_logic, "_collect", fail_once)
+    request = WebCollectionRequest(
+        host="192.0.2.10",
+        controller_name="sample_controller",
+        username="",
+        password="",
+        offline_raw_dir=fixture_root,
+    )
+
+    failed = run_web_collection(request)
+    retried = run_web_collection(request)
+
+    assert failed.success is False
+    assert retried.success is True
+    assert call_count == 2
+
+
+def test_web_repeated_runs_remove_temporary_workspaces(monkeypatch, tmp_path):
+    fixture_root = Path(__file__).parent / "fixtures"
+    created_paths = []
+
+    class TrackingTemporaryDirectory(tempfile.TemporaryDirectory):
+        def __init__(self, *, prefix):
+            super().__init__(prefix=prefix, dir=tmp_path)
+            created_paths.append(Path(self.name))
+
+    monkeypatch.setattr(web_logic.tempfile, "TemporaryDirectory", TrackingTemporaryDirectory)
+    request = WebCollectionRequest(
+        host="192.0.2.10",
+        controller_name="sample_controller",
+        username="",
+        password="",
+        offline_raw_dir=fixture_root,
+    )
+
+    for _index in range(5):
+        assert run_web_collection(request).success is True
+
+    assert len(created_paths) == 5
+    assert all(not path.exists() for path in created_paths)
 
 
 def _role_network_workbook_bytes() -> bytes:
