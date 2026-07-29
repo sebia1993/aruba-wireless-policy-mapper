@@ -6,7 +6,7 @@ import pytest
 from openpyxl import load_workbook
 
 from wlc_role_acl_collector.collector import collect_from_offline_raw
-from wlc_role_acl_collector.models import Controller, RoleNetworkDefinition
+from wlc_role_acl_collector.models import CommandOutput, Controller, RoleNetworkDefinition
 from wlc_role_acl_collector.report import (
     _access_check_script,
     _acl_rows_html,
@@ -56,7 +56,10 @@ def test_write_excel_and_html_report(tmp_path):
     assert files["xlsx"].exists()
     assert files["html"].exists()
     assert files["status"].exists()
-    assert json.loads(files["status"].read_text(encoding="utf-8"))["status"] == "completed"
+    report_status = json.loads(files["status"].read_text(encoding="utf-8"))
+    assert report_status["status"] == "completed"
+    assert report_status["collection_status"] == "completed"
+    assert report_status["failed_command_count"] == 0
     workbook = load_workbook(files["xlsx"], read_only=True)
     assert {
         "Overview",
@@ -249,7 +252,57 @@ def test_write_reports_marks_failed_status_when_an_artifact_cannot_be_written(mo
     status = json.loads((tmp_path / "report_status.json").read_text(encoding="utf-8"))
     assert status["status"] == "failed"
     assert status["error_type"] == "OSError"
+    assert status["collection_status"] == "completed"
+    assert not (tmp_path / "ssid_role_acl_report.xlsx").exists()
+    assert not (tmp_path / "ssid_role_acl_report.html").exists()
     assert not list(tmp_path.glob(".*.tmp*"))
+    assert not list(tmp_path.glob(".*.staging.*"))
+    assert not list(tmp_path.glob(".*.backup.*"))
+
+
+def test_write_reports_marks_failed_status_when_frame_building_fails(monkeypatch, tmp_path):
+    import wlc_role_acl_collector.report as report
+
+    fixture_root = Path(__file__).parent / "fixtures"
+    controller = Controller(name="sample_controller", host="192.0.2.10")
+    result = collect_from_offline_raw(controller, fixture_root)
+    parsed = build_parsed_controllers([result])
+    monkeypatch.setattr(
+        report,
+        "_build_frames",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("bad parsed data")),
+    )
+
+    with pytest.raises(ValueError, match="bad parsed data"):
+        write_reports(parsed_controllers=parsed, collection_results=[result], output_dir=tmp_path)
+
+    status = json.loads((tmp_path / "report_status.json").read_text(encoding="utf-8"))
+    assert status["status"] == "failed"
+    assert status["error_type"] == "ValueError"
+    assert not (tmp_path / "ssid_role_acl_report.xlsx").exists()
+    assert not (tmp_path / "ssid_role_acl_report.html").exists()
+
+
+def test_write_reports_records_collection_health_separately_from_file_status(tmp_path):
+    fixture_root = Path(__file__).parent / "fixtures"
+    controller = Controller(name="sample_controller", host="192.0.2.10")
+    result = collect_from_offline_raw(controller, fixture_root)
+    result.commands.append(
+        CommandOutput(
+            command_id="clock",
+            command="show clock",
+            success=False,
+            error="clock command failed",
+        )
+    )
+    parsed = build_parsed_controllers([result])
+
+    files = write_reports(parsed_controllers=parsed, collection_results=[result], output_dir=tmp_path)
+
+    status = json.loads(files["status"].read_text(encoding="utf-8"))
+    assert status["status"] == "completed"
+    assert status["collection_status"] == "partial"
+    assert status["failed_command_count"] == 1
 
 
 def test_role_image_export_script_preserves_visible_state_and_splits_safely():

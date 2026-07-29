@@ -85,6 +85,38 @@ def test_collection_health_is_failed_when_required_output_is_empty():
     assert "SSID·Role·ACL 기준 설정" in health.impact_areas
 
 
+def test_disconnect_failure_is_visible_without_claiming_role_or_ssid_impact():
+    health = assess_collection_results(
+        [
+            _result(
+                CommandOutput(
+                    command_id="configuration_effective",
+                    command="show configuration effective",
+                    output="configuration data",
+                ),
+                CommandOutput(
+                    command_id="disconnect",
+                    command="disconnect",
+                    success=False,
+                    error="socket cleanup failed",
+                ),
+            )
+        ]
+    )
+    scope = infer_collection_impact_scope(
+        [{"controller": "wlc-a", "command_id": "disconnect", "success": False}],
+        [{"controller": "wlc-a", "role": "employee"}],
+        [{"controller": "wlc-a", "role": "employee", "ssid": "CORP"}],
+    )
+
+    assert health.status == COLLECTION_PARTIAL
+    assert health.impact_areas == ("장비 세션 정리",)
+    assert "세션 종료" in health.recommended_action_ko
+    assert scope.affected_roles == ()
+    assert scope.affected_ssids == ()
+    assert scope.identification_incomplete is False
+
+
 def test_report_rows_accept_string_boolean_and_detect_partial_collection():
     health = assess_command_status_rows(
         [

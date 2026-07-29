@@ -45,6 +45,8 @@ class CollectionHealth:
         if self.status == COLLECTION_FAILED:
             return "보고서를 정책 판단에 사용하지 말고 접속·인증·필수 명령 문제를 해결한 뒤 다시 수집하세요."
         if self.status == COLLECTION_PARTIAL:
+            if set(self.failed_command_ids) == {"disconnect"}:
+                return "보고서 데이터는 생성됐지만 장비 세션 종료를 확인하지 못했습니다. 프로그램을 종료하고 WLC 관리 세션 상태를 확인하세요."
             return "실패 명령과 영향 영역을 확인하고, 해당 정보는 재수집 전까지 확정된 값으로 판단하지 마세요."
         return "필수 및 선택 수집 명령이 모두 완료되었습니다. Unresolved 항목은 별도로 확인하세요."
 
@@ -199,7 +201,7 @@ def infer_collection_impact_scope(
                 identification_incomplete = True
             continue
 
-        if command_id not in {"clock", "version"}:
+        if command_id not in {"clock", "version", "disconnect"}:
             affected_roles.update(all_roles)
             affected_ssids.update(all_ssids)
             identification_incomplete = True
@@ -296,6 +298,7 @@ def _impact_area(command_id: str) -> str:
         "version": "장비 버전",
         "ip_interface_brief": "VLAN·인터페이스 대역",
         "user_table": "Role별 관측 사용자 수",
+        "disconnect": "장비 세션 정리",
     }.get(command_id, "일부 수집 항목")
 
 

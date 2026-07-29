@@ -171,9 +171,16 @@ GUI의 기본 흐름은 `접속 정보 입력 → 분석 시작 → 결과 상�
 | `ssid_role_acl_report.xlsx` | Excel 보고서 |
 | `run.log` | 실행 과정과 오류 원인 로그 |
 | `raw\<controller>.txt` | 수집한 원본 명령 결과 일부 |
-| `report_status.json` | 보고서 저장 상태. `completed`가 아니면 HTML/Excel을 완료본으로 사용하지 않음 |
+| `report_status.json` | 보고서 저장 상태와 수집 완전성. 파일 `status`가 `completed`가 아니면 HTML/Excel을 완료본으로 사용하지 않음 |
 
 주의: `show user-table` 원문은 개인정보 노출을 줄이기 위해 raw 파일에 그대로 저장하지 않습니다. 다만 ACL, Alias, WLC 설정에는 내부 IP나 정책명이 포함될 수 있습니다.
+
+`report_status.json`에는 서로 다른 두 상태가 기록됩니다.
+
+- `status`: HTML/Excel 파일 저장 상태인 `writing`, `completed`, `failed`
+- `collection_status`: 장비 명령 수집 상태인 `completed`, `partial`, `failed`
+
+파일 `status=completed`라도 `collection_status=partial`이면 일부 장비 명령이 실패한 보고서입니다. HTML 첫 화면의 영향 범위와 권장 조치를 확인해야 합니다.
 
 ## 7. HTML 보고서 보는 방법
 
@@ -284,9 +291,10 @@ python -m wlc_role_acl_collector collect --role-networks config\role_networks.ex
 
 | 오류 | 확인할 내용 |
 | --- | --- |
-| Authentication failed | ID/PW, 계정 잠금, WLC 로그인 권한 확인 |
-| Connection timed out or was refused | IP, 방화벽, SSH/Telnet 활성화, 포트 확인 |
-| Command failed after login | 로그인은 됐지만 `show configuration effective` 또는 `show rights` 권한/응답 문제 확인 |
+| WLC 로그인 인증에 실패했습니다 | ID/PW, 계정 잠금, WLC 로그인 권한 확인 |
+| Enable 권한 전환에 실패했습니다 | enable password 필요 여부, 입력값, 계정 권한 확인 |
+| WLC에 연결하지 못했습니다 | IP, 방화벽, SSH/Telnet 활성화, 포트 확인 |
+| 로그인 후 필수 조회 명령에 실패했습니다 | 로그인은 됐지만 `show configuration effective` 또는 `show rights` 권한/응답 문제 확인 |
 | Unable to open Role network Excel file: File is not a zip file | 실제 Excel `.xlsx`가 아니라 CSV/HTML/구형 XLS를 확장자만 바꾼 파일인지 확인 |
 | 보고서에 Role이 부족함 | 해당 Role의 `show rights <role>` 명령 권한 또는 수집 로그 확인 |
 | Access Check 결과가 예상과 다름 | Service 선택 여부, Alias 상세 수집 여부, 숨겨진 other ACL 표시 여부 확인 |
@@ -294,6 +302,7 @@ python -m wlc_role_acl_collector collect --role-networks config\role_networks.ex
 | 부분 완료 | HTML 첫 화면의 실패 명령, 영향 영역, 영향 Role/SSID를 확인하고 해당 영역은 재수집 전 확정 판단하지 않음 |
 | Timeout seconds 입력 오류 | 5~600 사이 숫자로 입력 |
 | `duration_limit` | 전체 60분 상한에 도달함. 느린 명령과 실패 대상을 확인한 뒤 대상 부하를 고려해 재수집 |
+| 장비 세션 정리 경고 | 보고서 데이터는 생성됐지만 `disconnect()` 성공을 확인하지 못함. 프로그램을 종료하고 WLC 관리 세션 상태 확인 |
 | 사용자 취소 후 보고서가 없음 | 정상 동작. 취소 실행은 완료 보고서를 만들지 않으며 결과 폴더의 run.log만 참고 |
 | `report_status.json`이 `writing` 또는 `failed` | HTML/Excel을 완료본으로 사용하지 말고 수집 로그와 저장 권한 확인 |
 

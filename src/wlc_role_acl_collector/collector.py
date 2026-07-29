@@ -270,8 +270,16 @@ def collect_from_controller(
         if connection is not None:
             try:
                 connection.disconnect()
-            except Exception:
-                pass
+            except Exception as exc:
+                # 수집 데이터와 별개로 세션 종료 확인이 실패했다는 사실을 결과에 남깁니다.
+                result.commands.append(
+                    CommandOutput(
+                        command_id="disconnect",
+                        command="disconnect",
+                        success=False,
+                        error=str(exc),
+                    )
+                )
     return result
 
 

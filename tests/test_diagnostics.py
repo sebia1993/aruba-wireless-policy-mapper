@@ -7,15 +7,23 @@ def test_classifies_authentication_failure():
 
     assert info.category == "authentication"
     assert info.code == "WLC-AUTH-001"
-    assert "Error code: WLC-AUTH-001" in info.as_text()
-    assert "username/password" in info.suggestion
+    assert "오류 코드: WLC-AUTH-001" in info.as_text()
+    assert "ID/PW" in info.suggestion
 
 
 def test_classifies_timeout_failure():
     info = classify_error_message("TCP connection to device failed. Intermediate firewall blocking access.")
 
     assert info.category == "timeout"
-    assert "IP" in info.suggestion
+    assert "WLC IP" in info.suggestion
+
+
+def test_classifies_enable_failure_separately_from_login_failure():
+    info = classify_error_message("enable password failed")
+
+    assert info.category == "enable_authentication"
+    assert info.code == "WLC-AUTH-002"
+    assert "enable password" in info.suggestion
 
 
 def test_summarizes_missing_config_as_command_failure():

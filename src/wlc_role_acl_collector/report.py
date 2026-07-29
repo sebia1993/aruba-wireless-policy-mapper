@@ -7,6 +7,8 @@ as not embedding local Role network mappings unless explicit export is enabled.
 from __future__ import annotations
 
 import json
+import shutil
+import uuid
 from datetime import datetime
 from functools import lru_cache
 from html import escape
@@ -26,6 +28,7 @@ from .collection_health import (
     COLLECTION_FAILED,
     COLLECTION_PARTIAL,
     assess_command_status_rows,
+    assess_collection_results,
     infer_collection_impact_scope,
 )
 from .models import CollectionResult, ParsedController, RoleNetworkDefinition
@@ -130,7 +133,15 @@ def write_reports(
     workbook_path = output_dir / "ssid_role_acl_report.xlsx"
     html_path = output_dir / "ssid_role_acl_report.html"
     status_path = output_dir / "report_status.json"
+    transaction_id = uuid.uuid4().hex
+    staging_workbook_path = output_dir / f".{workbook_path.stem}.{transaction_id}.staging.xlsx"
+    staging_html_path = output_dir / f".{html_path.stem}.{transaction_id}.staging.html"
     started_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    collection_health = assess_collection_results(collection_results)
+    status_context = {
+        "collection_status": collection_health.status,
+        "failed_command_count": collection_health.failed_command_count,
+    }
     atomic_write_text(
         status_path,
         json.dumps(
@@ -138,6 +149,7 @@ def write_reports(
                 "status": "writing",
                 "started_at": started_at,
                 "files": [workbook_path.name, html_path.name],
+                **status_context,
             },
             ensure_ascii=False,
             indent=2,
@@ -146,23 +158,33 @@ def write_reports(
     )
 
     local_role_networks = local_role_networks or []
-    # pandas DataFrame은 Excel과 HTML 양쪽에서 재사용하는 중간 표 형식입니다.
-    # 새 컬럼을 추가할 때는 이 frames 구조와 HTML/Excel 출력을 함께 확인해야 합니다.
-    frames = _build_frames(
-        parsed_controllers,
-        collection_results,
-        local_role_networks,
-        export_local_role_networks=export_local_role_networks,
-    )
     try:
-        _write_excel(workbook_path, frames)
+        # pandas DataFrame은 Excel과 HTML 양쪽에서 재사용하는 중간 표 형식입니다.
+        # 새 컬럼을 추가할 때는 이 frames 구조와 HTML/Excel 출력을 함께 확인해야 합니다.
+        frames = _build_frames(
+            parsed_controllers,
+            collection_results,
+            local_role_networks,
+            export_local_role_networks=export_local_role_networks,
+        )
+        # 두 산출물을 모두 완성하기 전에는 사용자가 보는 최종 파일명을 갱신하지 않습니다.
+        _write_excel(staging_workbook_path, frames)
         _write_html(
-            html_path,
+            staging_html_path,
             frames,
             local_role_networks_enabled=bool(local_role_networks) and export_local_role_networks,
             access_history_enabled=access_history_enabled,
         )
+        _commit_report_artifacts(
+            (
+                (staging_workbook_path, workbook_path),
+                (staging_html_path, html_path),
+            ),
+            transaction_id=transaction_id,
+        )
     except Exception as exc:
+        staging_workbook_path.unlink(missing_ok=True)
+        staging_html_path.unlink(missing_ok=True)
         try:
             atomic_write_text(
                 status_path,
@@ -172,6 +194,8 @@ def write_reports(
                         "started_at": started_at,
                         "failed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
                         "error_type": type(exc).__name__,
+                        "files": [workbook_path.name, html_path.name],
+                        **status_context,
                     },
                     ensure_ascii=False,
                     indent=2,
@@ -190,6 +214,7 @@ def write_reports(
                 "started_at": started_at,
                 "completed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
                 "files": [workbook_path.name, html_path.name],
+                **status_context,
             },
             ensure_ascii=False,
             indent=2,
@@ -197,6 +222,52 @@ def write_reports(
         + "\n",
     )
     return {"xlsx": workbook_path, "html": html_path, "status": status_path}
+
+
+def _commit_report_artifacts(
+    artifacts: tuple[tuple[Path, Path], ...],
+    *,
+    transaction_id: str,
+) -> None:
+    """Replace a report pair and restore previous files if a replacement fails."""
+
+    backups: dict[Path, Path] = {}
+    committed: list[Path] = []
+    preserved_backups: set[Path] = set()
+    try:
+        for _staging, destination in artifacts:
+            if destination.exists():
+                backup = destination.with_name(
+                    f".{destination.stem}.{transaction_id}.backup{destination.suffix}"
+                )
+                shutil.copy2(destination, backup)
+                backups[destination] = backup
+
+        for staging, destination in artifacts:
+            staging.replace(destination)
+            committed.append(destination)
+    except Exception as exc:
+        restore_errors: list[str] = []
+        for destination in reversed(committed):
+            backup = backups.get(destination)
+            try:
+                if backup is not None and backup.exists():
+                    backup.replace(destination)
+                else:
+                    destination.unlink(missing_ok=True)
+            except OSError as restore_exc:
+                restore_errors.append(f"{destination.name}: {restore_exc}")
+                if backup is not None and backup.exists():
+                    preserved_backups.add(backup)
+        if restore_errors:
+            exc.add_note("Unable to restore previous report files: " + "; ".join(restore_errors))
+        raise
+    finally:
+        for staging, _destination in artifacts:
+            staging.unlink(missing_ok=True)
+        for backup in backups.values():
+            if backup not in preserved_backups:
+                backup.unlink(missing_ok=True)
 
 
 def _build_frames(

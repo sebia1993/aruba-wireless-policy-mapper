@@ -186,6 +186,7 @@ show user-table
 - `show configuration effective`가 실패하면 보고서 생성에 필요한 핵심 데이터가 없으므로 실패 처리합니다.
 - 일부 Role이나 Alias 명령이 실패해도 가능한 범위에서 보고서를 생성합니다.
 - `cancel_event`는 각 명령 전후에 확인하고, 취소 시 `cancelled` CommandOutput을 추가한 뒤 `finally`에서 `disconnect()`합니다.
+- `disconnect()`가 예외를 내면 무시하지 않고 `disconnect` CommandOutput을 추가합니다. 수집 데이터 영향 범위는 0으로 유지하되 세션 정리 확인 필요 상태로 표시합니다.
 - 각 명령의 `read_timeout`은 전체 마감까지 남은 시간보다 길 수 없습니다.
 - 전체 60분 상한에 도달하면 `duration_limit` CommandOutput을 추가하고 다음 명령을 실행하지 않습니다.
 - 스레드 강제 종료나 비동기 예외 주입은 사용하지 않습니다.
@@ -243,8 +244,11 @@ Excel과 HTML 보고서를 만드는 파일입니다. 이 프로젝트에서 가
 - Access Check에 필요한 JSON 생성
 - Role 탭 선택과 Access Check Role 선택값 동기화
 - 보안모드에서 민감 데이터 export 차단
-- Excel/HTML/raw를 최종 파일명에 직접 쓰지 않고 `atomic_io.py`를 통해 같은 폴더의 임시 파일을 완성한 뒤 교체
-- `report_status.json`의 `writing/completed/failed` 상태 기록
+- raw는 `atomic_io.py`를 통해 같은 폴더의 임시 파일을 완성한 뒤 교체
+- Excel/HTML은 둘 다 staging 파일로 완성한 뒤 `_commit_report_artifacts()`에서 최종 파일명으로 반영
+- 두 파일 반영 중 하나가 실패하면 새 파일을 제거하고 기존 파일 백업을 복원
+- DataFrame 생성 단계부터 예외 경계에 포함해 모든 생성 실패를 `report_status.json`의 `failed`로 기록
+- `report_status.json`에 파일 `status`, 장비 `collection_status`, `failed_command_count`를 분리해 기록
 
 중요한 보안 기본값:
 
@@ -335,11 +339,12 @@ Service 미선택 동작:
 예:
 
 - 인증 실패
+- enable 권한 전환 실패
 - 접속 timeout
 - 로그인 후 명령 실패
 - 알 수 없는 실패
 
-오류 메시지를 개선하고 싶으면 이 파일을 보면 됩니다.
+사용자 화면의 제목과 조치 안내는 한국어로 제공하고, 외부 라이브러리의 원본 오류 상세는 원인 확인을 위해 함께 표시합니다. 오류 메시지를 개선하고 싶으면 이 파일을 보면 됩니다.
 
 ### 진단 모드 관련 파일
 
@@ -525,7 +530,7 @@ GUI에서는 사내 Role 대역표를 선택하면 내부용 보고서에 실제
 
 ### `report_status.json`과 수집 상태는 다른 값입니다.
 
-`report_status.json`의 `writing/completed/failed`는 파일 저장 트랜잭션 상태입니다. `collection_health.py`의 `completed/partial/failed`는 장비 명령 수집 완전성입니다. 파일 저장은 완료됐어도 장비 선택 명령 실패 때문에 수집 상태는 `partial`일 수 있습니다.
+`report_status.json`의 `status=writing/completed/failed`는 파일 저장 트랜잭션 상태입니다. 같은 JSON의 `collection_status=completed/partial/failed`는 장비 명령 수집 완전성입니다. 파일 저장은 완료됐어도 장비 선택 명령 실패 때문에 수집 상태는 `partial`일 수 있습니다. `failed_command_count`도 같이 기록하므로 자동화에서는 세 값을 함께 확인합니다.
 
 ### 취소는 즉시 스레드 종료가 아닙니다.
 

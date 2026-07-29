@@ -243,10 +243,12 @@ def classify_message_to_code(message: str, *, command_id: str = "") -> Diagnosti
     normalized = (message or "").casefold()
     normalized_command = (command_id or "").casefold()
 
+    if normalized_command == "enable" or (
+        "enable" in normalized and any(token in normalized for token in ("failed", "denied", "password"))
+    ):
+        return DIAGNOSTIC_CODES["WLC-AUTH-002"]
     if any(token in normalized for token in ("authentication", "auth", "password", "login failed")):
         return DIAGNOSTIC_CODES["WLC-AUTH-001"]
-    if "enable" in normalized and any(token in normalized for token in ("failed", "denied", "password")):
-        return DIAGNOSTIC_CODES["WLC-AUTH-002"]
     if "connection refused" in normalized:
         return DIAGNOSTIC_CODES["WLC-NET-002"]
     if any(token in normalized for token in ("no route", "unreachable", "network is unreachable")):

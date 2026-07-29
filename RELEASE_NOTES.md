@@ -18,6 +18,8 @@ GitHub에 push하거나 Release를 준비하기 전에 아래 문서를 함께 �
 - 실패 명령 기준 영향 Role/SSID와 수집 신뢰도 표시
 - GUI 실행 취소와 종료 시 장비 세션 정리
 - WLC 주소/Port/Timeout 검증 및 전체 60분 수집 상한
+- Excel/HTML 묶음 저장과 `report_status.json`의 파일/수집 상태 분리
+- disconnect 실패 가시화와 enable 오류 코드 정확성 개선
 
 ## GitHub Release 본문에 포함되는 정보
 

@@ -15,6 +15,12 @@ def test_message_classification_returns_stable_code():
     assert code.code == "WLC-NET-001"
 
 
+def test_enable_failure_is_classified_before_generic_password_failure():
+    code = classify_message_to_code("enable password failed", command_id="enable")
+
+    assert code.code == "WLC-AUTH-002"
+
+
 def test_legacy_failure_info_exposes_new_code():
     info = classify_error_message("Authentication failed: bad password")
 

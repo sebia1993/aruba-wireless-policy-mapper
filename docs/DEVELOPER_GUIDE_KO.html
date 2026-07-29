@@ -261,6 +261,7 @@ show user-table</code></pre>
       <li><code>show configuration effective</code>가 실패하면 보고서 생성에 필요한 핵심 데이터가 없으므로 실패 처리합니다.</li>
       <li>일부 Role이나 Alias 명령이 실패해도 가능한 범위에서 보고서를 생성합니다.</li>
       <li><code>cancel_event</code>는 각 명령 전후에 확인하고, 취소 시 <code>cancelled</code> CommandOutput을 추가한 뒤 <code>finally</code>에서 <code>disconnect()</code>합니다.</li>
+      <li><code>disconnect()</code>가 예외를 내면 무시하지 않고 <code>disconnect</code> CommandOutput을 추가합니다. 수집 데이터 영향 범위는 0으로 유지하되 세션 정리 확인 필요 상태로 표시합니다.</li>
       <li>각 명령의 <code>read_timeout</code>은 전체 마감까지 남은 시간보다 길 수 없습니다.</li>
       <li>전체 60분 상한에 도달하면 <code>duration_limit</code> CommandOutput을 추가하고 다음 명령을 실행하지 않습니다.</li>
       <li>스레드 강제 종료나 비동기 예외 주입은 사용하지 않습니다.</li>
@@ -311,8 +312,11 @@ show user-table</code></pre>
       <li>Access Check에 필요한 JSON 생성</li>
       <li>Role 탭 선택과 Access Check Role 선택값 동기화</li>
       <li>보안모드에서 민감 데이터 export 차단</li>
-      <li>Excel/HTML/raw를 최종 파일명에 직접 쓰지 않고 <code>atomic_io.py</code>를 통해 같은 폴더의 임시 파일을 완성한 뒤 교체</li>
-      <li><code>report_status.json</code>의 <code>writing/completed/failed</code> 상태 기록</li>
+      <li>raw는 <code>atomic_io.py</code>를 통해 같은 폴더의 임시 파일을 완성한 뒤 교체</li>
+      <li>Excel/HTML은 둘 다 staging 파일로 완성한 뒤 <code>_commit_report_artifacts()</code>에서 최종 파일명으로 반영</li>
+      <li>두 파일 반영 중 하나가 실패하면 새 파일을 제거하고 기존 파일 백업을 복원</li>
+      <li>DataFrame 생성 단계부터 예외 경계에 포함해 모든 생성 실패를 <code>report_status.json</code>의 <code>failed</code>로 기록</li>
+      <li><code>report_status.json</code>에 파일 <code>status</code>, 장비 <code>collection_status</code>, <code>failed_command_count</code>를 분리해 기록</li>
     </ul>
     <p>중요한 보안 기본값:</p>
     <pre><code>export_local_role_networks=False
@@ -386,11 +390,12 @@ access_history_enabled=False</code></pre>
     <p>예:</p>
     <ul>
       <li>인증 실패</li>
+      <li>enable 권한 전환 실패</li>
       <li>접속 timeout</li>
       <li>로그인 후 명령 실패</li>
       <li>알 수 없는 실패</li>
     </ul>
-    <p>오류 메시지를 개선하고 싶으면 이 파일을 보면 됩니다.</p>
+    <p>사용자 화면의 제목과 조치 안내는 한국어로 제공하고, 외부 라이브러리의 원본 오류 상세는 원인 확인을 위해 함께 표시합니다. 오류 메시지를 개선하고 싶으면 이 파일을 보면 됩니다.</p>
     <h3>진단 모드 관련 파일</h3>
     <p>진단 모드는 실제 장비 원본 출력 없이 오류 코드와 단계 상태만 저장합니다.</p>
     <ul>
@@ -520,7 +525,7 @@ git commit -m &quot;Add developer guide&quot;</code></pre>
     <h3><code>show user-table</code>은 참고용입니다.</h3>
     <p>현재 접속한 사용자 수와 관측 VLAN/Network를 알 수 있지만, Role의 공식 네트워크 대역이라고 단정하면 안 됩니다.</p>
     <h3><code>report_status.json</code>과 수집 상태는 다른 값입니다.</h3>
-    <p><code>report_status.json</code>의 <code>writing/completed/failed</code>는 파일 저장 트랜잭션 상태입니다. <code>collection_health.py</code>의 <code>completed/partial/failed</code>는 장비 명령 수집 완전성입니다. 파일 저장은 완료됐어도 장비 선택 명령 실패 때문에 수집 상태는 <code>partial</code>일 수 있습니다.</p>
+    <p><code>report_status.json</code>의 <code>status=writing/completed/failed</code>는 파일 저장 트랜잭션 상태입니다. 같은 JSON의 <code>collection_status=completed/partial/failed</code>는 장비 명령 수집 완전성입니다. 파일 저장은 완료됐어도 장비 선택 명령 실패 때문에 수집 상태는 <code>partial</code>일 수 있습니다. <code>failed_command_count</code>도 같이 기록하므로 자동화에서는 세 값을 함께 확인합니다.</p>
     <h3>취소는 즉시 스레드 종료가 아닙니다.</h3>
     <p>Netmiko 호출 중 Python 스레드를 강제로 죽이면 세션과 파일 정리를 보장하기 어렵습니다. 현재 구현은 <code>threading.Event</code>를 사용하고, 진행 중 명령의 응답 또는 Timeout 이후 다음 명령 경계에서 멈춥니다.</p>
     <h2>13. 새 기능을 넣을 때 문서도 같이 바꿀 기준</h2>

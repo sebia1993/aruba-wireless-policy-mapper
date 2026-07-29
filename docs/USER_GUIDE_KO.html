@@ -255,10 +255,16 @@ python -m wlc_role_acl_collector.gui_app</code></pre>
       <tr><td><code>ssid_role_acl_report.xlsx</code></td><td>Excel 보고서</td></tr>
       <tr><td><code>run.log</code></td><td>실행 과정과 오류 원인 로그</td></tr>
       <tr><td><code>raw\&lt;controller&gt;.txt</code></td><td>수집한 원본 명령 결과 일부</td></tr>
-      <tr><td><code>report_status.json</code></td><td>보고서 저장 상태. <code>completed</code>가 아니면 HTML/Excel을 완료본으로 사용하지 않음</td></tr>
+      <tr><td><code>report_status.json</code></td><td>보고서 저장 상태와 수집 완전성. 파일 <code>status</code>가 <code>completed</code>가 아니면 HTML/Excel을 완료본으로 사용하지 않음</td></tr>
       </tbody>
     </table>
     <p>주의: <code>show user-table</code> 원문은 개인정보 노출을 줄이기 위해 raw 파일에 그대로 저장하지 않습니다. 다만 ACL, Alias, WLC 설정에는 내부 IP나 정책명이 포함될 수 있습니다.</p>
+    <p><code>report_status.json</code>에는 서로 다른 두 상태가 기록됩니다.</p>
+    <ul>
+      <li><code>status</code>: HTML/Excel 파일 저장 상태인 <code>writing</code>, <code>completed</code>, <code>failed</code></li>
+      <li><code>collection_status</code>: 장비 명령 수집 상태인 <code>completed</code>, <code>partial</code>, <code>failed</code></li>
+    </ul>
+    <p>파일 <code>status=completed</code>라도 <code>collection_status=partial</code>이면 일부 장비 명령이 실패한 보고서입니다. HTML 첫 화면의 영향 범위와 권장 조치를 확인해야 합니다.</p>
     <h2>7. HTML 보고서 보는 방법</h2>
     <p>HTML 파일을 브라우저로 열면 Role별 ACL을 확인할 수 있습니다.</p>
     <ul>
@@ -358,9 +364,10 @@ python -m wlc_role_acl_collector.gui_app</code></pre>
     <table>
       <thead><tr><th>오류</th><th>확인할 내용</th></tr></thead>
       <tbody>
-      <tr><td>Authentication failed</td><td>ID/PW, 계정 잠금, WLC 로그인 권한 확인</td></tr>
-      <tr><td>Connection timed out or was refused</td><td>IP, 방화벽, SSH/Telnet 활성화, 포트 확인</td></tr>
-      <tr><td>Command failed after login</td><td>로그인은 됐지만 <code>show configuration effective</code> 또는 <code>show rights</code> 권한/응답 문제 확인</td></tr>
+      <tr><td>WLC 로그인 인증에 실패했습니다</td><td>ID/PW, 계정 잠금, WLC 로그인 권한 확인</td></tr>
+      <tr><td>Enable 권한 전환에 실패했습니다</td><td>enable password 필요 여부, 입력값, 계정 권한 확인</td></tr>
+      <tr><td>WLC에 연결하지 못했습니다</td><td>IP, 방화벽, SSH/Telnet 활성화, 포트 확인</td></tr>
+      <tr><td>로그인 후 필수 조회 명령에 실패했습니다</td><td>로그인은 됐지만 <code>show configuration effective</code> 또는 <code>show rights</code> 권한/응답 문제 확인</td></tr>
       <tr><td>Unable to open Role network Excel file: File is not a zip file</td><td>실제 Excel <code>.xlsx</code>가 아니라 CSV/HTML/구형 XLS를 확장자만 바꾼 파일인지 확인</td></tr>
       <tr><td>보고서에 Role이 부족함</td><td>해당 Role의 <code>show rights &lt;role&gt;</code> 명령 권한 또는 수집 로그 확인</td></tr>
       <tr><td>Access Check 결과가 예상과 다름</td><td>Service 선택 여부, Alias 상세 수집 여부, 숨겨진 other ACL 표시 여부 확인</td></tr>
@@ -368,6 +375,7 @@ python -m wlc_role_acl_collector.gui_app</code></pre>
       <tr><td>부분 완료</td><td>HTML 첫 화면의 실패 명령, 영향 영역, 영향 Role/SSID를 확인하고 해당 영역은 재수집 전 확정 판단하지 않음</td></tr>
       <tr><td>Timeout seconds 입력 오류</td><td>5~600 사이 숫자로 입력</td></tr>
       <tr><td><code>duration_limit</code></td><td>전체 60분 상한에 도달함. 느린 명령과 실패 대상을 확인한 뒤 대상 부하를 고려해 재수집</td></tr>
+      <tr><td>장비 세션 정리 경고</td><td>보고서 데이터는 생성됐지만 <code>disconnect()</code> 성공을 확인하지 못함. 프로그램을 종료하고 WLC 관리 세션 상태 확인</td></tr>
       <tr><td>사용자 취소 후 보고서가 없음</td><td>정상 동작. 취소 실행은 완료 보고서를 만들지 않으며 결과 폴더의 run.log만 참고</td></tr>
       <tr><td><code>report_status.json</code>이 <code>writing</code> 또는 <code>failed</code></td><td>HTML/Excel을 완료본으로 사용하지 말고 수집 로그와 저장 권한 확인</td></tr>
       </tbody>

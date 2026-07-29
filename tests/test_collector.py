@@ -12,10 +12,11 @@ FIXTURE = Path(__file__).parent / "fixtures" / "sample_controller" / "show_confi
 
 
 class FakeConnection:
-    def __init__(self, *, responses=None, failures=None, enable_failure=None):
+    def __init__(self, *, responses=None, failures=None, enable_failure=None, disconnect_failure=None):
         self.responses = responses or {}
         self.failures = failures or {}
         self.enable_failure = enable_failure
+        self.disconnect_failure = disconnect_failure
         self.enable_called = False
         self.commands = []
         self.disconnected = False
@@ -33,6 +34,8 @@ class FakeConnection:
 
     def disconnect(self):
         self.disconnected = True
+        if self.disconnect_failure:
+            raise self.disconnect_failure
 
 
 def _install_fake_netmiko(monkeypatch, connection):
@@ -186,6 +189,29 @@ def test_collect_duration_limit_stops_before_first_command_and_disconnects(monke
     assert duration_failure.success is False
     assert connection.commands == []
     assert any(event == "duration_limit" for event, _payload in events)
+    assert connection.disconnected is True
+
+
+def test_collect_records_disconnect_failure_without_losing_collected_data(monkeypatch):
+    config = FIXTURE.read_text(encoding="utf-8")
+    connection = FakeConnection(
+        responses={
+            "show configuration effective": config,
+            "show netdestination controller": "Name: controller\n1 host 10.10.10.1 32\n",
+        },
+        disconnect_failure=RuntimeError("socket cleanup failed"),
+    )
+    _install_fake_netmiko(monkeypatch, connection)
+
+    result = collect_from_controller(
+        Controller(name="wlc", host="192.0.2.10"),
+        credentials=ControllerCredentials(username="admin", password="secret"),
+    )
+
+    disconnect = next(command for command in result.commands if command.command_id == "disconnect")
+    assert result.command_output("configuration_effective") == config
+    assert disconnect.success is False
+    assert disconnect.error == "socket cleanup failed"
     assert connection.disconnected is True
 
 
