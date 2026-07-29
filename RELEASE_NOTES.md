@@ -21,6 +21,7 @@ GitHub에 push하거나 Release를 준비하기 전에 아래 문서를 함께 �
 - Excel/HTML 묶음 저장과 `report_status.json`의 파일/수집 상태 분리
 - disconnect 실패 가시화와 enable 오류 코드 정확성 개선
 - Streamlit 접속 방식별 기본 포트와 단계별 안전 실패 요약
+- CLI 다중 WLC 실패 격리와 traceback 없는 저장/파싱 오류 처리
 
 ## GitHub Release 본문에 포함되는 정보
 

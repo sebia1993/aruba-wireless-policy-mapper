@@ -221,3 +221,21 @@ def test_impact_scope_marks_unknown_alias_and_duration_scope_conservatively():
     assert duration_scope.affected_roles == ("employee",)
     assert duration_scope.affected_ssids == ("CORP",)
     assert duration_scope.identification_incomplete is True
+
+
+def test_unknown_failure_scope_does_not_mark_other_controllers_as_affected():
+    scope = infer_collection_impact_scope(
+        [{"controller": "wlc-a", "command_id": "parse_runtime", "success": False}],
+        [
+            {"controller": "wlc-a", "role": "employee"},
+            {"controller": "wlc-b", "role": "guest"},
+        ],
+        [
+            {"controller": "wlc-a", "role": "employee", "ssid": "CORP"},
+            {"controller": "wlc-b", "role": "guest", "ssid": "GUEST"},
+        ],
+    )
+
+    assert scope.affected_roles == ("employee",)
+    assert scope.affected_ssids == ("CORP",)
+    assert scope.identification_incomplete is True

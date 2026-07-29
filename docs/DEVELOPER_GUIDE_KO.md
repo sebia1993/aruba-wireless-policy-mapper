@@ -136,7 +136,11 @@ wlc_role_acl_collector/
 
 ### `cli.py`와 `web_logic.py`
 
-CLI collect 종료 코드는 `0=성공`, `1=필수 수집 실패`, `2=입력 오류`, `3=선택 명령 일부 실패`입니다. 자동화에서 보고서 파일 존재 여부만 보지 말고 종료 코드를 함께 확인해야 합니다.
+CLI collect 종료 코드는 `0=성공`, `1=필수 수집·장비별 런타임·파싱·저장 실패`, `2=입력 오류`, `3=선택 명령 일부 실패`입니다. 자동화에서 보고서 파일 존재 여부만 보지 말고 종료 코드를 함께 확인해야 합니다.
+
+`cli._collect()`은 대상 설정, 결과 폴더 생성, 장비별 수집, raw 저장, 장비별 파싱, 최종 보고서 저장을 별도 예외 경계로 처리합니다. 장비별 수집/파싱 예외는 `collection_runtime` 또는 `parse_runtime` CommandOutput으로 바꾸고 다음 WLC를 계속 처리합니다. 로컬 저장 실패는 결과 무결성을 보장할 수 없으므로 `WLC-RPT-001/002`를 표시하고 전체 실행을 종료합니다. `_diagnose()`도 대상별 예외를 격리합니다.
+
+다중 컨트롤러 영향 범위 계산은 실패 command row의 controller와 같은 ACL/SSID 행만 확장해야 합니다. `collection_health.infer_collection_impact_scope()`에서 다른 컨트롤러의 Role/SSID까지 영향 대상으로 섞지 않습니다.
 
 Streamlit은 `_ACTIVE_TARGETS`와 `_target_collection_slot()`으로 같은 WLC에 대한 중복 수집을 즉시 거부합니다. 기본 launcher 주소는 `127.0.0.1`이며, 원격 HTTP 노출은 기본 동작이 아닙니다. 브라우저 화면에는 Python traceback을 직접 출력하지 않습니다.
 

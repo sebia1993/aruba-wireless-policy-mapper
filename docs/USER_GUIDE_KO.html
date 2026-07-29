@@ -362,6 +362,7 @@ python -m wlc_role_acl_collector.gui_app</code></pre>
     <p>CLI는 기본적으로 대역표를 보고서에 내보내지 않습니다. CLI에서 내부 보관용 보고서에 Role network를 포함해야 하는 경우에만 아래 옵션을 사용합니다.</p>
     <pre><code>python -m wlc_role_acl_collector collect --role-networks config\role_networks.example.xlsx --export-local-role-networks</code></pre>
     <p>이 옵션을 사용한 보고서는 내부 네트워크 대역이 포함될 수 있으므로 외부 반출 금지 대상으로 취급해야 합니다.</p>
+    <p>CLI에서 여러 WLC를 지정하면 장비 하나의 예상 밖 수집·파싱 오류가 다른 장비의 수집을 중단시키지 않습니다. 실패 장비는 raw와 보고서 상태에 남고 종료 코드 <code>1</code>을 반환합니다. 입력 오류는 <code>2</code>, 선택 명령 일부 실패는 <code>3</code>입니다. 출력 폴더나 보고서 저장 실패는 <code>WLC-RPT-001</code> 또는 <code>WLC-RPT-002</code>와 조치 안내를 표시하며 Python traceback을 일반 오류 안내로 사용하지 않습니다.</p>
     <h2>11. 자주 발생하는 오류</h2>
     <table>
       <thead><tr><th>오류</th><th>확인할 내용</th></tr></thead>

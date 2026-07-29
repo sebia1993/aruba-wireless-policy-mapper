@@ -12,9 +12,10 @@ from .collection_health import (
 )
 from .config import load_controllers
 from .diagnostic_mode import run_diagnostic
+from .diagnostics import FailureInfo, classify_error_message
 from .interactive import prompt_controller_targets
 from .mock_server import run_mock_server
-from .models import CollectionResult, ControllerTarget
+from .models import CollectionResult, CommandOutput, ControllerTarget
 from .report import build_parsed_controllers, create_run_dir, write_raw_result, write_reports
 from .role_networks import RoleNetworkDefinitionError, load_role_network_definitions
 from .validation import validate_timeout_seconds
@@ -100,48 +101,142 @@ def _collect(args: argparse.Namespace) -> int:
         print(f"Role network Excel error: {exc}", file=sys.stderr)
         return COLLECT_EXIT_INPUT_ERROR
 
-    targets = _resolve_targets(args)
+    try:
+        targets = _resolve_targets(args)
+    except (OSError, ValueError, EOFError) as exc:
+        print(f"WLC 대상 설정 오류: {exc}", file=sys.stderr)
+        return COLLECT_EXIT_INPUT_ERROR
     if not targets:
         print("No WLC targets were provided.", file=sys.stderr)
         return COLLECT_EXIT_INPUT_ERROR
 
-    run_dir = create_run_dir(args.output_dir)
+    try:
+        run_dir = create_run_dir(args.output_dir)
+    except (OSError, RuntimeError) as exc:
+        _print_failure(
+            _local_failure(
+                code="WLC-RPT-001",
+                title="결과 폴더를 만들지 못했습니다",
+                detail=str(exc),
+                suggestion="쓰기 가능한 로컬 폴더를 --output-dir로 지정하고 다시 실행하세요.",
+            )
+        )
+        return COLLECT_EXIT_FAILED
     raw_dir = run_dir / "raw"
 
-    results = []
+    results: list[CollectionResult] = []
+    runtime_failure_count = 0
     for target in targets:
         controller = target.controller
-        if args.offline_raw_dir:
-            result = collect_from_offline_raw(controller, args.offline_raw_dir)
-        else:
-            result = collect_from_controller(
-                controller,
-                timeout=timeout,
-                credentials=target.credentials,
+        try:
+            if args.offline_raw_dir:
+                result = collect_from_offline_raw(controller, args.offline_raw_dir)
+            else:
+                result = collect_from_controller(
+                    controller,
+                    timeout=timeout,
+                    credentials=target.credentials,
+                )
+        except Exception as exc:
+            runtime_failure_count += 1
+            failure = classify_error_message(str(exc))
+            print(f"[{controller.name}] {failure.as_text()}", file=sys.stderr)
+            result = CollectionResult(
+                controller=controller,
+                commands=[
+                    CommandOutput(
+                        command_id="collection_runtime",
+                        command="collection runtime",
+                        success=False,
+                        error=str(exc),
+                    )
+                ],
             )
-        write_raw_result(result, raw_dir)
+        try:
+            write_raw_result(result, raw_dir)
+        except OSError as exc:
+            _print_failure(
+                _local_failure(
+                    code="WLC-RPT-001",
+                    title="수집 원본 파일을 저장하지 못했습니다",
+                    detail=str(exc),
+                    suggestion="출력 폴더 권한, 디스크 여유 공간, 파일 잠금 상태를 확인하세요.",
+                ),
+                prefix=f"[{controller.name}] ",
+            )
+            return COLLECT_EXIT_FAILED
         results.append(result)
 
-    parsed = build_parsed_controllers(results)
-    files = write_reports(
-        parsed_controllers=parsed,
-        collection_results=results,
-        output_dir=run_dir,
-        local_role_networks=local_role_networks,
-        export_local_role_networks=args.export_local_role_networks,
-        access_history_enabled=False,
-    )
+    parsed = []
+    for result in results:
+        try:
+            parsed.extend(build_parsed_controllers([result]))
+        except Exception as exc:
+            runtime_failure_count += 1
+            failure = _local_failure(
+                code="WLC-PRS-001",
+                title="수집한 WLC 설정을 해석하지 못했습니다",
+                detail=str(exc),
+                suggestion="대상이 Aruba AOS8 WLC인지 확인하고 안전 진단 결과를 검토하세요.",
+            )
+            print(f"[{result.controller.name}] {failure.as_text()}", file=sys.stderr)
+            result.commands.append(
+                CommandOutput(
+                    command_id="parse_runtime",
+                    command="parse collected configuration",
+                    success=False,
+                    error=str(exc),
+                )
+            )
+            try:
+                write_raw_result(result, raw_dir)
+            except OSError as raw_exc:
+                _print_failure(
+                    _local_failure(
+                        code="WLC-RPT-001",
+                        title="파싱 실패 상태를 원본 파일에 기록하지 못했습니다",
+                        detail=str(raw_exc),
+                        suggestion="출력 폴더 권한과 파일 잠금 상태를 확인하세요.",
+                    ),
+                    prefix=f"[{result.controller.name}] ",
+                )
+                return COLLECT_EXIT_FAILED
+
+    try:
+        files = write_reports(
+            parsed_controllers=parsed,
+            collection_results=results,
+            output_dir=run_dir,
+            local_role_networks=local_role_networks,
+            export_local_role_networks=args.export_local_role_networks,
+            access_history_enabled=False,
+        )
+    except Exception as exc:
+        _print_failure(
+            _local_failure(
+                code="WLC-RPT-002",
+                title="HTML/Excel 보고서를 생성하지 못했습니다",
+                detail=str(exc),
+                suggestion="report_status.json, 출력 폴더 권한, 디스크 여유 공간을 확인하세요.",
+            )
+        )
+        return COLLECT_EXIT_FAILED
+
     print(f"Output directory: {run_dir}")
     if local_role_networks and not args.export_local_role_networks:
         print("Role network Excel was loaded for this run only; local networks were not exported.")
     print(f"Excel: {files['xlsx']}")
     print(f"HTML: {files['html']}")
     exit_code = _collection_exit_code(results)
+    if runtime_failure_count:
+        exit_code = COLLECT_EXIT_FAILED
+
     if exit_code == COLLECT_EXIT_FAILED:
         failed_controllers = [
             result.controller.name
             for result in results
             if not result.command_output("configuration_effective")
+            or any(command.command_id == "parse_runtime" for command in result.commands)
         ]
         print(
             "Collection failed for required WLC data: " + ", ".join(failed_controllers),
@@ -182,15 +277,29 @@ def _diagnose(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return COLLECT_EXIT_INPUT_ERROR
-    targets = _resolve_targets(args)
+    try:
+        targets = _resolve_targets(args)
+    except (OSError, ValueError, EOFError) as exc:
+        print(f"WLC 대상 설정 오류: {exc}", file=sys.stderr)
+        return COLLECT_EXIT_INPUT_ERROR
+    if not targets:
+        print("No WLC targets were provided.", file=sys.stderr)
+        return COLLECT_EXIT_INPUT_ERROR
+
     exit_code = 0
     for target in targets:
-        diagnostic = run_diagnostic(
-            target,
-            output_root=args.output_dir,
-            timeout=timeout,
-            offline_raw_dir=args.offline_raw_dir,
-        )
+        try:
+            diagnostic = run_diagnostic(
+                target,
+                output_root=args.output_dir,
+                timeout=timeout,
+                offline_raw_dir=args.offline_raw_dir,
+            )
+        except Exception as exc:
+            failure = classify_error_message(str(exc))
+            print(f"[{target.controller.name}] {failure.as_text()}", file=sys.stderr)
+            exit_code = COLLECT_EXIT_FAILED
+            continue
         print(f"Diagnostic output directory: {diagnostic.run_dir}")
         print(f"Primary code: {diagnostic.primary_code}")
         print(f"Diagnostic JSON: {diagnostic.report_paths['json']}")
@@ -198,3 +307,17 @@ def _diagnose(args: argparse.Namespace) -> int:
         if diagnostic.primary_code != "OK":
             exit_code = 1
     return exit_code
+
+
+def _local_failure(*, code: str, title: str, detail: str, suggestion: str) -> FailureInfo:
+    return FailureInfo(
+        category="local_runtime",
+        title=title,
+        detail=detail,
+        suggestion=suggestion,
+        code=code,
+    )
+
+
+def _print_failure(failure: FailureInfo, *, prefix: str = "") -> None:
+    print(f"{prefix}{failure.as_text()}", file=sys.stderr)

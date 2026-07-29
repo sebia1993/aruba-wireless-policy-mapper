@@ -131,17 +131,6 @@ def infer_collection_impact_scope(
     affected_roles: set[str] = set()
     affected_ssids: set[str] = set()
     identification_incomplete = False
-    all_roles = {
-        str(row.get("role") or "").strip()
-        for row in (*acl_row_list, *ssid_row_list)
-        if str(row.get("role") or "").strip()
-    }
-    all_ssids = {
-        str(row.get("ssid") or "").strip()
-        for row in ssid_row_list
-        if str(row.get("ssid") or "").strip()
-    }
-
     for command_row in command_row_list:
         if _bool_value(command_row.get("success"), default=True):
             continue
@@ -202,8 +191,16 @@ def infer_collection_impact_scope(
             continue
 
         if command_id not in {"clock", "version", "disconnect"}:
-            affected_roles.update(all_roles)
-            affected_ssids.update(all_ssids)
+            affected_roles.update(
+                str(row.get("role") or "").strip()
+                for row in (*controller_acl_rows, *controller_ssid_rows)
+                if str(row.get("role") or "").strip()
+            )
+            affected_ssids.update(
+                str(row.get("ssid") or "").strip()
+                for row in controller_ssid_rows
+                if str(row.get("ssid") or "").strip()
+            )
             identification_incomplete = True
 
     return CollectionImpactScope(
@@ -299,6 +296,8 @@ def _impact_area(command_id: str) -> str:
         "ip_interface_brief": "VLAN·인터페이스 대역",
         "user_table": "Role별 관측 사용자 수",
         "disconnect": "장비 세션 정리",
+        "collection_runtime": "대상 WLC 전체 수집",
+        "parse_runtime": "수집 결과 해석",
     }.get(command_id, "일부 수집 항목")
 
 
