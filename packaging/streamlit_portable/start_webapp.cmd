@@ -7,7 +7,7 @@ if exist "%~dp0webapp_settings.cmd" (
     call "%~dp0webapp_settings.cmd"
 )
 
-if "%WLC_WEB_ADDRESS%"=="" set "WLC_WEB_ADDRESS=0.0.0.0"
+if "%WLC_WEB_ADDRESS%"=="" set "WLC_WEB_ADDRESS=127.0.0.1"
 if "%WLC_WEB_PORT%"=="" set "WLC_WEB_PORT=8763"
 
 set "PYTHON_EXE=%~dp0python\python.exe"
@@ -29,7 +29,7 @@ echo [INFO] WLC Role ACL Collector Streamlit 웹앱을 시작합니다.
 echo [INFO] 이 창을 닫으면 웹앱도 종료됩니다.
 echo [INFO] 첫 실행은 내장 Python과 Streamlit 초기화 때문에 잠시 느릴 수 있습니다.
 echo [INFO] 로컬 접속 주소: http://127.0.0.1:%WLC_WEB_PORT%
-echo [INFO] 다른 PC 접속 주소 예시: http://공용PC_IP:%WLC_WEB_PORT%
+if /I not "%WLC_WEB_ADDRESS%"=="127.0.0.1" echo [WARNING] 원격 HTTP 접속에서는 장비 계정이 암호화되지 않습니다.
 echo.
 
 "%PYTHON_EXE%" -m streamlit run "%~dp0app\app.py" ^

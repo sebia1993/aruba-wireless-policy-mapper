@@ -82,7 +82,10 @@ def run_diagnostic(
             events.append(safe_info_event("DGN-CMD", "Command completed.", command_id=command_id))
         elif event == "command_error":
             code = classify_message_to_code(str(payload.get("error", "")), command_id=command_id)
-            events.append(event_from_code(code, command_id=command_id, detail=str(payload.get("error", ""))))
+            detail = str(payload.get("error", ""))
+            if command_id.startswith(("rights::", "netdestination::")):
+                detail = "Dynamic Role/Alias command failed; raw device detail was omitted."
+            events.append(event_from_code(code, command_id=command_id, detail=detail))
         elif event in {"roles_discovered", "aliases_discovered"}:
             events.append(safe_info_event("DGN-PARSE", f"{event.replace('_', ' ').title()}."))
 

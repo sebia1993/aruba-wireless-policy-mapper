@@ -12,9 +12,9 @@ def test_diagnostic_report_writes_no_raw_output_and_redacts_sensitive_metadata(t
                 stage="DGN-NET",
                 status="error",
                 code="WLC-NET-001",
-                command_id="connect",
+                command_id="rights::finance-employee",
                 message="Connection timeout",
-                detail="10.10.10.10 password Secret123 wlc-prod-01",
+                detail="10.10.10.10 password Secret123 wlc-prod-01 show rights finance-employee",
             ),
             event_from_code("WLC-NET-001", command_id="connect"),
         ],
@@ -32,3 +32,4 @@ def test_diagnostic_report_writes_no_raw_output_and_redacts_sensitive_metadata(t
         assert "10.10.10.10" not in text
         assert "Secret123" not in text
         assert "wlc-prod-01" not in text
+        assert "finance-employee" not in text

@@ -1,9 +1,109 @@
+import pytest
+
 from wlc_role_acl_collector.acl_evaluator import (
     EXACT_ROLE_ACL_WARNING,
     NO_MATCHING_ROLE_ACL_VERDICT,
     build_access_check_data,
     evaluate_access,
 )
+
+
+@pytest.mark.parametrize(("first_action", "second_action"), [("deny", "permit"), ("permit", "deny")])
+def test_evaluate_access_stops_at_potential_match_when_alias_detail_is_missing(
+    first_action,
+    second_action,
+):
+    access_data = build_access_check_data(
+        [
+            {
+                "role": "corp-employee",
+                "user_count": 1,
+                "zero_user_hidden": False,
+                "panel_id": "role-panel-1",
+                "rows": [
+                    {
+                        "acl": "corp-employee",
+                        "sequence": 1,
+                        "action": first_action,
+                        "source": "any",
+                        "destination": "alias missing-alias",
+                        "service": "any",
+                        "raw_rule": "",
+                    },
+                    {
+                        "acl": "corp-employee",
+                        "sequence": 2,
+                        "action": second_action,
+                        "source": "any",
+                        "destination": "any",
+                        "service": "any",
+                        "raw_rule": "",
+                    },
+                ],
+            }
+        ],
+        [],
+        [],
+    )
+
+    result = evaluate_access(
+        access_data,
+        role="corp-employee",
+        source_ip="10.40.1.10",
+        destination_ip="8.8.8.8",
+    )
+
+    assert result["status"] == "unknown"
+    assert result["verdict"] == "판정 불가(ACL/Alias 정보 불완전)"
+    assert result["matchedRule"] is None
+    assert result["candidateRule"]["sequence"] == "1"
+    assert any("Alias detail was not collected" in warning for warning in result["warnings"])
+    assert any("첫 매칭 여부" in warning for warning in result["warnings"])
+
+
+def test_evaluate_access_can_skip_uncertain_rule_when_an_endpoint_definitely_misses():
+    access_data = build_access_check_data(
+        [
+            {
+                "role": "corp-employee",
+                "user_count": 1,
+                "zero_user_hidden": False,
+                "panel_id": "role-panel-1",
+                "rows": [
+                    {
+                        "acl": "corp-employee",
+                        "sequence": 1,
+                        "action": "deny",
+                        "source": "network 192.0.2.0 255.255.255.0",
+                        "destination": "alias missing-alias",
+                        "service": "any",
+                        "raw_rule": "",
+                    },
+                    {
+                        "acl": "corp-employee",
+                        "sequence": 2,
+                        "action": "permit",
+                        "source": "any",
+                        "destination": "any",
+                        "service": "any",
+                        "raw_rule": "",
+                    },
+                ],
+            }
+        ],
+        [],
+        [],
+    )
+
+    result = evaluate_access(
+        access_data,
+        role="corp-employee",
+        source_ip="10.40.1.10",
+        destination_ip="8.8.8.8",
+    )
+
+    assert result["status"] == "allowed"
+    assert result["matchedRule"]["sequence"] == "2"
 
 
 def test_evaluate_access_blocks_first_matching_deny_rule():

@@ -19,3 +19,19 @@ def test_redaction_masks_sensitive_values_with_stable_labels():
 
 def test_redaction_self_test_passes():
     assert redaction_self_test()
+
+
+def test_redaction_masks_dynamic_role_and_alias_command_identifiers():
+    redactor = Redactor()
+
+    redacted = redactor.redact(
+        "rights::finance-employee | show rights finance-employee | "
+        "netdestination::payroll-servers | show netdestination payroll-servers"
+    )
+
+    assert "finance-employee" not in redacted
+    assert "payroll-servers" not in redacted
+    assert "rights::<ROLE:1>" in redacted
+    assert "show rights <ROLE:1>" in redacted
+    assert "netdestination::<ALIAS:1>" in redacted
+    assert "show netdestination <ALIAS:1>" in redacted

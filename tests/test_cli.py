@@ -5,7 +5,13 @@ from openpyxl import Workbook, load_workbook
 import wlc_role_acl_collector.cli as cli
 from wlc_role_acl_collector.cli import main
 from wlc_role_acl_collector.interactive import prompt_controller_targets
-from wlc_role_acl_collector.models import CollectionResult
+from wlc_role_acl_collector.models import (
+    CollectionResult,
+    CommandOutput,
+    Controller,
+    ControllerCredentials,
+    ControllerTarget,
+)
 
 
 def test_cli_collect_offline(tmp_path):
@@ -98,7 +104,16 @@ def test_cli_interactive_defaults_to_ssh(monkeypatch, tmp_path):
     def fake_collect(controller, *, timeout, credentials):
         captured["controller"] = controller
         captured["credentials"] = credentials
-        return CollectionResult(controller=controller)
+        return CollectionResult(
+            controller=controller,
+            commands=[
+                CommandOutput(
+                    command_id="configuration_effective",
+                    command="show configuration effective",
+                    output="show configuration effective\n",
+                )
+            ],
+        )
 
     monkeypatch.setattr(cli, "collect_from_controller", fake_collect)
 
@@ -111,6 +126,69 @@ def test_cli_interactive_defaults_to_ssh(monkeypatch, tmp_path):
     assert captured["controller"].port == 22
     assert captured["controller"].device_type == "aruba_os"
     assert captured["credentials"].username == "admin"
+
+
+def test_cli_returns_failure_when_required_configuration_was_not_collected(monkeypatch, tmp_path, capsys):
+    controller = Controller(name="failed-wlc", host="192.0.2.10")
+    target = ControllerTarget(
+        controller=controller,
+        credentials=ControllerCredentials(username="admin", password="secret"),
+    )
+    monkeypatch.setattr(cli, "_resolve_targets", lambda _args: [target])
+    monkeypatch.setattr(
+        cli,
+        "collect_from_controller",
+        lambda *_args, **_kwargs: CollectionResult(
+            controller=controller,
+            commands=[
+                CommandOutput(
+                    command_id="connect",
+                    command="connect",
+                    success=False,
+                    error="authentication failed",
+                )
+            ],
+        ),
+    )
+
+    exit_code = main(["collect", "--output-dir", str(tmp_path / "outputs")])
+
+    assert exit_code == cli.COLLECT_EXIT_FAILED
+    assert "failed-wlc" in capsys.readouterr().err
+
+
+def test_cli_returns_partial_when_optional_command_failed(monkeypatch, tmp_path, capsys):
+    controller = Controller(name="partial-wlc", host="192.0.2.10")
+    target = ControllerTarget(
+        controller=controller,
+        credentials=ControllerCredentials(username="admin", password="secret"),
+    )
+    monkeypatch.setattr(cli, "_resolve_targets", lambda _args: [target])
+    monkeypatch.setattr(
+        cli,
+        "collect_from_controller",
+        lambda *_args, **_kwargs: CollectionResult(
+            controller=controller,
+            commands=[
+                CommandOutput(
+                    command_id="configuration_effective",
+                    command="show configuration effective",
+                    output="show configuration effective\n",
+                ),
+                CommandOutput(
+                    command_id="user_table",
+                    command="show user-table",
+                    success=False,
+                    error="command timed out",
+                ),
+            ],
+        ),
+    )
+
+    exit_code = main(["collect", "--output-dir", str(tmp_path / "outputs")])
+
+    assert exit_code == cli.COLLECT_EXIT_PARTIAL
+    assert "partial-wlc:user_table" in capsys.readouterr().err
 
 
 def _write_role_networks(path: Path) -> None:

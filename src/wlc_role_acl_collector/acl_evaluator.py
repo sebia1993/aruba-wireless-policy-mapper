@@ -152,7 +152,6 @@ def evaluate_access(
         }
 
     local_warnings = _local_source_warnings(role_data, source_number, source_ip)
-    uncertain_rules: list[dict[str, Any]] = []
     for rule in role_data.get("rules", []):
         # ACL은 위에서부터 처음 매칭되는 행이 결과를 결정합니다.
         # HTML Access Check도 장비 ACL을 읽는 방식과 맞추기 위해 같은 순서를 유지합니다.
@@ -170,15 +169,35 @@ def evaluate_access(
             source_number=source_number,
             destination_number=destination_number,
         )
-        if not source_result["matched"] or not destination_result["matched"]:
-            if source_result["uncertain"] or destination_result["uncertain"]:
-                uncertain_rules.append(rule)
-            continue
-
         # service를 비워 두면 "서비스 조건은 자동으로 맞는 규칙을 찾는다"는 사용 흐름으로 처리합니다.
         service_result = _service_matches(_clean(rule.get("service")), selected_service)
-        if not service_result["matched"]:
+        source_definitely_missed = not source_result["matched"] and not source_result["uncertain"]
+        destination_definitely_missed = (
+            not destination_result["matched"] and not destination_result["uncertain"]
+        )
+        if source_definitely_missed or destination_definitely_missed or not service_result["matched"]:
             continue
+
+        if not source_result["matched"] or not destination_result["matched"]:
+            warnings = _unique(
+                local_warnings
+                + source_result["warnings"]
+                + destination_result["warnings"]
+                + service_result["warnings"]
+                + list(rule.get("warnings", []))
+                + [
+                    "선행 ACL rule의 Alias/name 정보가 불완전하여 "
+                    "첫 매칭 여부를 확정할 수 없습니다."
+                ]
+            )
+            return {
+                "status": "unknown",
+                "verdict": "판정 불가(ACL/Alias 정보 불완전)",
+                "conditional": service_result["conditional"],
+                "matchedRule": None,
+                "candidateRule": rule,
+                "warnings": warnings,
+            }
 
         verdict = _action_verdict(_clean(rule.get("action")))
         warnings = _unique(
@@ -196,17 +215,12 @@ def evaluate_access(
             "warnings": warnings,
         }
 
-    warnings = list(local_warnings)
-    if uncertain_rules:
-        warnings.append(
-            f"{len(uncertain_rules)}개 rule은 alias/name 데이터가 불완전해 완전 판정하지 못했습니다."
-        )
     return {
         "status": "blocked",
         "verdict": "기본 차단(Implicit deny)",
         "conditional": False,
         "matchedRule": None,
-        "warnings": _unique(warnings),
+        "warnings": _unique(local_warnings),
     }
 
 

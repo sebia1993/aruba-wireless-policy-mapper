@@ -10,7 +10,9 @@ from __future__ import annotations
 import csv
 import io
 import tempfile
+import threading
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +26,12 @@ from .report import build_parsed_controllers, create_run_dir, write_raw_result, 
 from .role_networks import RoleNetworkLoadSummary, load_role_network_definitions_with_summary
 
 ProgressCallback = Callable[[str, dict[str, object]], None]
+_ACTIVE_TARGETS: set[str] = set()
+_ACTIVE_TARGETS_LOCK = threading.Lock()
+
+
+class WebCollectionBusyError(RuntimeError):
+    """Raised when another web session is already collecting from the same WLC."""
 
 
 @dataclass(frozen=True)
@@ -96,12 +104,13 @@ def run_web_collection(
             if role_network_summary.sheet_notice:
                 messages.append(role_network_summary.sheet_notice)
 
-        result = _collect(
-            controller,
-            credentials,
-            request=request,
-            progress_callback=progress_callback,
-        )
+        with _target_collection_slot(controller.host):
+            result = _collect(
+                controller,
+                credentials,
+                request=request,
+                progress_callback=progress_callback,
+            )
         write_raw_result(result, run_dir / "raw")
 
         if not result.command_output("configuration_effective"):
@@ -168,6 +177,22 @@ def format_web_progress(event: str, payload: dict[str, object]) -> tuple[str, st
     if event == "complete":
         return "수집 완료", f"COMMANDS COMPLETE {payload.get('command_count', 0)}"
     return "", ""
+
+
+@contextmanager
+def _target_collection_slot(host: str):
+    target_key = host.strip().casefold()
+    with _ACTIVE_TARGETS_LOCK:
+        if target_key in _ACTIVE_TARGETS:
+            raise WebCollectionBusyError(
+                "같은 WLC에서 이미 수집이 진행 중입니다. 기존 작업이 끝난 뒤 다시 실행하세요."
+            )
+        _ACTIVE_TARGETS.add(target_key)
+    try:
+        yield
+    finally:
+        with _ACTIVE_TARGETS_LOCK:
+            _ACTIVE_TARGETS.discard(target_key)
 
 
 def _validate_request(request: WebCollectionRequest) -> None:

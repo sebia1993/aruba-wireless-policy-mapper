@@ -1,11 +1,14 @@
+import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from openpyxl import load_workbook
 
 from wlc_role_acl_collector.collector import collect_from_offline_raw
 from wlc_role_acl_collector.models import Controller, RoleNetworkDefinition
 from wlc_role_acl_collector.report import (
+    _access_check_script,
     _acl_rows_html,
     _html2canvas_source,
     _is_role_related_acl,
@@ -16,6 +19,15 @@ from wlc_role_acl_collector.report import (
     write_raw_result,
     write_reports,
 )
+
+
+def test_access_check_script_stops_at_potentially_matching_uncertain_rule():
+    script = _access_check_script()
+
+    assert "const sourceDefinitelyMissed" in script
+    assert "candidateRule: rule" in script
+    assert "판정 불가(ACL/Alias 정보 불완전)" in script
+    assert "uncertainCount" not in script
 
 
 def test_create_run_dir_adds_safe_label_and_collision_suffix(monkeypatch, tmp_path):
@@ -43,6 +55,8 @@ def test_write_excel_and_html_report(tmp_path):
 
     assert files["xlsx"].exists()
     assert files["html"].exists()
+    assert files["status"].exists()
+    assert json.loads(files["status"].read_text(encoding="utf-8"))["status"] == "completed"
     workbook = load_workbook(files["xlsx"], read_only=True)
     assert {
         "Overview",
@@ -214,6 +228,28 @@ def test_write_excel_and_html_report(tmp_path):
     assert "[show user-table output redacted]" in raw_text
     assert "corp-user-2" not in raw_text
     assert "aa:bb:cc" not in raw_text
+
+
+def test_write_reports_marks_failed_status_when_an_artifact_cannot_be_written(monkeypatch, tmp_path):
+    import wlc_role_acl_collector.report as report
+
+    fixture_root = Path(__file__).parent / "fixtures"
+    controller = Controller(name="sample_controller", host="192.0.2.10")
+    result = collect_from_offline_raw(controller, fixture_root)
+    parsed = build_parsed_controllers([result])
+    monkeypatch.setattr(
+        report,
+        "_write_html",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    with pytest.raises(OSError, match="disk full"):
+        write_reports(parsed_controllers=parsed, collection_results=[result], output_dir=tmp_path)
+
+    status = json.loads((tmp_path / "report_status.json").read_text(encoding="utf-8"))
+    assert status["status"] == "failed"
+    assert status["error_type"] == "OSError"
+    assert not list(tmp_path.glob(".*.tmp*"))
 
 
 def test_role_image_export_script_preserves_visible_state_and_splits_safely():

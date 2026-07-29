@@ -14,7 +14,7 @@ Aruba AOS8 WLC에 접속해 SSID별 기본 Role과 Role별 ACL 접근 범위를 
 
 구현된 기능:
 
-- 사내망 내부 공유용 Streamlit 웹앱 실행
+- 실행 PC 전용이 기본인 Streamlit 웹앱 실행
 - Windows GUI 실행 파일과 CLI 실행 파일 배포
 - Aruba AOS8 WLC 접속 후 SSID, Role, ACL, Alias, VLAN/사용자 관측 정보 수집
 - Excel/HTML 보고서 생성
@@ -33,7 +33,7 @@ Aruba AOS8 WLC에 접속해 SSID별 기본 Role과 Role별 ACL 접근 범위를 
 
 ## Streamlit 웹앱 실행
 
-사내망 내부에서 공용 PC 또는 노트북 1대에 실행해 두고, 다른 사용자가 브라우저로 접속하는 방식입니다. 인터넷 공개용으로 설계하지 않았습니다.
+기본 설정은 웹앱을 실행한 PC에서만 브라우저로 접속하는 방식입니다. 장비 계정을 HTTP로 전송하지 않도록 원격 접속은 기본 비활성화되어 있으며, 인터넷 공개용으로 설계하지 않았습니다.
 
 ### 1. Release 통합 ZIP로 실행
 
@@ -69,33 +69,33 @@ GitHub 화면의 `Source code (zip)` / `Source code (tar.gz)`는 자동 생성�
 http://127.0.0.1:8763
 ```
 
-사내망의 다른 PC에서 접속할 때는 아래 주소를 사용합니다.
+기본 `webapp_settings.cmd`의 주소는 `127.0.0.1`입니다. 다른 PC에서 접속해야 하고 회사에서 TLS, 접근통제, 사용자 인증을 별도로 승인·구성한 경우에만 `WLC_WEB_ADDRESS=0.0.0.0`으로 변경합니다.
 
 ```text
-http://공용PC_IP:8763
+http://승인된_서버_IP:8763
 ```
 
 기본 포트는 `8763`입니다. 포트를 바꾸려면 압축을 푼 폴더의 `web\webapp_settings.cmd`를 메모장으로 열고 `WLC_WEB_PORT` 값을 변경합니다.
 
-Windows 방화벽에서 TCP `8763` 포트 허용이 필요할 수 있습니다. 공용 PC가 꺼지거나 절전모드에 들어가면 접속이 끊기므로, 장시간 사용 시 전원/절전 설정을 확인하세요.
+`0.0.0.0` 모드는 장비 ID/PW가 암호화되지 않은 HTTP 구간을 통과하므로 보안 구성이 없는 환경에서는 사용하지 마십시오. 원격 모드를 승인해 사용한다면 Windows 방화벽에서 허용 대상을 제한하고, 실행 PC가 절전모드에 들어가지 않도록 전원 설정도 확인합니다.
 
 ### 3. 개발 PC에서 소스 실행
 
 소스 코드로 직접 실행할 때만 Python 3.11 이상이 필요합니다.
 
 ```powershell
-cd "D:\Codex Project\Network\wlc_role_acl_collector"
+cd "D:\Project\Network\wlc_role_acl_collector"
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-streamlit run app.py --server.address 0.0.0.0 --server.port 8763
+streamlit run app.py --server.address 127.0.0.1 --server.port 8763
 ```
 
 ### 4. 웹 화면 사용 순서
 
 1. 브라우저에서 Streamlit 주소에 접속합니다.
-2. WLC IP 또는 Host를 입력합니다.
+2. 실제 WLC IP를 입력합니다.
 3. Protocol, Port, Timeout seconds를 확인합니다.
 4. Username, Password, Enable password를 입력합니다.
 5. 필요하면 사내 Role 대역표 Excel(`.xlsx` 또는 `.xlsm`)을 업로드합니다.
@@ -117,6 +117,7 @@ streamlit run app.py --server.address 0.0.0.0 --server.port 8763
 - 서버 PC에서 실제 WLC 접속이 실행되므로, 서버 PC가 WLC에 접근 가능한 네트워크에 있어야 합니다.
 - 업로드한 Role 대역표와 생성된 결과 파일은 서버의 임시 작업 폴더에서 처리한 뒤 다운로드용 bytes만 세션에 보관합니다.
 - 사내 Role 대역표를 업로드하고 보고서 포함 옵션을 켜면 HTML/Excel 결과에 내부 대역 정보가 들어갑니다. 회사 외부 공유 전 반드시 내용을 확인하세요.
+- 같은 WLC에서 다른 웹 수집이 진행 중이면 새 요청은 실행하지 않고 기존 작업 종료 후 재시도를 안내합니다.
 - 인터넷 공개, 사용자별 로그인, 권한 분리, 감사 로그 보관이 필요한 환경에서는 별도 인증/프록시/접근제어 구성이 필요합니다.
 
 ## Windows GUI 실행
@@ -197,6 +198,7 @@ ACL에 `alias <이름>`이 있으면 자동으로 `show netdestination <이름>`
 
 - `run.log`
 - `raw\<controller>.txt`
+- `report_status.json`: `writing`, `completed`, `failed` 중 하나로 보고서 저장 상태 표시
 
 ## 실패 진단
 
@@ -287,6 +289,14 @@ Add another controller? [y/N]:
 - `ssid_role_acl_report.xlsx`
 - `ssid_role_acl_report.html`
 - `raw\<controller>.txt`
+- `report_status.json`
+
+CLI 종료 코드는 자동화에서 반드시 확인합니다.
+
+- `0`: 모든 필수/선택 명령 성공
+- `1`: 필수 `show configuration effective`를 수집하지 못한 실패
+- `2`: 입력 또는 Role network Excel 오류
+- `3`: 보고서는 생성됐지만 하나 이상의 선택 명령이 실패한 부분 완료
 
 ## 수집 명령
 
@@ -327,6 +337,7 @@ HTML 보고서의 ACL 주석은 입력 즉시 브라우저 `localStorage`에 임
 - `차단(Blocked)`: `deny` 룰에 매칭된 경우입니다.
 - `NAT/특수 Action 허용`: `src-nat`, `dst-nat`, `redirect`, `route`, `tunnel`, `forward` 같은 액션에 매칭된 경우입니다.
 - `기본 차단(Implicit deny)`: Source/Destination/Service 기준으로 매칭되는 룰이 없는 경우입니다.
+- `판정 불가(ACL/Alias 정보 불완전)`: 앞선 ACL이 매칭될 가능성이 있지만 Alias/name 상세가 없어 허용·차단을 확정할 수 없는 경우입니다. 뒤 규칙으로 넘어가 확정 판정하지 않습니다.
 - `조건부`: Service를 선택하지 않았고, 매칭된 ACL 룰이 `any`가 아닌 특정 service에 제한된 경우입니다. 정확한 판정에는 Service 선택이 필요합니다.
 
 Service 판정은 현재 ACL에 수집된 service token 기준입니다. 예를 들어 `svc-dns`, `svc-http`, `svc-https`, `any` 같은 값을 비교합니다. TCP/UDP 포트 번호를 직접 입력해 service object까지 정밀 해석하는 기능은 아직 포함하지 않습니다.

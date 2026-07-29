@@ -96,7 +96,7 @@ def test_streamlit_portable_build_contract():
     assert "--smoke" in launcher
     assert "STREAMLIT_PORTABLE_OK" in launcher
     assert "python\\python.exe" in launcher
-    assert "WLC_WEB_ADDRESS=0.0.0.0" in settings
+    assert "WLC_WEB_ADDRESS=127.0.0.1" in settings
     assert "WLC_WEB_PORT=8763" in settings
     assert "Python을 별도로 설치하지 않고" in guide
     assert "첫 실행" in guide
@@ -267,13 +267,13 @@ def test_release_documentation_describes_current_package_contract():
     assert "python .\\tools\\verify_release_package.py --dist .\\dist --smoke-cli" in readme
     assert "python .\\tools\\verify_streamlit_portable_package.py --dist .\\dist --smoke" in readme
     assert "python .\\tools\\verify_combined_release_package.py --dist .\\dist --smoke" in readme
-    assert "streamlit run app.py --server.address 0.0.0.0 --server.port 8763" in readme
-    assert "http://공용PC_IP:8763" in readme
+    assert "streamlit run app.py --server.address 127.0.0.1 --server.port 8763" in readme
+    assert "http://127.0.0.1:8763" in readme
     assert "Windows 방화벽" in readme
     assert "절전모드" in readme
     assert "Windows PC에 Python을 별도로 설치하지 않습니다" in readme
     assert "WlcRoleAclCollectorWindows_v0.1.0.zip" in readme
-    assert "streamlit run app.py --server.address 0.0.0.0 --server.port 8763" in release_notes
+    assert "streamlit run app.py --server.address 127.0.0.1 --server.port 8763" in release_notes
     assert "python .\\tools\\verify_streamlit_portable_package.py --dist .\\dist --smoke" in release_notes
     assert "python .\\tools\\verify_combined_release_package.py --dist .\\dist --smoke" in release_notes
     assert "-e .[web]" in requirements

@@ -1,8 +1,10 @@
 import inspect
+import queue
 from pathlib import Path
 
 import customtkinter as ctk
 
+import wlc_role_acl_collector.gui_app as gui_app
 from wlc_role_acl_collector.gui_app import (
     ADVANCED_OPTIONS_HIDE_LABEL,
     ADVANCED_OPTIONS_SHOW_LABEL,
@@ -61,6 +63,7 @@ from wlc_role_acl_collector.gui_app import (
     _log_tag_for_line,
     _result_report_summary_from_parsed,
     _write_run_log,
+    _write_run_log_safely,
     format_collection_progress,
     format_diagnostic_progress,
 )
@@ -423,6 +426,34 @@ def test_write_run_log(tmp_path):
 
     assert path.name == "run.log"
     assert path.read_text(encoding="utf-8") == "line1\nline2\n"
+
+
+def test_write_run_log_safely_handles_missing_run_directory():
+    path, error = _write_run_log_safely(None, ["line1"])
+
+    assert path is None
+    assert "결과 폴더" in error
+
+
+def test_collection_worker_reports_error_when_run_directory_creation_fails(monkeypatch, tmp_path):
+    target = build_target_from_gui_input(
+        GuiConnectionInput(host="192.0.2.10", username="admin", password="secret")
+    )
+    app = object.__new__(WlcRoleAclCollectorGui)
+    app.event_queue = queue.Queue()
+    monkeypatch.setattr(
+        gui_app,
+        "create_run_dir",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("access denied")),
+    )
+
+    app._run_collection_worker(target, tmp_path, 60, [])
+
+    event, payload = app.event_queue.get_nowait()
+    assert event == "error"
+    assert payload["run_dir"] is None
+    assert payload["run_log"] is None
+    assert "run.log" in payload["message"]
 
 
 def test_format_collection_progress_for_role_command():

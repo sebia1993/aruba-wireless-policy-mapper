@@ -38,6 +38,10 @@ _NETWORK_SECRET_PATTERN = re.compile(
     r"(?i)\b((?:enable\s+)?secret|snmp-server\s+community|username\s+\S+\s+(?:password|secret))"
     r"\s+(?:[0-9]\s+)?([^\s,;]+)"
 )
+_DYNAMIC_COMMAND_ID_PATTERN = re.compile(r"(?i)\b(rights|netdestination)::([^\r\n|,;]+)")
+_DYNAMIC_COMMAND_PATTERN = re.compile(
+    r'(?i)\b(show\s+(rights|netdestination)\s+)("[^"]+"|\S+)'
+)
 _HOSTNAME_PATTERN = re.compile(
     r"(?ix)"
     r"\b("
@@ -54,6 +58,8 @@ class Redactor:
         self._ip_labels: dict[str, str] = {}
         self._mac_labels: dict[str, str] = {}
         self._host_labels: dict[str, str] = {}
+        self._role_labels: dict[str, str] = {}
+        self._alias_labels: dict[str, str] = {}
 
     def redact(self, value: str) -> str:
         if not value:
@@ -64,10 +70,25 @@ class Redactor:
         text = _URL_CREDENTIAL_PATTERN.sub(lambda match: f"{match.group(1)}:{MASK}@", text)
         text = _NETWORK_SECRET_PATTERN.sub(lambda match: f"{match.group(1)} {MASK}", text)
         text = _KEY_VALUE_SECRET_PATTERN.sub(lambda match: f"{match.group(1)}{match.group(2)}{MASK}", text)
+        text = _DYNAMIC_COMMAND_ID_PATTERN.sub(self._redact_dynamic_command_id, text)
+        text = _DYNAMIC_COMMAND_PATTERN.sub(self._redact_dynamic_command, text)
         text = _MAC_PATTERN.sub(lambda match: self._label(self._mac_labels, match.group(0), "MAC"), text)
         text = _IPV4_PATTERN.sub(lambda match: self._label(self._ip_labels, match.group(0), "IP"), text)
         text = _HOSTNAME_PATTERN.sub(lambda match: self._label(self._host_labels, match.group(0), "HOST"), text)
         return text
+
+    def _redact_dynamic_command_id(self, match: re.Match[str]) -> str:
+        command_type = match.group(1).casefold()
+        cache = self._role_labels if command_type == "rights" else self._alias_labels
+        prefix = "ROLE" if command_type == "rights" else "ALIAS"
+        return f"{command_type}::{self._label(cache, match.group(2).strip(), prefix)}"
+
+    def _redact_dynamic_command(self, match: re.Match[str]) -> str:
+        command_type = match.group(2).casefold()
+        cache = self._role_labels if command_type == "rights" else self._alias_labels
+        prefix = "ROLE" if command_type == "rights" else "ALIAS"
+        value = match.group(3).strip('"')
+        return f"{match.group(1)}{self._label(cache, value, prefix)}"
 
     @staticmethod
     def _label(cache: dict[str, str], value: str, prefix: str) -> str:

@@ -64,6 +64,8 @@ wlc_role_acl_collector/
     gui_app.py          Windows GUI 화면과 버튼 동작
     gui_support.py      GUI 입력값 검증, 기본 출력 폴더 계산
     cli.py              CLI 명령어 진입점
+    web_logic.py        Streamlit 수집 흐름, 동일 WLC 동시 실행 제한
+    atomic_io.py        임시 파일과 os.replace를 이용한 원자 저장
     collector.py        WLC 접속 및 show 명령어 실행
     aos8_parser.py      Aruba AOS8 설정/명령 출력 파싱
     acl_evaluator.py    Source/Destination/Service 기준 ACL 매칭 판단
@@ -118,6 +120,13 @@ wlc_role_acl_collector/
 - 진단 모드는 `diagnostic_summary.json/html`, `diagnostic_run.log`만 생성하고 raw 폴더를 만들지 않습니다.
 - Windows 다중 모니터와 DPI 배율 차이를 고려해 창 위치/크기를 작업영역 안으로 보정합니다.
 - GUI 색상, 단계 라벨, 주요 문구는 `gui_app.py` 상단 상수에서 관리합니다.
+- worker 전체를 예외 경계 안에 두어 결과 폴더 생성이 실패해도 반드시 `error` 이벤트를 UI queue에 보냅니다.
+
+### `cli.py`와 `web_logic.py`
+
+CLI collect 종료 코드는 `0=성공`, `1=필수 수집 실패`, `2=입력 오류`, `3=선택 명령 일부 실패`입니다. 자동화에서 보고서 파일 존재 여부만 보지 말고 종료 코드를 함께 확인해야 합니다.
+
+Streamlit은 `_ACTIVE_TARGETS`와 `_target_collection_slot()`으로 같은 WLC에 대한 중복 수집을 즉시 거부합니다. 기본 launcher 주소는 `127.0.0.1`이며, 원격 HTTP 노출은 기본 동작이 아닙니다. 브라우저 화면에는 Python traceback을 직접 출력하지 않습니다.
 
 ### `collector.py`
 
@@ -197,6 +206,8 @@ Excel과 HTML 보고서를 만드는 파일입니다. 이 프로젝트에서 가
 - Access Check에 필요한 JSON 생성
 - Role 탭 선택과 Access Check Role 선택값 동기화
 - 보안모드에서 민감 데이터 export 차단
+- Excel/HTML/raw를 최종 파일명에 직접 쓰지 않고 `atomic_io.py`를 통해 같은 폴더의 임시 파일을 완성한 뒤 교체
+- `report_status.json`의 `writing/completed/failed` 상태 기록
 
 중요한 보안 기본값:
 
@@ -262,6 +273,7 @@ Service 미선택 동작:
 
 - Service object의 실제 TCP/UDP 포트까지 완전 해석하지는 않습니다.
 - Alias가 IP 범위로 해석되지 않으면 warning을 표시합니다.
+- 앞선 ACL이 불완전한 Alias/name 때문에 매칭될 가능성이 있으면 뒤 ACL을 평가하지 않고 `판정 불가(ACL/Alias 정보 불완전)`를 반환합니다.
 
 ### `role_networks.py`
 
@@ -321,6 +333,8 @@ mock 관련 파일:
 | Role network Excel 형식 변경 | `role_networks.py`, `tests/test_role_networks.py` |
 | 오류 메시지 개선 | `diagnostics.py`, `tests/test_diagnostics.py` |
 | 진단 코드/리포트 변경 | `diagnostic_codes.py`, `diagnostic_mode.py`, `diagnostic_report.py`, `tests/test_diagnostic_*.py` |
+| 파일 저장 안전성 변경 | `atomic_io.py`, `report.py`, `diagnostic_report.py`, `tests/test_atomic_io.py` |
+| Streamlit 동시 실행/접속 범위 변경 | `web_logic.py`, `app.py`, `packaging/streamlit_portable`, `tests/test_web_logic.py` |
 | mock 서버/시나리오 변경 | `mock_server.py`, `mock_scenarios.py`, `config/mock_scenarios`, `tests/test_mock_server.py` |
 | 배포 ZIP 구성 변경 | `build_windows_gui_exe.ps1`, `tests/test_tooling.py` |
 | 사용자 문서 변경 | `docs/USER_GUIDE_KO.md` |
@@ -337,6 +351,9 @@ mock 관련 파일:
 - Role network Excel은 세션 전용
 - 내부 대역을 기본 보고서에 저장하지 않음
 - Access Check 이력 기본 미저장
+- Streamlit 기본 바인딩 `127.0.0.1`
+- 진단 command ID의 실제 Role/Alias 이름을 `<ROLE:n>`, `<ALIAS:n>`으로 마스킹
+- 웹 화면에 Python traceback 미노출
 - `outputs/`, `config/private/`, 민감 파일 패턴 git ignore
 
 기능을 추가할 때 내부 IP, 계정, 비밀번호, 정책명, 사용자 정보가 파일에 남는지 먼저 확인해야 합니다.

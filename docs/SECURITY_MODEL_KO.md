@@ -28,6 +28,15 @@
 - password, secret, token, api key, community
 - URL 안의 credential
 - 네트워크 장비 설정 안의 secret/community 계열 값
+- 진단 command ID와 `show rights`/`show netdestination` 오류에 포함된 실제 Role/Alias 이름
+
+## 웹앱 접속 정책
+
+- Streamlit portable 기본 주소는 `127.0.0.1`이며 실행 PC에서만 접속합니다.
+- `0.0.0.0` 원격 모드는 TLS, 접근통제, 사용자 인증이 별도로 승인·구성된 경우에만 사용합니다.
+- 기본 HTTP 원격 접속에서는 장비 ID/PW가 전송 구간에서 암호화되지 않습니다.
+- 같은 WLC에 대한 웹 수집은 한 번에 하나만 실행합니다.
+- 브라우저에는 Python traceback을 직접 표시하지 않습니다.
 
 ## 개발 규칙
 

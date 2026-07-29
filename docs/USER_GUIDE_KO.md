@@ -81,10 +81,18 @@ ZIP 안에는 설명서가 두 가지 형식으로 포함됩니다.
 소스 코드 상태에서 실행하는 경우:
 
 ```powershell
-cd "D:\Codex Project\Network\wlc_role_acl_collector"
+cd "D:\Project\Network\wlc_role_acl_collector"
 python -m pip install -e .
 python -m wlc_role_acl_collector.gui_app
 ```
+
+### Streamlit 웹앱을 사용하는 경우
+
+통합 ZIP의 `web\start_webapp.cmd`를 실행한 뒤 같은 PC에서 `http://127.0.0.1:8763`을 엽니다. 기본 설정에서는 다른 PC가 접속할 수 없습니다.
+
+다른 PC 접속을 위해 `webapp_settings.cmd`를 `0.0.0.0`으로 바꾸면 장비 ID/PW가 암호화되지 않은 HTTP 구간을 통과합니다. 회사에서 TLS, 접근통제, 사용자 인증을 별도로 승인하고 구성한 경우에만 원격 모드를 사용하십시오.
+
+같은 WLC에서 다른 웹 수집이 진행 중이면 새 작업은 시작되지 않습니다. 기존 작업이 끝난 뒤 다시 실행합니다.
 
 ## 5. GUI 입력 항목 설명
 
@@ -149,6 +157,7 @@ GUI의 기본 흐름은 `접속 정보 입력 → 수집 시작 → 결과 확�
 | `ssid_role_acl_report.xlsx` | Excel 보고서 |
 | `run.log` | 실행 과정과 오류 원인 로그 |
 | `raw\<controller>.txt` | 수집한 원본 명령 결과 일부 |
+| `report_status.json` | 보고서 저장 상태. `completed`가 아니면 HTML/Excel을 완료본으로 사용하지 않음 |
 
 주의: `show user-table` 원문은 개인정보 노출을 줄이기 위해 raw 파일에 그대로 저장하지 않습니다. 다만 ACL, Alias, WLC 설정에는 내부 IP나 정책명이 포함될 수 있습니다.
 
@@ -207,12 +216,14 @@ Role ACL Detail에서 Role 버튼을 클릭하면 Access Check의 Role 선택값
 | 차단(Blocked) | deny ACL에 매칭됨 |
 | NAT/특수 Action 허용 | src-nat, dst-nat, redirect, route, tunnel, forward 같은 특수 action에 매칭됨 |
 | 기본 차단(Implicit deny) | 매칭되는 ACL이 없어 기본 차단으로 판단 |
+| 판정 불가(ACL/Alias 정보 불완전) | 앞선 ACL이 매칭될 가능성이 있지만 Alias/name 상세가 없어 허용·차단을 확정할 수 없음 |
 | 조건부 | Service 자동 매칭 상태에서 특정 service ACL에 매칭되어 추가 확인이 필요 |
 | 일치하는 Role ACL 없음 | Role 이름과 정확히 같은 ACL이 없어 Access Check로 판정할 수 없음 |
 
 중요한 제한:
 
 - Access Check는 보고서 안에 포함된 ACL/Alias 데이터를 기준으로 판단합니다.
+- 앞선 규칙의 Alias/name 정보가 불완전하면 뒤 규칙으로 넘어가 허용·차단을 확정하지 않고 `판정 불가`를 표시합니다.
 - Access Check는 ACL 이름이 Role 이름과 정확히 같은 ACL만 검사합니다.
 - Service를 선택하지 않으면 `자동 - Source/Destination 기준` 모드로 동작하며, ACL 표시 순서대로 첫 번째 Source/Destination 매칭 규칙을 찾습니다.
 - Service 자동 매칭 결과가 `any`가 아닌 특정 service ACL이면 조건부 판정으로 표시합니다.
@@ -263,6 +274,8 @@ python -m wlc_role_acl_collector collect --role-networks config\role_networks.ex
 | Unable to open Role network Excel file: File is not a zip file | 실제 Excel `.xlsx`가 아니라 CSV/HTML/구형 XLS를 확장자만 바꾼 파일인지 확인 |
 | 보고서에 Role이 부족함 | 해당 Role의 `show rights <role>` 명령 권한 또는 수집 로그 확인 |
 | Access Check 결과가 예상과 다름 | Service 선택 여부, Alias 상세 수집 여부, 숨겨진 other ACL 표시 여부 확인 |
+| 같은 WLC에서 이미 수집 중 | 웹앱의 기존 수집이 끝난 뒤 다시 실행 |
+| `report_status.json`이 `writing` 또는 `failed` | HTML/Excel을 완료본으로 사용하지 말고 수집 로그와 저장 권한 확인 |
 
 ## 12. 진단 모드와 오류 코드
 

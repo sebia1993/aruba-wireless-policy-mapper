@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import traceback
-
 import streamlit as st
 
 from wlc_role_acl_collector.config import default_port_for_protocol
 from wlc_role_acl_collector.web_logic import (
     WebCollectionRequest,
     WebCollectionResult,
+    WebCollectionBusyError,
     format_web_progress,
     run_web_collection,
 )
@@ -37,11 +36,13 @@ def main() -> None:
 
 def _render_sidebar_notice() -> None:
     with st.sidebar:
-        st.subheader("사내망 실행 예시")
-        st.code("streamlit run app.py --server.address 0.0.0.0 --server.port 8763", language="powershell")
-        st.write("접속 주소 예시: `http://공용PC_IP:8763`")
-        st.write("Windows 방화벽에서 TCP 8763 포트 허용이 필요할 수 있습니다.")
-        st.write("공용 PC가 꺼지거나 절전모드에 들어가면 접속이 끊깁니다.")
+        st.subheader("기본 접속 범위")
+        st.code("http://127.0.0.1:8763", language="text")
+        st.write("기본 설정에서는 웹앱을 실행한 PC에서만 접속할 수 있습니다.")
+        st.warning(
+            "다른 PC 접속을 허용하면 HTTP 구간에서 장비 계정이 보호되지 않습니다. "
+            "승인된 보안 구성이 없으면 로컬 접속만 사용하세요."
+        )
 
 
 def _render_input_form() -> tuple[bool, WebCollectionRequest]:
@@ -131,13 +132,16 @@ def _run_collection(request: WebCollectionRequest) -> None:
             status_box.success("보고서 생성이 완료되었습니다.")
         else:
             status_box.error("수집에 실패했습니다. 오류 내용을 확인하세요.")
+    except WebCollectionBusyError as exc:
+        progress_bar.progress(100)
+        status_box.warning(str(exc))
+        logs.append(str(exc))
+        log_box.code("\n".join(logs[-80:]), language="text")
     except Exception as exc:
         progress_bar.progress(100)
         status_box.error("실행 중 오류가 발생했습니다.")
-        logs.append(str(exc))
+        logs.append(f"{type(exc).__name__}: 실행 로그 또는 안전 진단 결과를 확인하세요.")
         log_box.code("\n".join(logs[-80:]), language="text")
-        with st.expander("상세 오류"):
-            st.code(traceback.format_exc(), language="text")
 
 
 def _render_result(result: WebCollectionResult) -> None:

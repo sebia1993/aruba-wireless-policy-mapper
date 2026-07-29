@@ -20,6 +20,7 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
+from .atomic_io import atomic_write_text
 from .collector import collect_from_controller
 from .diagnostic_mode import run_diagnostic
 from .diagnostics import classify_error_message, summarize_collection_failure
@@ -1542,7 +1543,7 @@ class WlcRoleAclCollectorGui(ctk.CTk):
     def _run_collection_worker(self, target, output_dir: Path, timeout: int, role_networks) -> None:
         # 일반 수집 모드는 문제 분석을 위해 raw 명령 결과를 로컬 run_dir 아래에 저장합니다.
         # 단, user-table처럼 민감정보가 많은 출력은 report.py에서 원문 저장을 막습니다.
-        run_dir = create_run_dir(output_dir, label=target.controller.name)
+        run_dir: Path | None = None
         log_lines = [
             "WLC Role ACL Collector run log",
             f"Controller: {target.controller.name}",
@@ -1569,6 +1570,7 @@ class WlcRoleAclCollectorGui(ctk.CTk):
                 self.event_queue.put(("log", line))
 
         try:
+            run_dir = create_run_dir(output_dir, label=target.controller.name)
             self.event_queue.put(("status", f"{target.controller.host}에 접속 중입니다."))
             self.event_queue.put(("log", f"Controller: {target.controller.name} ({target.controller.protocol}:{target.controller.port})"))
             if role_networks:
@@ -1622,12 +1624,15 @@ class WlcRoleAclCollectorGui(ctk.CTk):
         except Exception as exc:
             failure = classify_error_message(str(exc))
             log_lines.extend([f"Failure category: {failure.category}", failure.as_text()])
-            run_log = _write_run_log(run_dir, log_lines)
+            run_log, run_log_error = _write_run_log_safely(run_dir, log_lines)
+            message = failure.as_text()
+            if run_log_error:
+                message = f"{message}\n\n{run_log_error}"
             self.event_queue.put(
                 (
                     "error",
                     {
-                        "message": _collection_failure_message(failure.as_text(), None, run_log),
+                        "message": _collection_failure_message(message, None, run_log),
                         "run_dir": run_dir,
                         "run_log": run_log,
                     },
@@ -2162,8 +2167,17 @@ def _open_path(path: Path) -> None:
 def _write_run_log(run_dir: Path, lines: list[str]) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     path = run_dir / "run.log"
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    atomic_write_text(path, "\n".join(lines) + "\n")
     return path
+
+
+def _write_run_log_safely(run_dir: Path | None, lines: list[str]) -> tuple[Path | None, str]:
+    if run_dir is None:
+        return None, "결과 폴더를 만들지 못해 run.log를 저장하지 못했습니다."
+    try:
+        return _write_run_log(run_dir, lines), ""
+    except Exception as exc:
+        return None, f"run.log 저장 실패: {exc}"
 
 
 def main() -> None:

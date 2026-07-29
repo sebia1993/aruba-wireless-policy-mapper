@@ -71,13 +71,13 @@ Streamlit 웹앱은 Windows 통합 ZIP의 `web` 폴더에 포함합니다. 일�
 - `packaging/streamlit_portable/webapp_settings.cmd`
 - `packaging/streamlit_portable/README_WEBAPP_KO.txt`
 
-개발자가 소스에서 실행할 때의 사내망 공유 실행 예시는 다음과 같습니다.
+개발자가 소스에서 실행할 때의 기본 로컬 실행 예시는 다음과 같습니다.
 
 ```powershell
-streamlit run app.py --server.address 0.0.0.0 --server.port 8763
+streamlit run app.py --server.address 127.0.0.1 --server.port 8763
 ```
 
-브라우저 접속 주소 예시는 `http://공용PC_IP:8763`입니다.
+브라우저 접속 주소는 `http://127.0.0.1:8763`입니다. 원격 모드는 TLS와 접근통제가 승인된 환경에서만 별도로 활성화합니다.
 
 ## 검증 기준
 

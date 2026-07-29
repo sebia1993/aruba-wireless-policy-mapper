@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .atomic_io import atomic_write_text
 from .diagnostic_codes import DiagnosticCode, get_diagnostic_code
 from .diagnostic_events import DiagnosticEvent
 from .redaction import redact_payload, redact_sensitive_text
@@ -29,9 +30,9 @@ def write_diagnostic_report(
     html_path = output_dir / "diagnostic_summary.html"
     log_path = output_dir / "diagnostic_run.log"
 
-    json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    html_path.write_text(_diagnostic_html(payload), encoding="utf-8")
-    log_path.write_text(_diagnostic_log(payload), encoding="utf-8")
+    atomic_write_text(json_path, json.dumps(payload, indent=2, ensure_ascii=False))
+    atomic_write_text(html_path, _diagnostic_html(payload))
+    atomic_write_text(log_path, _diagnostic_log(payload))
     return {"json": json_path, "html": html_path, "log": log_path}
 
 

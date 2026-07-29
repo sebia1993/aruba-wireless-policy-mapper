@@ -1,9 +1,16 @@
 from io import BytesIO
 from pathlib import Path
+import threading
 
 from openpyxl import Workbook
+import pytest
 
-from wlc_role_acl_collector.web_logic import WebCollectionRequest, run_web_collection
+import wlc_role_acl_collector.web_logic as web_logic
+from wlc_role_acl_collector.web_logic import (
+    WebCollectionBusyError,
+    WebCollectionRequest,
+    run_web_collection,
+)
 
 
 def test_run_web_collection_offline_returns_preview_and_downloads():
@@ -35,6 +42,44 @@ def test_run_web_collection_offline_returns_preview_and_downloads():
     assert b"guest-logon" in result.artifacts["csv"].data
     assert result.artifacts["html"].data.startswith(b"<!doctype html>")
     assert any(event == "complete" for event, _payload in events)
+
+
+def test_run_web_collection_rejects_concurrent_collection_for_same_wlc(monkeypatch):
+    fixture_root = Path(__file__).parent / "fixtures"
+    request = WebCollectionRequest(
+        host="192.0.2.10",
+        controller_name="sample_controller",
+        username="",
+        password="",
+        offline_raw_dir=fixture_root,
+    )
+    entered = threading.Event()
+    release = threading.Event()
+    original_collect = web_logic._collect
+
+    def blocking_collect(*args, **kwargs):
+        entered.set()
+        assert release.wait(timeout=5)
+        return original_collect(*args, **kwargs)
+
+    monkeypatch.setattr(web_logic, "_collect", blocking_collect)
+    result_holder = {}
+
+    def first_collection():
+        result_holder["result"] = run_web_collection(request)
+
+    worker = threading.Thread(target=first_collection)
+    worker.start()
+    assert entered.wait(timeout=5)
+    try:
+        with pytest.raises(WebCollectionBusyError, match="이미 수집"):
+            run_web_collection(request)
+    finally:
+        release.set()
+        worker.join(timeout=10)
+
+    assert not worker.is_alive()
+    assert result_holder["result"].success is True
 
 
 def _role_network_workbook_bytes() -> bytes:

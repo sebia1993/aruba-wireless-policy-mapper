@@ -9,9 +9,15 @@ from .config import load_controllers
 from .diagnostic_mode import run_diagnostic
 from .interactive import prompt_controller_targets
 from .mock_server import run_mock_server
-from .models import ControllerTarget
+from .models import CollectionResult, ControllerTarget
 from .report import build_parsed_controllers, create_run_dir, write_raw_result, write_reports
 from .role_networks import RoleNetworkDefinitionError, load_role_network_definitions
+
+
+COLLECT_EXIT_OK = 0
+COLLECT_EXIT_FAILED = 1
+COLLECT_EXIT_INPUT_ERROR = 2
+COLLECT_EXIT_PARTIAL = 3
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -81,9 +87,13 @@ def _collect(args: argparse.Namespace) -> int:
         local_role_networks = load_role_network_definitions(args.role_networks) if args.role_networks else []
     except RoleNetworkDefinitionError as exc:
         print(f"Role network Excel error: {exc}", file=sys.stderr)
-        return 2
+        return COLLECT_EXIT_INPUT_ERROR
 
     targets = _resolve_targets(args)
+    if not targets:
+        print("No WLC targets were provided.", file=sys.stderr)
+        return COLLECT_EXIT_INPUT_ERROR
+
     run_dir = create_run_dir(args.output_dir)
     raw_dir = run_dir / "raw"
 
@@ -115,7 +125,37 @@ def _collect(args: argparse.Namespace) -> int:
         print("Role network Excel was loaded for this run only; local networks were not exported.")
     print(f"Excel: {files['xlsx']}")
     print(f"HTML: {files['html']}")
-    return 0
+    exit_code = _collection_exit_code(results)
+    if exit_code == COLLECT_EXIT_FAILED:
+        failed_controllers = [
+            result.controller.name
+            for result in results
+            if not result.command_output("configuration_effective")
+        ]
+        print(
+            "Collection failed for required WLC data: " + ", ".join(failed_controllers),
+            file=sys.stderr,
+        )
+    elif exit_code == COLLECT_EXIT_PARTIAL:
+        failed_commands = [
+            f"{result.controller.name}:{command.command_id}"
+            for result in results
+            for command in result.commands
+            if not command.success
+        ]
+        print(
+            "Collection completed with failed optional commands: " + ", ".join(failed_commands),
+            file=sys.stderr,
+        )
+    return exit_code
+
+
+def _collection_exit_code(results: list[CollectionResult]) -> int:
+    if any(not result.command_output("configuration_effective") for result in results):
+        return COLLECT_EXIT_FAILED
+    if any(not command.success for result in results for command in result.commands):
+        return COLLECT_EXIT_PARTIAL
+    return COLLECT_EXIT_OK
 
 
 def _resolve_targets(args: argparse.Namespace) -> list[ControllerTarget]:

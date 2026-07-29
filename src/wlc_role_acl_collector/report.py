@@ -20,6 +20,7 @@ from openpyxl.utils import get_column_letter
 
 from .acl_evaluator import access_rule_id, build_access_check_data
 from .aos8_parser import parse_controller_config
+from .atomic_io import atomic_output_path, atomic_write_text
 from .models import CollectionResult, ParsedController, RoleNetworkDefinition
 
 
@@ -62,7 +63,7 @@ def write_raw_result(result: CollectionResult, raw_dir: Path) -> Path:
                 "",
             ]
         )
-    path.write_text("\n".join(lines), encoding="utf-8")
+    atomic_write_text(path, "\n".join(lines))
     result.raw_file = path
     return path
 
@@ -121,6 +122,21 @@ def write_reports(
     output_dir.mkdir(parents=True, exist_ok=True)
     workbook_path = output_dir / "ssid_role_acl_report.xlsx"
     html_path = output_dir / "ssid_role_acl_report.html"
+    status_path = output_dir / "report_status.json"
+    started_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    atomic_write_text(
+        status_path,
+        json.dumps(
+            {
+                "status": "writing",
+                "started_at": started_at,
+                "files": [workbook_path.name, html_path.name],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+    )
 
     local_role_networks = local_role_networks or []
     # pandas DataFrame은 Excel과 HTML 양쪽에서 재사용하는 중간 표 형식입니다.
@@ -131,14 +147,49 @@ def write_reports(
         local_role_networks,
         export_local_role_networks=export_local_role_networks,
     )
-    _write_excel(workbook_path, frames)
-    _write_html(
-        html_path,
-        frames,
-        local_role_networks_enabled=bool(local_role_networks) and export_local_role_networks,
-        access_history_enabled=access_history_enabled,
+    try:
+        _write_excel(workbook_path, frames)
+        _write_html(
+            html_path,
+            frames,
+            local_role_networks_enabled=bool(local_role_networks) and export_local_role_networks,
+            access_history_enabled=access_history_enabled,
+        )
+    except Exception as exc:
+        try:
+            atomic_write_text(
+                status_path,
+                json.dumps(
+                    {
+                        "status": "failed",
+                        "started_at": started_at,
+                        "failed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                        "error_type": type(exc).__name__,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+            )
+        except Exception as status_exc:
+            exc.add_note(f"Unable to update {status_path.name}: {status_exc}")
+        raise
+
+    atomic_write_text(
+        status_path,
+        json.dumps(
+            {
+                "status": "completed",
+                "started_at": started_at,
+                "completed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "files": [workbook_path.name, html_path.name],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
     )
-    return {"xlsx": workbook_path, "html": html_path}
+    return {"xlsx": workbook_path, "html": html_path, "status": status_path}
 
 
 def _build_frames(
@@ -503,22 +554,23 @@ def _acl_field_interpretation(
 
 
 def _write_excel(path: Path, frames: dict[str, pd.DataFrame]) -> None:
-    with pd.ExcelWriter(path, engine="openpyxl") as writer:
-        for sheet_name, frame in frames.items():
-            frame.to_excel(writer, index=False, sheet_name=sheet_name)
-            worksheet = writer.sheets[sheet_name]
-            worksheet.freeze_panes = "A2"
-            if worksheet.max_row >= 1 and worksheet.max_column >= 1:
-                worksheet.auto_filter.ref = worksheet.dimensions
-            for cell in worksheet[1]:
-                cell.font = Font(bold=True, color="FFFFFF")
-                cell.fill = PatternFill("solid", fgColor="1F4E78")
-            for column_cells in worksheet.columns:
-                max_length = 8
-                for cell in column_cells:
-                    value = "" if cell.value is None else str(cell.value)
-                    max_length = max(max_length, min(len(value), 80))
-                worksheet.column_dimensions[get_column_letter(column_cells[0].column)].width = max_length + 2
+    with atomic_output_path(path) as temporary:
+        with pd.ExcelWriter(temporary, engine="openpyxl") as writer:
+            for sheet_name, frame in frames.items():
+                frame.to_excel(writer, index=False, sheet_name=sheet_name)
+                worksheet = writer.sheets[sheet_name]
+                worksheet.freeze_panes = "A2"
+                if worksheet.max_row >= 1 and worksheet.max_column >= 1:
+                    worksheet.auto_filter.ref = worksheet.dimensions
+                for cell in worksheet[1]:
+                    cell.font = Font(bold=True, color="FFFFFF")
+                    cell.fill = PatternFill("solid", fgColor="1F4E78")
+                for column_cells in worksheet.columns:
+                    max_length = 8
+                    for cell in column_cells:
+                        value = "" if cell.value is None else str(cell.value)
+                        max_length = max(max_length, min(len(value), 80))
+                    worksheet.column_dimensions[get_column_letter(column_cells[0].column)].width = max_length + 2
 
 
 def _write_html(
@@ -1701,7 +1753,7 @@ def _write_html(
 </body>
 </html>
 """
-    path.write_text(html, encoding="utf-8")
+    atomic_write_text(path, html)
 
 
 @lru_cache(maxsize=1)
@@ -2583,7 +2635,7 @@ def _access_check_script(*, history_enabled: bool = False) -> str:
       if (!result || result.status === 'error') {
         return;
       }
-      const rule = result.matchedRule || {};
+      const rule = result.matchedRule || result.candidateRule || {};
       accessSetHistory([
         {
           timestamp: new Date().toISOString(),
@@ -2762,11 +2814,12 @@ def _access_check_script(*, history_enabled: bool = False) -> str:
       const warningHtml = warnings.length
         ? `<ul class="access-warning-list">${warnings.map((warning) => `<li>${accessEscapeHtml(warning)}</li>`).join('')}</ul>`
         : '';
-      const rule = result.matchedRule;
+      const rule = result.matchedRule || result.candidateRule;
+      const ruleLabel = result.candidateRule && !result.matchedRule ? '판정 중단 ACL' : 'ACL';
       const conditional = result.conditional ? '<span class="access-conditional">조건부</span>' : '';
       const ruleHtml = rule
         ? `<div class="access-result-meta">
-            <div><strong>ACL</strong>${accessEscapeHtml(rule.acl)}</div>
+            <div><strong>${ruleLabel}</strong>${accessEscapeHtml(rule.acl)}</div>
             <div><strong>Sequence</strong>${accessEscapeHtml(rule.sequence)}</div>
             <div><strong>Action</strong>${accessEscapeHtml(rule.action)}</div>
             <div><strong>Service</strong>${accessEscapeHtml(rule.service || 'any')}</div>
@@ -2824,20 +2877,39 @@ def _access_check_script(*, history_enabled: bool = False) -> str:
       const selectedService = accessServiceInput?.value || '';
       const checkContext = { roleName, sourceText, destinationText, selectedService };
       const localWarnings = accessLocalWarnings(roleData, sourceNumber, sourceText);
-      let uncertainCount = 0;
       for (const rule of roleData.rules || []) {
         const sourceResult = accessEndpointMatches(sourceNumber, rule.sourceMatchers, 'source', sourceNumber, destinationNumber);
         const destinationResult = accessEndpointMatches(destinationNumber, rule.destinationMatchers, 'destination', sourceNumber, destinationNumber);
-        if (!sourceResult.matched || !destinationResult.matched) {
-          if (sourceResult.uncertain || destinationResult.uncertain) {
-            uncertainCount += 1;
-          }
-          continue;
-        }
         const serviceResult = accessServiceMatches(rule.service, selectedService);
-        if (!serviceResult.matched) {
+        const sourceDefinitelyMissed = !sourceResult.matched && !sourceResult.uncertain;
+        const destinationDefinitelyMissed = !destinationResult.matched && !destinationResult.uncertain;
+        if (sourceDefinitelyMissed || destinationDefinitelyMissed || !serviceResult.matched) {
           continue;
         }
+
+        if (!sourceResult.matched || !destinationResult.matched) {
+          const warnings = accessUnique([
+            ...localWarnings,
+            ...sourceResult.warnings,
+            ...destinationResult.warnings,
+            ...serviceResult.warnings,
+            ...(rule.warnings || []),
+            '선행 ACL rule의 Alias/name 정보가 불완전하여 첫 매칭 여부를 확정할 수 없습니다.',
+          ]);
+          const result = {
+            status: 'unknown',
+            verdict: '판정 불가(ACL/Alias 정보 불완전)',
+            conditional: serviceResult.conditional,
+            matchedRule: null,
+            candidateRule: rule,
+            warnings,
+          };
+          accessRenderResult(result);
+          accessAddHistoryFromResult(result, checkContext);
+          accessHighlightRule(rule.id);
+          return;
+        }
+
         const verdict = accessActionVerdict(rule.action);
         const warnings = accessUnique([
           ...localWarnings,
@@ -2858,16 +2930,12 @@ def _access_check_script(*, history_enabled: bool = False) -> str:
         accessHighlightRule(rule.id);
         return;
       }
-      const warnings = [...localWarnings];
-      if (uncertainCount > 0) {
-        warnings.push(`${uncertainCount}개 rule은 alias/name 데이터가 불완전해 완전 판정하지 못했습니다.`);
-      }
       const result = {
         status: 'blocked',
         verdict: '기본 차단(Implicit deny)',
         conditional: false,
         matchedRule: null,
-        warnings,
+        warnings: [...localWarnings],
       };
       accessRenderResult(result);
       accessAddHistoryFromResult(result, checkContext);
