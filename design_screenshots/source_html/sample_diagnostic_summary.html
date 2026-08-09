@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WLC Diagnostic Summary</title>
+  <style>
+    body { background: #f4f7fb; color: #172033; font-family: Segoe UI, Arial, sans-serif; margin: 0; }
+    main { margin: 0 auto; max-width: 1120px; padding: 24px; }
+    .panel { background: #fff; border: 1px solid #d8e0ea; border-radius: 8px; box-shadow: 0 8px 24px rgba(15, 23, 42, .06); margin-bottom: 16px; padding: 18px; }
+    h1 { font-size: 24px; margin: 0 0 6px; }
+    h2 { font-size: 17px; margin: 0 0 12px; }
+    .code { background: #eef4ff; border: 1px solid #bdd4ff; border-radius: 6px; display: inline-block; font-weight: 700; padding: 5px 8px; }
+    .notice { color: #667085; font-size: 13px; }
+    .grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+    .field strong { color: #667085; display: block; font-size: 11px; text-transform: uppercase; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border-bottom: 1px solid #e4e9f1; font-size: 13px; padding: 8px; text-align: left; vertical-align: top; }
+    th { background: #f8fafc; color: #475467; }
+  </style>
+</head>
+<body>
+<main>
+  <section class="panel">
+    <h1>WLC Diagnostic Summary</h1>
+    <p class="notice">This report intentionally excludes raw device output, IP addresses, hostnames, credentials, and command results.</p>
+    <p class="code">OK</p>
+  </section>
+  <section class="panel">
+    <h2>Primary Finding</h2>
+    <div class="grid">
+      <div class="field"><strong>Stage</strong>DGN-COMPLETE</div>
+      <div class="field"><strong>Category</strong>success</div>
+      <div class="field"><strong>Title</strong>Diagnostic completed</div>
+      <div class="field"><strong>Retryable</strong>False</div>
+    </div>
+    <p>Diagnostic checks completed without a blocking issue.</p>
+    <p><strong>Likely cause:</strong> No known failure was detected.</p>
+    <p><strong>Operator action:</strong> Use the generated report for local records. No raw device output was saved.</p>
+  </section>
+  <section class="panel">
+    <h2>Stage Events</h2>
+    <table>
+      <thead><tr><th>Time</th><th>Stage</th><th>Status</th><th>Code</th><th>Command ID</th><th>Safe Message</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>2026-06-30T05:24:57.726068+00:00</td>
+          <td>DGN-BOOT</td>
+          <td>ok</td>
+          <td>OK</td>
+          <td></td>
+          <td>Diagnostic mode started.</td>
+        </tr>
+
+
+        <tr>
+          <td>2026-06-30T05:24:57.726201+00:00</td>
+          <td>DGN-INPUT</td>
+          <td>ok</td>
+          <td>OK</td>
+          <td></td>
+          <td>Diagnostic inputs validated.</td>
+        </tr>
+
+
+        <tr>
+          <td>2026-06-30T05:24:57.726207+00:00</td>
+          <td>DGN-MOCK</td>
+          <td>ok</td>
+          <td>OK</td>
+          <td></td>
+          <td>Offline raw diagnostic input selected.</td>
+        </tr>
+
+
+        <tr>
+          <td>2026-06-30T05:24:57.728262+00:00</td>
+          <td>DGN-PARSE</td>
+          <td>ok</td>
+          <td>OK</td>
+          <td></td>
+          <td>Configuration parsed successfully.</td>
+        </tr>
+
+
+        <tr>
+          <td>2026-06-30T05:24:57.728268+00:00</td>
+          <td>DGN-REPORT</td>
+          <td>ok</td>
+          <td>OK</td>
+          <td></td>
+          <td>Safe diagnostic report generated.</td>
+        </tr>
+        </tbody>
+    </table>
+  </section>
+</main>
+</body>
+</html>
