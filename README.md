@@ -194,6 +194,20 @@ wlc-role-acl-collector_vYYYY.MM.DD-HHMMSS_windows.zip
 
 압축을 완전히 푼 뒤 목적에 맞는 실행 경로를 선택합니다.
 
+### 통합 ZIP 구성
+
+```text
+README_START_HERE_KO.txt
+gui/
+  WlcRoleAclCollectorGUI.exe
+  WlcRoleAclCollectorCLI.exe
+web/
+  start_webapp.cmd
+  webapp_settings.cmd
+```
+
+GitHub의 `Source code (zip)` / `Source code (tar.gz)`는 소스 아카이브이며 일반 사용자용 실행 파일이 아닙니다. Mock 검증 데이터는 배포본의 `config/mock_scenarios` 아래에 포함됩니다.
+
 ### Windows GUI
 
 ```text
