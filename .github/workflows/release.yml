@@ -1,14 +1,13 @@
 name: Release
 
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-main
+  group: release-manual
   cancel-in-progress: false
 
 jobs:
@@ -90,7 +89,7 @@ jobs:
         shell: pwsh
         run: python .\tools\verify_combined_release_package.py --dist .\dist --smoke
 
-      - name: Prepare release assets
+      - name: Prepare release asset
         id: assets
         shell: pwsh
         run: |
@@ -109,11 +108,10 @@ jobs:
           Copy-Item -LiteralPath $sourceZip.FullName -Destination $assetPath -Force
 
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $assetPath).Hash.ToLowerInvariant()
-
           "asset_path=$assetPath" >> $env:GITHUB_OUTPUT
           "checksum=$hash" >> $env:GITHUB_OUTPUT
 
-      - name: Verify release assets
+      - name: Verify final release asset
         shell: pwsh
         run: |
           python .\tools\verify_combined_release_package.py `
@@ -131,125 +129,97 @@ jobs:
           $checksum = "${{ steps.assets.outputs.checksum }}"
           $sha = "${{ github.sha }}"
           $branch = "${{ github.ref_name }}"
-          $before = "${{ github.event.before }}"
 
-          if ($before -and $before -notmatch "^0+$") {
-            $range = "$before..$sha"
-            $commitHashes = git log --format="%H" $range
-            $changedFiles = git diff --name-only $range
+          $previousTag = $null
+          git describe --tags --abbrev=0 HEAD^ *> $null
+          if ($LASTEXITCODE -eq 0) {
+            $previousTag = (git describe --tags --abbrev=0 HEAD^).Trim()
+          }
+          $global:LASTEXITCODE = 0
+
+          if ($previousTag) {
+            $range = "$previousTag..$sha"
+            $commitLines = @(git log --pretty=format:"- %h %s" $range)
+            $changedFiles = @(git diff --name-only $range)
           } else {
-            $range = ""
-            $commitHashes = git log --format="%H" -n 20 $sha
-            $changedFiles = git show --pretty="" --name-only $sha
+            $range = "최근 커밋"
+            $commitLines = @(git log --pretty=format:"- %h %s" -n 20 $sha)
+            $changedFiles = @(git show --pretty="" --name-only $sha)
           }
 
-          $changeSummary = New-Object System.Collections.Generic.List[string]
-          foreach ($commitHash in $commitHashes) {
-            if (-not $commitHash) {
-              continue
-            }
-            $shortHash = git rev-parse --short $commitHash
-            $subject = git log -1 --pretty=format:"%s" $commitHash
-            $body = git log -1 --pretty=format:"%b" $commitHash
-            $changeSummary.Add("- $subject ($shortHash)")
-            foreach ($line in ($body -split "`r?`n")) {
-              $trimmed = $line.Trim()
-              if ($trimmed) {
-                $changeSummary.Add("  - $trimmed")
-              }
-            }
+          if (-not $commitLines) {
+            $commitLines = @("- 변경 커밋을 자동으로 찾지 못했습니다.")
           }
-          if ($changeSummary.Count -eq 0) {
-            $changeSummary.Add("- 변경 요약을 자동으로 찾지 못했습니다. 아래 원본 커밋 목록을 확인하세요.")
-          }
-          $changeSummaryText = $changeSummary -join [Environment]::NewLine
+          $commitText = $commitLines -join [Environment]::NewLine
 
           $areas = New-Object System.Collections.Generic.List[string]
-          function Add-ReleaseArea([string] $text) {
+          function Add-Area([string] $text) {
             if (-not $script:areas.Contains($text)) {
               $script:areas.Add($text)
             }
           }
+
           foreach ($file in $changedFiles) {
-            if ($file -like ".github/workflows/*") {
-              Add-ReleaseArea "- 배포 자동화: GitHub Actions 검증, 빌드, Release 생성 흐름이 변경되었습니다."
-            } elseif ($file -eq "src/wlc_role_acl_collector/gui_app.py") {
-              Add-ReleaseArea "- GUI: 화면 구성, 진행 상태, 사용자 알림 또는 수집 동작이 변경되었습니다."
-            } elseif ($file -eq "src/wlc_role_acl_collector/report.py") {
-              Add-ReleaseArea "- 보고서: HTML/Excel 보고서 생성 로직이 변경되었습니다."
-            } elseif ($file -eq "src/wlc_role_acl_collector/role_networks.py") {
-              Add-ReleaseArea "- Role 대역표: Excel 입력 파일 처리 로직이 변경되었습니다."
+            if ($file -like "src/wlc_role_acl_collector/*") {
+              Add-Area "- 수집/분석: WLC 수집, Parser, Role/ACL 평가 또는 보고서 로직이 변경되었습니다."
+            } elseif ($file -eq "app.py") {
+              Add-Area "- 웹앱: Streamlit 화면 또는 실행 흐름이 변경되었습니다."
             } elseif ($file -like "tests/*") {
-              Add-ReleaseArea "- 검증: 테스트 코드가 추가 또는 수정되었습니다."
-            } elseif ($file -like "docs/*") {
-              Add-ReleaseArea "- 문서: 사용자 문서 또는 기획 자료가 변경되었습니다."
+              Add-Area "- 검증: 자동 회귀 테스트가 추가 또는 변경되었습니다."
             } elseif ($file -like "config/*") {
-              Add-ReleaseArea "- 설정/샘플: 배포에 포함되는 설정 또는 샘플 파일이 변경되었습니다."
-            } elseif ($file -eq "app.py" -or $file -eq "src/wlc_role_acl_collector/web_logic.py") {
-              Add-ReleaseArea "- 웹앱: Streamlit 실행 화면 또는 수집 흐름이 변경되었습니다."
-            } elseif ($file -like "*.ps1" -or $file -like "tools/*") {
-              Add-ReleaseArea "- 빌드/도구: Windows 빌드 또는 검증 스크립트가 변경되었습니다."
+              Add-Area "- 샘플/설정: 배포에 포함되는 비식별 샘플 또는 설정 구조가 변경되었습니다."
+            } elseif ($file -like "docs/*" -or $file -eq "README.md") {
+              Add-Area "- 문서: 운영/검증/사용 문서가 변경되었습니다."
+            } elseif ($file -like ".github/workflows/*" -or $file -like "*.ps1" -or $file -like "tools/*") {
+              Add-Area "- 배포/도구: Windows 빌드, 검증 또는 Release 자동화가 변경되었습니다."
             }
           }
           if ($areas.Count -eq 0) {
-            Add-ReleaseArea "- 기타: 소스, 설정, 문서 중 하나 이상이 변경되었습니다."
+            Add-Area "- 기타: 저장소 변경 사항이 포함되어 있습니다."
           }
           $areaText = $areas -join [Environment]::NewLine
-
-          $changedFileLines = @($changedFiles | Where-Object { $_ } | ForEach-Object { "- $_" })
-          if (-not $changedFileLines) {
-            $changedFileLines = @("- 변경 파일을 자동으로 찾지 못했습니다.")
-          }
-          $changedFileText = $changedFileLines -join [Environment]::NewLine
-
-          if ($before -and $before -notmatch "^0+$") {
-            $commitLines = git log --pretty=format:"- %h %s" "$before..$sha"
-          } else {
-            $commitLines = git log --pretty=format:"- %h %s" -n 20 $sha
-          }
-          if (-not $commitLines) {
-            $commitLines = git log --pretty=format:"- %h %s" -n 1 $sha
-          }
-          $commitText = $commitLines -join [Environment]::NewLine
 
           $notesPath = Join-Path $PWD "release_notes.md"
           $notes = @"
           # $projectName $tag
 
-          이 릴리즈는 main 브랜치에 반영된 변경 사항을 기준으로 GitHub Actions에서 자동 생성한 Windows 실행 패키지입니다.
+          Aruba AOS8 WLC의 SSID·AAA Profile·Role·ACL·Alias 관계를 수집·분석하는 Windows 배포본입니다.
 
-          ## 변경내용
-          $changeSummaryText
-
-          ### 변경 영역
+          ## 이번 릴리즈
           $areaText
 
-          ## 검증
-          - 기준 커밋 SHA: $sha
-          - 브랜치명: $branch
-          - 실행한 검증 명령: powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\validate.ps1
-          - 실행한 빌드 명령: powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_gui_exe.ps1
-          - 실행한 웹앱 빌드 명령: powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_streamlit_portable.ps1
-          - 실행한 통합 ZIP 빌드 명령: powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_combined_release.ps1
-          - 실행한 ZIP 검증 명령: python .\tools\verify_release_package.py --dist .\dist --smoke-cli
-          - 실행한 웹앱 ZIP 검증 명령: python .\tools\verify_streamlit_portable_package.py --dist .\dist --smoke
-          - 실행한 통합 ZIP 검증 명령: python .\tools\verify_combined_release_package.py --dist .\dist --smoke
+          ## 운영 영향
+          - 장비 설정을 변경하는 기능은 추가하지 않습니다.
+          - 실제 운영망 정보는 Release asset이나 Release notes에 포함하지 않습니다.
+          - GUI, CLI, 로컬 Streamlit 웹앱을 하나의 Windows 통합 ZIP으로 제공합니다.
+          - 기존 결과를 사용할 때는 `정상 완료 / 부분 완료 / 수집 실패` 상태와 영향 Role/SSID를 함께 확인하십시오.
 
-          ## 첨부파일
-          - 다운로드할 파일: $assetName
-          - SHA256 체크섬: $checksum
-          - GUI 사용 방법: ZIP 압축을 풀고 `gui\WlcRoleAclCollectorGUI.exe`를 실행하세요.
-          - 웹앱 사용 방법: ZIP 압축을 풀고 `web\start_webapp.cmd`를 더블클릭하세요. Python 별도 설치는 필요 없습니다.
-          - 주의: GitHub 화면의 `Source code (zip)` / `Source code (tar.gz)`는 자동 생성된 소스 아카이브이며 일반 사용자가 실행할 파일이 아닙니다.
+          ## 검증 결과
+          - 기준 커밋: `$sha`
+          - 브랜치: `$branch`
+          - `tools\validate.ps1` 통과
+          - Windows GUI/CLI 패키지 빌드 및 smoke 검증
+          - Streamlit portable 패키지 빌드 및 smoke 검증
+          - GUI + Web 통합 ZIP 빌드 및 SHA-256 검증
+
+          ## 다운로드
+          - 일반 사용자용: `$assetName`
+          - SHA-256: `$checksum`
+          - GUI: ZIP 압축 해제 후 `gui\WlcRoleAclCollectorGUI.exe`
+          - 웹앱: ZIP 압축 해제 후 `web\start_webapp.cmd`
+          - GitHub의 `Source code (zip)` / `Source code (tar.gz)`는 실행용 배포 파일이 아닙니다.
+
+          ## 알려진 범위
+          - ClearPass/RADIUS 서버의 동적 Role을 직접 조회하지 않습니다.
+          - 모든 service object를 TCP/UDP 포트 번호까지 완전 해석하지 않습니다.
+          - Streamlit 자체 사용자 인증/권한 관리와 코드서명은 현재 범위가 아닙니다.
 
           <details>
-          <summary>세부 커밋 및 변경 파일</summary>
+          <summary>세부 커밋</summary>
 
-          ### 원본 커밋 목록
+          비교 기준: $range
+
           $commitText
-
-          ### 변경 파일
-          $changedFileText
 
           </details>
           "@
