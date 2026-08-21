@@ -22,7 +22,8 @@
 | `app.py` | Streamlit 웹앱 진입점 |
 | `cli_launcher.py` | CLI 실행 진입점 |
 | `gui_launcher.py` | GUI 실행 진입점 |
-| `config/` | 비식별 예제, Role 대역 템플릿, Mock scenario |
+| `config/` | 비식별 예제와 Role 대역 템플릿 |
+| `config/mock_scenarios/` | 실제 WLC 접속 없이 사용하는 비식별 Mock 시나리오 |
 | `tests/` | Parser/수집/ACL 평가/진단/GUI/보고서 회귀 테스트 |
 | `tools/` | 검증 및 패키지 확인 도구 |
 | `docs/` | 사용자·개발·오류·보안·검증 문서 |
