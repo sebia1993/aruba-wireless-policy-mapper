@@ -1,126 +1,154 @@
-# Release Notes 운영 규칙
+# Release 운영 기준
 
-이 파일은 저장소에 커밋하는 릴리즈 준비 점검 문서입니다. 실제 GitHub Release 본문은 `.github/workflows/release.yml`에서 main push 시 한국어로 자동 생성합니다.
+이 문서는 `wlc-role-acl-collector`의 공개 Release를 언제 만들고, 무엇을 검증하고, 어떤 정보를 Release notes에 포함할지 정의합니다.
 
-## Release 전 문서 점검
+## Release 원칙
 
-GitHub에 push하거나 Release를 준비하기 전에 아래 문서를 함께 확인합니다.
+공개 Release는 **문서 수정이나 내부 정리만으로 자동 생성하지 않습니다.**
 
-- `README.md`: 설치, 실행, 빌드, 배포 파일, 폴더 구조, 제한사항
-- `RELEASE_NOTES.md`: Release 설명 규칙과 asset 계약
-- `CHANGELOG.md`: 구현된 변경과 미구현/제외 항목 구분
+GitHub Actions의 `Release` workflow를 수동 실행하며, 다음과 같이 사용자가 체감하는 변경이 충분히 검증된 경우에만 배포합니다.
 
-문서에는 사내 IP, 실제 장비명, 계정, 비밀번호, 실제 로그, 내부망 정보, 고객 정보를 넣지 않습니다. 예시는 `192.0.2.10`, `10.10.10.0/24`, `sample_controller` 같은 샘플 값만 사용합니다.
+- WLC 수집 명령 또는 Parser 동작 변경
+- SSID / AAA / Role / ACL / Alias 관계 해석 변경
+- Access Check 판정 로직 변경
+- Excel / CSV / HTML 결과 의미 또는 구조 변경
+- GUI / Web / CLI 실행 방식 변경
+- Windows 패키지 또는 통합 ZIP 구조 변경
+- 운영상 중요한 오류 수정
+- 호환성에 영향을 줄 수 있는 의존성 변경
 
-이번 안정성 개선 Release notes에는 다음 항목을 한국어로 요약합니다.
+오탈자, README 정리, 주석, 내부 코드 정리 등은 다음 기능 Release에 함께 포함합니다.
 
-- 정상 완료, 부분 완료, 수집 실패의 공통 상태 표시
-- 실패 명령 기준 영향 Role/SSID와 수집 신뢰도 표시
-- GUI 실행 취소와 종료 시 장비 세션 정리
-- WLC 주소/Port/Timeout 검증 및 전체 60분 수집 상한
-- Excel/HTML 묶음 저장과 `report_status.json`의 파일/수집 상태 분리
-- disconnect 실패 가시화와 enable 오류 코드 정확성 개선
-- Streamlit 접속 방식별 기본 포트와 단계별 안전 실패 요약
-- CLI 다중 WLC 실패 격리와 traceback 없는 저장/파싱 오류 처리
-- 안전 진단 다중 파일 롤백·완료 상태와 반복 실행 자원 정리
-- 관리자 요약의 조치 필요·동적 Role 참고 분리와 상태별 권장 조치
-- 좁은 화면 ACL 표 가로 스크롤과 특수문자 Role HTML ID 충돌 방지
-- 대량 Role/ACL 보고서 생성·렌더링 회귀 검증
-- 전체 검증 시 로컬 `.venv` 자동 선택과 Python 경로 표시
-- Streamlit 배치 파일 CRLF 고정과 예상 밖 smoke 출력 차단
+## 배포 산출물
 
-## GitHub Release 본문에 포함되는 정보
+일반 사용자에게 직접 제공하는 Release asset은 다음 Windows 통합 ZIP 하나입니다.
 
-자동 Release notes에는 다음 정보가 들어가야 합니다.
-
-- 변경 커밋 목록
-- 기준 커밋 SHA
-- 브랜치명
-- 실행한 검증 명령
-- 실행한 빌드 명령
-- 산출물 파일명
-- SHA256 checksum
-- 변경 파일 목록
-
-## Release Asset 계약
-
-GitHub Release에는 아래 파일 하나만 직접 업로드합니다.
-
-- `wlc-role-acl-collector_vYYYY.MM.DD-HHMMSS_windows.zip`
-
-GitHub가 자동으로 표시하는 `Source code (zip)` / `Source code (tar.gz)`는 tag 기준 소스 아카이브이며, 사용자가 실행할 배포 파일이 아닙니다.
-
-통합 ZIP 내부에는 아래 파일이 포함되어야 합니다.
-
-- `README_START_HERE_KO.txt`
-- `gui/WlcRoleAclCollectorGUI.exe`
-- `gui/WlcRoleAclCollectorCLI.exe`
-- `gui/USER_GUIDE_KO.md`, `gui/USER_GUIDE_KO.html`
-- `gui/DEVELOPER_GUIDE_KO.md`, `gui/DEVELOPER_GUIDE_KO.html`
-- `gui/ERROR_CODES_KO.md`, `gui/ERROR_CODES_KO.html`
-- `gui/DIAGNOSTIC_MODE_KO.md`, `gui/DIAGNOSTIC_MODE_KO.html`
-- `gui/SECURITY_MODEL_KO.md`, `gui/SECURITY_MODEL_KO.html`
-- `gui/config/role_networks.example.xlsx`
-- `gui/config/mock_scenarios/*.json`
-- `web/start_webapp.cmd`
-- `web/webapp_settings.cmd`
-- `web/README_WEBAPP_KO.txt`
-- `web/python/python.exe`
-- `web/python/Lib/site-packages/streamlit/`
-- `web/python/Lib/site-packages/wlc_role_acl_collector/`
-- `web/app/app.py`
-- `web/config/role_networks.example.xlsx`
-
-ZIP 파일은 Release asset입니다. 저장소에는 커밋하지 않습니다. SHA256 checksum은 별도 asset으로 올리지 않고 Release notes에 기록합니다.
-
-## Streamlit 웹앱 배포 파일
-
-Streamlit 웹앱은 Windows 통합 ZIP의 `web` 폴더에 포함합니다. 일반 사용자는 Python을 설치하지 않고 `web/start_webapp.cmd`를 더블클릭합니다.
-
-웹앱 첫 실행은 내장 Python과 Streamlit 초기화 때문에 GUI EXE보다 느릴 수 있습니다. 배포 launcher는 파일 감시와 개발 모드를 끄고, portable 빌드 단계에서 주요 모듈을 사전 컴파일해 초기 접속 지연을 줄입니다. 사용자는 ZIP을 완전히 압축 해제한 뒤 로컬 폴더에서 실행해야 합니다.
-
-- `app.py`
-- `requirements.txt`
-- `src/wlc_role_acl_collector/web_logic.py`
-- `src/wlc_role_acl_collector/` 기존 수집/파서/보고서 모듈
-- `config/role_networks.example.xlsx`
-- `packaging/streamlit_portable/start_webapp.cmd`
-- `packaging/streamlit_portable/webapp_settings.cmd`
-- `packaging/streamlit_portable/README_WEBAPP_KO.txt`
-
-개발자가 소스에서 실행할 때의 기본 로컬 실행 예시는 다음과 같습니다.
-
-```powershell
-streamlit run app.py --server.address 127.0.0.1 --server.port 8763
+```text
+wlc-role-acl-collector_vYYYY.MM.DD-HHMMSS_windows.zip
 ```
 
-브라우저 접속 주소는 `http://127.0.0.1:8763`입니다. 원격 모드는 TLS와 접근통제가 승인된 환경에서만 별도로 활성화합니다.
+GitHub가 자동 표시하는 `Source code (zip)`과 `Source code (tar.gz)`는 실행용 배포 파일이 아닙니다.
 
-## 검증 기준
+통합 ZIP에는 다음 경로가 포함되어야 합니다.
 
-Release 전에 다음 검증이 통과해야 합니다.
+```text
+README_START_HERE_KO.txt
+gui/
+  WlcRoleAclCollectorGUI.exe
+  WlcRoleAclCollectorCLI.exe
+  USER_GUIDE_KO.md
+  USER_GUIDE_KO.html
+  DEVELOPER_GUIDE_KO.md
+  DEVELOPER_GUIDE_KO.html
+  ERROR_CODES_KO.md
+  ERROR_CODES_KO.html
+  DIAGNOSTIC_MODE_KO.md
+  DIAGNOSTIC_MODE_KO.html
+  SECURITY_MODEL_KO.md
+  SECURITY_MODEL_KO.html
+  config/
+web/
+  start_webapp.cmd
+  webapp_settings.cmd
+  README_WEBAPP_KO.txt
+  python/
+  app/app.py
+  config/
+```
+
+SHA-256은 Release notes에 기록합니다.
+
+## Release 전 검증
+
+PR Validation이 성공한 상태에서 수동 Release workflow를 실행합니다.
+
+기본 검증:
 
 ```powershell
 python -m pytest -q
 python -m compileall -q src tests tools
 python -m pip check
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\validate.ps1
+```
+
+Windows GUI / CLI:
+
+```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_gui_exe.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_streamlit_portable.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_combined_release.ps1
 python .\tools\verify_release_package.py --dist .\dist --smoke-cli
+```
+
+Streamlit portable:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_streamlit_portable.ps1
 python .\tools\verify_streamlit_portable_package.py --dist .\dist --smoke
+```
+
+통합 ZIP:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_combined_release.ps1
 python .\tools\verify_combined_release_package.py --dist .\dist --smoke
 ```
 
-`tools\validate.ps1`은 HTML Access Check JavaScript와 Role PNG JavaScript를 각각 추출해 Node.js 문법 검사를 수행합니다. Role PNG 기능은 오프라인으로 포함된 `html2canvas` 리소스와 라이선스 파일이 패키지에 들어가는지도 테스트합니다.
+최종 Release asset은 계산된 SHA-256을 다시 입력해 통합 ZIP 검증을 한 번 더 수행합니다.
 
-로컬 macOS에서 PowerShell 또는 Windows EXE 검증을 실행할 수 없으면 GitHub Actions `windows-latest` 결과를 기준으로 확인합니다.
+## Release notes 구성
 
-## 작성하지 않을 내용
+Release 첫 화면에서는 구현 세부사항보다 **사용자가 업그레이드 여부를 판단할 정보**를 먼저 보여줍니다.
 
-- 실제 WLC 주소, 장비명, 사용자명, 비밀번호
-- 회사 내부 Role 대역표 원본 내용
+권장 순서:
+
+1. 이번 릴리즈의 핵심 변경
+2. 운영 영향
+3. 검증 결과
+4. 다운로드 파일과 SHA-256
+5. 알려진 기능 범위
+6. 세부 커밋
+
+자동 생성 본문도 이 순서를 따릅니다.
+
+## 운영 영향 작성 기준
+
+다음 내용을 명확히 구분합니다.
+
+- 장비 설정 변경 여부
+- 기존 결과 파일 호환성 영향
+- 수집/Parser/판정 의미 변화
+- 사용자가 다시 확인해야 할 설정
+- 부분 완료 또는 데이터 신뢰도에 미치는 영향
+
+단순 UI 문구 변경이나 문서 변경에 습관적으로 `보안` 항목을 붙이지 않습니다.
+
+`보안`은 다음과 같이 실제 보안 경계가 바뀌는 경우에만 별도로 표시합니다.
+
+- 자격 증명 처리
+- SSH/Telnet 접근 범위
+- 민감정보 마스킹
+- 웹앱 원격 접근
+- 패키지 무결성
+- 의존성 취약점
+
+## 공개하지 않는 정보
+
+Release notes와 asset에는 다음 정보를 포함하지 않습니다.
+
+- 실제 WLC 주소 / Hostname
+- 장비 계정과 비밀번호
+- 실제 SSID / Role / ACL / Alias 이름과 원문
+- 내부 VLAN / 서브넷 / Role 대역표
+- ClearPass/RADIUS 내부 구성
 - 실제 `show` 명령 출력
-- 고객명, 사이트명, 운영망 식별자
-- 아직 구현하지 않은 installer, MSIX, 코드서명 기능
+- 고객명, 사이트명, 운영망 식별 정보
+- 실제 운영 보고서
+
+문서 예시는 비식별 샘플만 사용합니다.
+
+## 현재 알려진 범위
+
+- ClearPass/RADIUS 서버에서 동적 Role을 직접 조회하지 않습니다.
+- 모든 service object를 TCP/UDP 포트 번호까지 완전 해석하지 않습니다.
+- Streamlit 자체 사용자 로그인/권한 관리 기능은 없습니다.
+- 코드서명, installer, MSIX는 현재 범위가 아닙니다.
+- Windows EXE는 Windows runner 또는 Windows PC에서 검증합니다.
