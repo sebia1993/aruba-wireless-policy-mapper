@@ -1,0 +1,33 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      network-runtime:
+        patterns:
+          - "netmiko"
+          - "paramiko"
+      application-runtime:
+        patterns:
+          - "customtkinter"
+          - "openpyxl"
+          - "pandas"
+          - "streamlit"
+      development-tools:
+        dependency-type: development
+        patterns:
+          - "pyinstaller"
+          - "pytest"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      github-actions:
+        patterns:
+          - "*"
