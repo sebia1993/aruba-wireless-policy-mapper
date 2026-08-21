@@ -1,74 +1,81 @@
 # Changelog
 
-이 문서는 저장소에 반영된 주요 변경을 사람이 확인하기 위한 기록입니다. GitHub Release 본문은 Actions에서 자동 생성하지만, 기능 범위와 문서 상태는 이 파일에도 맞춰 둡니다.
+이 문서는 `wlc-role-acl-collector`의 **사용자와 네트워크 운영에 의미 있는 변경**을 기록합니다.
 
-## 0.1.0 - 현재 자동 Release 라인
+세부 구현 커밋을 모두 나열하기보다 수집 범위, 정책 해석, 결과물, 안전성, 배포 방식이 어떻게 달라졌는지 중심으로 정리합니다.
 
-현재 구현된 주요 기능:
+## Unreleased
 
-- 사내망 내부 공용 PC에서 실행하는 Streamlit 웹앱을 제공합니다.
-- Python 설치가 없는 Windows PC에서도 실행할 수 있도록 Streamlit portable ZIP을 제공합니다.
-- Streamlit 웹앱에서 WLC 접속 정보 입력, Role 대역 Excel 업로드, 진행 상태 표시, 결과 요약, 테이블 미리보기, xlsx/csv/html 다운로드를 제공합니다.
+### 문서 / 운영 체계
+
+- README를 `운영 문제 → 설계 판단 → 분석 구조 → 검증 → 빠른 시작` 순서로 재구성했습니다.
+- 기존 비식별 GUI/HTML 보고서 화면을 README에서 바로 확인할 수 있도록 연결했습니다.
+- 자동 테스트와 실제 운영 검증의 증거 수준을 구분하는 `docs/VALIDATION_REPORT.md`를 추가했습니다.
+- 저장소 개발 규칙을 일반적인 `DEVELOPMENT.md`로 정리했습니다.
+- 문서나 내부 정리만으로 공개 Release가 자동 생성되지 않도록 Release workflow를 수동 실행 방식으로 변경했습니다.
+- Release notes를 핵심 변경, 운영 영향, 검증 결과, 다운로드, 알려진 범위 중심으로 생성하도록 정리했습니다.
+
+## 0.1.0
+
+### 수집 / 정책 관계
+
 - Aruba AOS8 WLC에서 SSID, AAA Profile, 기본 Role, Role ACL, Alias 정보를 수집합니다.
-- `show ip interface brief`와 `show user-table`을 이용해 Role 대역 추정 근거와 현재 관측 사용자 정보를 보고서에 표시합니다.
-- Excel 보고서와 HTML 보고서를 생성합니다.
-- HTML 보고서에서 Role별 ACL 보기, ACL 주석/Role 설명 자동저장, 주석 포함 HTML 저장, 선택 Role PNG 저장, PDF 저장/인쇄, Access Check를 제공합니다.
-- GUI에서 사내 Role 대역 Excel 파일을 선택해 내부용 비교 보고서를 만들 수 있습니다.
-- CLI에서는 `--export-local-role-networks`를 명시한 경우에만 로컬 Role 대역을 보고서에 포함합니다.
-- 안전 진단 모드는 민감정보를 마스킹한 HTML/JSON 진단 보고서를 생성합니다.
-- Windows Release asset은 GUI/CLI와 Streamlit portable 웹앱을 함께 담은 통합 ZIP 하나로 배포합니다.
-- 통합 ZIP에는 GUI exe, CLI exe, 한국어 문서, 내장 Python 웹앱, Role 대역 예제 Excel, mock scenario JSON이 포함됩니다.
-- GitHub Actions는 PR에서 테스트/Windows 빌드/통합 ZIP 검증을 수행하고, main push에서 공개 Release와 SHA256 checksum을 생성합니다.
+- `initial-role`, `mac-default-role`, `dot1x-default-role`을 구분합니다.
+- ACL의 Alias 참조를 NetDestination 정의까지 연결해 접근 범위를 구조화합니다.
+- `show ip interface brief`와 `show user-table`을 이용해 Role 대역 추정 근거와 관측 사용자 정보를 보조 데이터로 제공합니다.
+- ClearPass/RADIUS 동적 Role은 직접 조회하지 않고 `동적 Role 가능성`으로 구분합니다.
 
-최근 안정성 개선:
+### 상태 / 신뢰도
 
-- Excel/HTML을 staging 파일로 모두 완성한 뒤 함께 반영하고, 실패 시 기존 파일을 복원하며 `report_status.json`에 파일 상태와 수집 상태를 분리해 기록합니다.
-- 장비 세션 종료 실패를 숨기지 않고 별도 경고로 표시하며, enable password 실패를 로그인 실패와 다른 오류 코드로 분류합니다.
-- GUI와 웹의 주요 실패 제목과 조치 안내를 초급 사용자가 이해하기 쉬운 한국어로 표시합니다.
-- Streamlit에서 SSH/Telnet 선택 시 기본 포트 22/23을 즉시 적용하고, 실패 결과를 오류 코드·단계·권장 조치로 보존합니다.
-- CLI에서 대상 설정·수집·파싱·저장 예외를 traceback 없이 처리하고, 다중 WLC 중 한 대상 실패 후에도 나머지 대상을 계속 수집합니다.
-- 다중 컨트롤러 실패 영향 범위를 해당 컨트롤러의 Role/SSID로 제한합니다.
-- 안전 진단 JSON/HTML/log를 묶음 staging/rollback 방식으로 저장하고 `diagnostic_status.json`에 완료 여부를 기록합니다.
-- 웹 반복 실행의 임시 폴더/동시 실행 슬롯 정리와 mock 서버 반복 start/stop을 자동 테스트합니다.
-- CLI/GUI/Web/HTML이 `collection_health.py`의 공통 상태 모델로 정상 완료, 부분 완료, 수집 실패를 동일하게 표시합니다.
-- 실패한 Role/Alias 명령을 수집된 ACL 관계와 연결해 영향 Role/SSID 및 수집 신뢰도를 관리자 요약에 표시합니다.
-- GUI에 cooperative cancel 버튼을 추가하고, 창 종료 시 non-daemon worker와 장비 세션 정리가 끝날 때까지 기다립니다.
-- WLC 주소, Port, Timeout 입력 검증을 공통화하고 명령 Timeout을 5~600초로 제한합니다.
-- 전체 live 수집에 60분 상한을 적용하고 남은 전체 시간보다 긴 명령 Timeout을 사용하지 않습니다.
-- Access Check가 불완전한 선행 Alias/name 규칙을 건너뛰어 뒤 규칙으로 오판하지 않고 `판정 불가`로 중단합니다.
-- GUI 결과 폴더 생성 실패도 worker에서 UI 오류 이벤트로 전달합니다.
-- CLI collect가 성공, 필수 수집 실패, 입력 오류, 부분 완료를 서로 다른 종료 코드로 반환합니다.
-- 보고서, raw, 진단, run.log를 원자적으로 저장하고 `report_status.json`에 완료 여부를 기록합니다.
-- 안전 진단의 Role/Alias command ID를 안정 라벨로 마스킹합니다.
-- Streamlit 기본 주소를 `127.0.0.1`로 제한하고 같은 WLC의 동시 수집을 차단합니다.
-- 선택한 Role만 상급자 보고용 PNG로 저장하고, 긴 Role은 ACL 그룹을 유지한 여러 이미지로 자동 분할합니다.
-- PNG 변환 라이브러리와 라이선스를 패키지에 포함해 인터넷이 차단된 사내망에서도 이미지 저장이 동작합니다.
-- 전체 검증 스크립트가 Role PNG JavaScript 문법 오류와 중간 단계 실패를 정확히 감지합니다.
-- Streamlit 실행마다 날짜시간과 세션 구분값이 포함된 결과 파일명을 사용합니다.
-- Streamlit 업로드 파일과 결과 파일은 서버 임시 작업 폴더에서 처리하고 다운로드 bytes만 세션에 보관합니다.
-- Streamlit portable ZIP 검증에서 내장 Python, Streamlit 패키지, 앱 패키지, `start_webapp.cmd --smoke`, SHA256 sidecar를 확인합니다.
-- 통합 Release ZIP 검증에서 `gui`와 `web` 실행 경로, 필수 문서/config, CLI smoke, 웹앱 smoke를 확인합니다.
-- Streamlit portable launcher에서 파일 감시/개발 모드를 비활성화하고, 빌드 시 주요 웹앱 모듈을 사전 컴파일해 첫 실행/접속 체감 지연을 줄였습니다.
-- collect, diagnose, GUI 수집 결과 폴더가 같은 시간에 생성되어도 충돌하지 않도록 run directory 생성 방식을 개선했습니다.
-- `enable password` 적용 실패를 조용히 무시하지 않고 수집 결과와 진행 이벤트에 기록합니다.
-- Windows 배포 ZIP 검증에서 GUI/CLI exe, 문서, config, mock scenario, CLI `--help`, SHA256 sidecar를 확인합니다.
-- HTML 관리자 요약에서 동적 Role 가능성을 장애·조치 필요 건수와 분리하고, 상태별 권장 조치를 바로 표시합니다.
-- 좁은 화면에서도 ACL 표의 Service·Raw·Comment 열을 표 내부 가로 스크롤로 확인할 수 있습니다.
-- 특수문자가 다른 Role 이름이 같은 HTML ID로 충돌하지 않도록 안정 해시 접미사를 적용합니다.
-- 60개 Role·1,200개 ACL 자동 회귀 테스트와 100개 Role·4,000개 ACL 실제 Chromium 검증을 수행했습니다.
-- 전체 검증 스크립트가 로컬 `.venv`를 자동 선택하고 사용한 Python 경로를 표시합니다.
-- Streamlit 배치 런처를 UTF-8 BOM 없는 CRLF로 고정하고, smoke가 예상 밖 stdout/stderr를 남기면 종료 코드 0이어도 실패 처리합니다.
+- CLI, GUI, Web에서 `정상 완료 / 부분 완료 / 수집 실패` 공통 상태 모델을 사용합니다.
+- 실패한 명령을 수집된 관계와 연결해 영향 Role/SSID와 수집 신뢰도를 표시합니다.
+- WLC 주소, Port, Timeout 입력을 검증하고 명령 Timeout을 5~600초로 제한합니다.
+- 전체 live 수집에는 60분 상한을 적용합니다.
+- GUI 취소 및 창 종료 시 worker와 장비 세션 정리 경로를 사용합니다.
+- CLI 다중 WLC 수집은 한 대상의 실패가 나머지 수집을 중단시키지 않도록 격리합니다.
 
-현재 제외된 항목:
+### ACL 분석 / Access Check
 
-- 코드서명, installer, MSIX, SmartScreen 평판 대응
-- ClearPass/RADIUS 서버에서 동적 Role을 직접 조회하는 기능
-- TCP/UDP 포트 번호 기반 service object 정밀 해석
-- Streamlit 웹앱 자체 사용자 로그인/권한 관리
+- Role별 ACL 상세를 HTML 보고서에서 확인할 수 있습니다.
+- Alias/name 기반 정책 관계를 Access Check에서 평가합니다.
+- 필요한 선행 Alias/ACL 정보가 불완전하면 뒤 규칙으로 임의 추정하지 않고 `판정 불가`로 처리합니다.
+- 특수문자가 포함된 서로 다른 Role 이름이 같은 HTML ID로 충돌하지 않도록 안정 ID를 사용합니다.
+
+### 보고서
+
+- Excel, SSID/Role CSV, HTML 보고서를 생성합니다.
+- HTML 보고서에서 ACL 주석과 Role 설명을 관리할 수 있습니다.
+- 선택한 Role의 ACL 내용을 PNG로 저장할 수 있습니다.
+- Excel/HTML은 staging에서 완성한 뒤 함께 반영하고 실패 시 기존 결과를 보호합니다.
+- `report_status.json`에 파일 생성 상태와 수집 상태를 분리해 기록합니다.
+- 내부 Role 대역 Excel을 선택적으로 입력해 WLC 추정값과 비교할 수 있습니다.
+
+### 진단 / 민감정보
+
+- 안전 진단 모드는 민감정보를 마스킹한 HTML/JSON 진단 결과를 생성합니다.
+- Role/Alias command ID는 안정 라벨로 치환합니다.
+- 실제 WLC 주소, 계정, 원문 출력, 내부 Role 대역표는 저장소나 공개 Release에 포함하지 않습니다.
+- Streamlit 기본 바인딩은 `127.0.0.1`이며 원격 사용은 별도 TLS/인증/접근통제를 전제로 합니다.
+
+### 검증
+
+- Parser, 수집기, ACL 평가, 진단, GUI, 보고서, Mock server 회귀 테스트를 제공합니다.
+- 60개 Role / 1,200개 ACL 보고서 생성 회귀를 검증합니다.
+- 100개 Role / 4,000개 ACL HTML 렌더링 경로를 검증합니다.
+- Access Check와 Role PNG JavaScript 문법을 자동 검증합니다.
+- Windows GUI/CLI 패키지, Streamlit portable 패키지, 통합 ZIP을 GitHub Actions에서 빌드·smoke 검증합니다.
+
+### Windows 배포
+
+- 일반 사용자용 Release는 GUI/CLI와 Streamlit portable 웹앱을 하나의 Windows 통합 ZIP으로 제공합니다.
+- Python이 설치되지 않은 Windows PC에서도 GUI와 로컬 웹앱을 실행할 수 있습니다.
+- 통합 ZIP의 필수 실행 파일, 문서, config, Mock scenario와 smoke 실행을 검증합니다.
+- 최종 ZIP의 SHA-256을 Release notes에 기록합니다.
+
+### 현재 제외 범위
+
+- ClearPass/RADIUS 서버의 동적 Role 직접 조회
+- 모든 service object의 TCP/UDP 포트 정밀 해석
+- Streamlit 자체 사용자 로그인/권한 관리
+- 코드서명 / installer / MSIX
 - macOS에서 Windows EXE를 직접 생성하는 공식 빌드 경로
-
-## 문서 변경 원칙
-
-기능, 실행 방법, 빌드 방법, Release asset, ZIP 내부 구조가 바뀌면 `README.md`, `RELEASE_NOTES.md`, `CHANGELOG.md`를 함께 점검합니다.
-
-문서 예시는 샘플 값만 사용합니다. 사내 IP, 실제 장비명, 계정, 비밀번호, 실제 로그, 고객 정보는 기록하지 않습니다.
