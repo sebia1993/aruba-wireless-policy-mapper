@@ -1,414 +1,262 @@
-# WLC Role ACL Collector
+# Aruba AOS8 WLC Role / ACL 분석
 
-Aruba AOS8 WLC에 접속해 SSID별 기본 Role과 Role별 ACL 접근 범위를 수집하고, 운영자가 한눈에 볼 수 있는 Excel/HTML 보고서를 생성하는 도구입니다.
+**Aruba AOS8 WLC의 `SSID → AAA Profile → 기본 Role → ACL → Alias(NetDestination)` 관계를 자동 수집·구조화하고 Excel/HTML 보고서로 만드는 네트워크 운영 자동화 도구입니다.**
 
-## 목적
+반복적인 CLI 조회와 수작업 정책 비교를 줄이고, **무선 서비스가 어떤 기본 Role과 ACL을 거쳐 어느 네트워크 범위에 접근할 수 있는지** 운영자가 빠르게 추적할 수 있도록 설계했습니다.
 
-- 어떤 SSID가 어떤 AAA Profile을 사용하는지 확인합니다.
-- SSID별 기본 Role(`initial-role`, `mac-default-role`, `dot1x-default-role`)을 정리합니다.
-- Role에 연결된 ACL 규칙과 접근 요약을 제공합니다.
-- ACL에 `alias <이름>`이 있으면 netdestination 내용을 함께 정리합니다.
-- ClearPass/RADIUS 동적 Role은 직접 수집하지 않고, 동적 Role 가능성으로 표시합니다.
+> 실제 운영 데이터는 저장소에 포함하지 않습니다. 문서와 화면 예시는 비식별 샘플·Mock 데이터만 사용합니다.
 
-## 현재 구현 범위
+## 한눈에 보기
 
-구현된 기능:
+| 항목 | 내용 |
+|---|---|
+| 대상 | Aruba AOS8 WLC |
+| 분석 흐름 | SSID → AAA Profile → 기본 Role → ACL → Alias / NetDestination |
+| 기본 Role | `initial-role`, `mac-default-role`, `dot1x-default-role` |
+| 접속 | SSH 또는 Telnet |
+| 장비 변경 | **없음 — 조회 중심 수집, 설정 변경 명령 사용 안 함** |
+| 결과 | Excel, CSV, HTML |
+| 추가 분석 | Role별 ACL 상세, Access Check, Role 대역 비교, VLAN/사용자 관측 정보 |
+| 실행 방식 | Windows GUI / 로컬 Streamlit 웹앱 / CLI |
+| 오프라인 운영 | Windows 통합 ZIP 제공, Python 별도 설치 불필요 |
+| 검증 | Mock/fixture, 대량 데이터 회귀, Windows 패키지/통합 ZIP CI 검증 |
 
-- 실행 PC 전용이 기본인 Streamlit 웹앱 실행
-- Windows GUI 실행 파일과 CLI 실행 파일 배포
-- Aruba AOS8 WLC 접속 후 SSID, Role, ACL, Alias, VLAN/사용자 관측 정보 수집
-- Excel/HTML 보고서 생성
-- HTML 보고서 안의 Role별 ACL 보기, ACL 주석/Role 설명 자동저장, 선택 Role PNG 저장, Access Check
-- 사내 Role 대역 Excel(`Role_Networks` Sheet 우선) 입력과 내부용 비교 보고서
-- 안전 진단 모드와 민감정보 마스킹된 진단 보고서
-- fixture/offline/mock 기반 검증과 GitHub Actions Windows Release 검증
+## 해결하려 한 운영 문제
 
-아직 포함하지 않는 기능:
+Aruba 무선 환경에서 특정 SSID의 실제 접근 정책을 확인하려면 여러 Profile과 Role, ACL을 연속해서 따라가야 합니다.
 
-- 코드서명, installer, MSIX, SmartScreen 평판 대응
-- ClearPass/RADIUS 서버에서 동적 Role을 직접 조회하는 기능
-- TCP/UDP 포트 번호까지 service object를 정밀 해석하는 기능
-- Streamlit 웹앱 자체 사용자 계정/권한 관리 기능
-- macOS에서 Windows EXE를 직접 생성하는 공식 빌드 경로
+- SSID와 AAA Profile의 연결 관계를 일일이 확인해야 함
+- `initial-role`, `mac-default-role`, `dot1x-default-role`이 서로 달라 정책 해석이 복잡함
+- User Role에서 ACL 이름만 확인해도 실제 목적지 범위는 Alias/NetDestination을 다시 조회해야 함
+- ClearPass/RADIUS가 동적 Role을 반환하는 환경에서는 WLC의 기본 Role만 보고 실제 적용 Role을 단정하면 안 됨
+- 일부 명령 수집이 실패했을 때 나머지 정상 결과까지 사용할 수 없는 것처럼 보이거나, 반대로 불완전한 결과를 정상으로 오판할 수 있음
+- CLI 출력과 Excel을 수작업으로 비교하면 누락·복사 오류가 발생하기 쉬움
 
-## Streamlit 웹앱 실행
+이 프로젝트는 단순 명령 수집보다 **정책 관계를 연결하고, 수집 신뢰도와 분석 한계를 함께 표시하는 것**을 목표로 합니다.
 
-기본 설정은 웹앱을 실행한 PC에서만 브라우저로 접속하는 방식입니다. 장비 계정을 HTTP로 전송하지 않도록 원격 접속은 기본 비활성화되어 있으며, 인터넷 공개용으로 설계하지 않았습니다.
+## 핵심 설계 판단
 
-### 1. Release 통합 ZIP로 실행
+| 운영 문제 | 설계 판단 |
+|---|---|
+| SSID 정책 경로가 여러 객체로 분산 | SSID → AAA → Role → ACL 관계를 하나의 모델로 연결 |
+| 기본 Role 종류가 여러 개 | `initial/mac-default/dot1x-default`를 구분해 보고서에 각각 표시 |
+| ACL의 Alias만으로 실제 범위를 알 수 없음 | Alias를 NetDestination 정의까지 추적해 네트워크 범위와 함께 정리 |
+| 동적 Role을 기본 Role로 오인할 위험 | ClearPass/RADIUS 동적 Role은 **가능성**으로 분리하고 직접 수집한 값처럼 표시하지 않음 |
+| 일부 명령 실패 시 결과 신뢰도 판단 필요 | `정상 완료 / 부분 완료 / 수집 실패` 상태와 영향 Role/SSID를 함께 계산 |
+| 불완전한 Alias/ACL에서 잘못된 접근 허용 판정 위험 | 선행 정보가 부족하면 Access Check를 억지로 통과시키지 않고 `판정 불가`로 중단 |
+| 동일 작업을 반복할 때 사람이 Excel을 다시 정리 | Excel/CSV/HTML을 동일 수집 모델에서 자동 생성 |
+| 내부 Role 대역표와 WLC 추정값 비교 필요 | 선택적으로 `Role_Networks` Excel을 읽어 로컬 기준과 수집값 비교 |
+| 현장 장애 재현 시 운영 정보 공유가 어려움 | IP·계정·원문을 제거한 안전 진단 보고서와 안정 오류 코드 사용 |
 
-일반 사용자는 GitHub Release의 Windows 통합 ZIP을 사용합니다. 이 방식은 Windows PC에 Python을 별도로 설치하지 않습니다.
+## 분석 구조
 
-1. GitHub Releases에서 아래 파일 하나만 다운로드합니다.
-   - `wlc-role-acl-collector_vYYYY.MM.DD-HHMMSS_windows.zip`
-2. Windows PC에서 ZIP 압축을 풉니다.
-3. `web` 폴더로 이동합니다.
-4. `start_webapp.cmd`를 더블클릭합니다.
-5. 실행 창은 닫지 않습니다. 이 창을 닫으면 웹앱도 종료됩니다.
+```mermaid
+flowchart LR
+    A["Aruba AOS8 WLC"] -->|"조회 명령"| B["수집기"]
+    B --> C["SSID / AAA Profile"]
+    B --> D["User Role / ACL"]
+    B --> E["Alias / NetDestination"]
+    B --> F["VLAN / 사용자 관측"]
 
-첫 실행은 내장 Python과 Streamlit을 초기화하므로 기존 GUI 실행보다 느릴 수 있습니다. ZIP 내부에서 직접 실행하지 말고 압축을 완전히 푼 뒤, OneDrive/네트워크 드라이브보다 `C:\WLC\wlc-role-acl-collector\` 같은 로컬 폴더에서 실행하는 방식을 권장합니다. 같은 PC에서 사용할 때는 `http://127.0.0.1:8763`으로 접속하면 됩니다.
+    C --> G["정책 관계 모델"]
+    D --> G
+    E --> G
+    F --> G
 
-GitHub 화면의 `Source code (zip)` / `Source code (tar.gz)`는 자동 생성된 소스 코드 파일입니다. 일반 사용자가 실행할 파일이 아니므로 다운로드하지 않아도 됩니다.
+    G --> H["SSID → AAA → Role → ACL"]
+    H --> I["Excel / CSV"]
+    H --> J["HTML 보고서"]
+    H --> K["Access Check"]
 
-통합 ZIP 안의 웹앱 관련 파일은 아래 위치에 있습니다.
+    L["선택: Role_Networks Excel"] --> H
+```
 
-- `web\start_webapp.cmd`
-- `web\webapp_settings.cmd`
-- `web\README_WEBAPP_KO.txt`
-- `web\python\`
-- `web\app\app.py`
-- `web\config\role_networks.example.xlsx`
-
-통합 ZIP 최상위의 `README_START_HERE_KO.txt`도 함께 확인하세요.
-
-### 2. 접속 주소와 포트
-
-실행한 PC에서만 접속할 때는 브라우저에서 아래 주소를 엽니다.
+핵심 분석 경로는 다음과 같습니다.
 
 ```text
-http://127.0.0.1:8763
+SSID
+ ↓
+AAA Profile
+ ↓
+initial / mac-default / dot1x-default Role
+ ↓
+Role에 연결된 ACL
+ ↓
+ACL Rule
+ ↓
+Alias가 있으면 NetDestination 실제 범위
+ ↓
+Excel / HTML / Access Check
 ```
 
-기본 `webapp_settings.cmd`의 주소는 `127.0.0.1`입니다. 다른 PC에서 접속해야 하고 회사에서 TLS, 접근통제, 사용자 인증을 별도로 승인·구성한 경우에만 `WLC_WEB_ADDRESS=0.0.0.0`으로 변경합니다.
+## 분석 경계
+
+정확한 결과를 위해 **수집한 사실과 추정 가능한 범위를 구분**합니다.
+
+- ClearPass/RADIUS 서버에서 동적 Role을 직접 조회하지 않습니다.
+- RADIUS 연계가 확인되는 경우 `동적 Role 가능성`으로 표시합니다.
+- service object를 TCP/UDP 포트 번호까지 완전 해석하는 기능은 현재 범위가 아닙니다.
+- 수집 실패가 있으면 영향을 받는 Role/SSID와 신뢰도를 결과에 표시합니다.
+- Access Check는 필요한 선행 정보가 부족하면 허용/차단을 임의 추정하지 않습니다.
+
+## 실행 및 결과 화면
+
+아래 이미지는 저장소의 **디자인 검토용 비식별 샘플 화면**입니다. 실제 운영망 주소·계정·설정 원문은 포함하지 않습니다.
+
+### 접속 정보 입력
+
+![WLC Role ACL Collector 접속 화면](design_screenshots/app_flow/01_app_ready_connection.png)
+
+### 수집 완료
+
+![WLC Role ACL Collector 수집 완료 화면](design_screenshots/app_flow/05_app_completed_results.png)
+
+### HTML 보고서 요약
+
+![WLC Role ACL Collector HTML 보고서](design_screenshots/html_files/11_html_report_overview.jpg)
+
+### Role / ACL 상세 분석
+
+![WLC Role ACL Collector Role ACL Detail](design_screenshots/html_files/12_html_report_role_acl_detail.jpg)
+
+### Access Check
+
+![WLC Role ACL Collector Access Check](design_screenshots/html_files/13_html_report_access_check.jpg)
+
+전체 화면 묶음은 [`design_screenshots/`](design_screenshots/)에서 확인할 수 있습니다.
+
+## 주요 결과물
+
+수집이 끝나면 날짜시간과 세션 구분값을 사용해 결과 파일을 생성합니다.
 
 ```text
-http://승인된_서버_IP:8763
+wlc_role_acl_<세션>.xlsx
+wlc_role_acl_<세션>_ssid_role_map.csv
+wlc_role_acl_<세션>.html
 ```
 
-기본 포트는 `8763`입니다. 포트를 바꾸려면 압축을 푼 폴더의 `web\webapp_settings.cmd`를 메모장으로 열고 `WLC_WEB_PORT` 값을 변경합니다.
+### Excel / CSV
 
-`0.0.0.0` 모드는 장비 ID/PW가 암호화되지 않은 HTTP 구간을 통과하므로 보안 구성이 없는 환경에서는 사용하지 마십시오. 원격 모드를 승인해 사용한다면 Windows 방화벽에서 허용 대상을 제한하고, 실행 PC가 절전모드에 들어가지 않도록 전원 설정도 확인합니다.
+- SSID와 AAA Profile 관계
+- 기본 Role 종류별 매핑
+- Role과 ACL 관계
+- Alias / NetDestination 범위
+- 선택적 Role 대역 비교
+- 수집 상태와 영향 범위
 
-### 3. 개발 PC에서 소스 실행
+### HTML
 
-소스 코드로 직접 실행할 때만 Python 3.11 이상이 필요합니다.
+- 관리자 요약
+- SSID / Role 관계
+- Role별 ACL 상세
+- ACL 주석 및 Role 설명
+- 선택 Role PNG 저장
+- Access Check
+- 부분 수집 시 영향 Role/SSID와 권장 조치
 
-```powershell
-cd "D:\Project\Network\wlc_role_acl_collector"
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-streamlit run app.py --server.address 127.0.0.1 --server.port 8763
-```
+## 안전 및 운영 원칙
 
-### 4. 웹 화면 사용 순서
+- 장비 계정과 비밀번호를 코드에 저장하지 않습니다.
+- 원격 웹앱 공개를 기본값으로 사용하지 않습니다. Streamlit 기본 주소는 `127.0.0.1`입니다.
+- GUI/Web/CLI에서 실제 WLC 수집과 테스트 fixture를 분리합니다.
+- Raw 장비 출력과 내부 Role 대역표는 공개 저장소에 포함하지 않습니다.
+- 안전 진단 결과는 주소·계정·Role/ACL 원문 등 운영 정보를 마스킹합니다.
+- GUI 작업 취소와 종료 시 장비 세션을 정리하도록 설계했습니다.
+- 전체 live 수집에는 60분 상한을 두고 명령 Timeout은 5~600초 범위로 제한합니다.
 
-1. 브라우저에서 Streamlit 주소에 접속합니다.
-2. 실제 WLC IP를 입력합니다.
-3. `접속 방식`에서 SSH 또는 Telnet을 먼저 선택하고 자동 기본 포트 22/23과 명령 Timeout을 확인합니다.
-4. 장비 ID, 장비 PW, 필요한 경우 Enable password를 입력합니다.
-5. 필요하면 사내 Role 대역표 Excel(`.xlsx` 또는 `.xlsm`)을 업로드합니다.
-6. `수집 실행` 버튼을 누릅니다.
-7. 진행 상태와 로그를 확인합니다.
-8. `정상 완료` 또는 `부분 완료` 상태와 실패 명령·영향 Role/SSID를 확인합니다.
-9. 필요한 파일을 다운로드합니다.
+상세 보안 경계는 [보안 모델](docs/SECURITY_MODEL_KO.md), 현장 진단은 [진단 모드 안내](docs/DIAGNOSTIC_MODE_KO.md)를 참고하십시오.
 
-실패하면 오류 코드, 실패 단계, 권장 조치를 먼저 확인합니다. 내부 상태값은 `기술 세부 정보`를 펼쳤을 때만 표시되며 Python traceback과 내부 임시 파일 경로는 일반 결과 화면에 노출하지 않습니다.
+## 검증
 
-다운로드 파일:
+자동 검증과 실제 운영 검증은 같은 의미로 취급하지 않습니다.
 
-- `wlc_role_acl_<날짜시간_세션>.xlsx`
-- `wlc_role_acl_<날짜시간_세션>_ssid_role_map.csv`
-- `wlc_role_acl_<날짜시간_세션>.html`
+| 검증 항목 | 상태 |
+|---|---|
+| Parser / ACL 평가 단위 테스트 | ✅ 자동 검증 |
+| Mock WLC / fixture 기반 수집 | ✅ 자동 검증 |
+| GUI / CLI / Web 공통 상태 모델 | ✅ 자동 검증 |
+| 60 Role / 1,200 ACL 회귀 | ✅ 자동 검증 |
+| 100 Role / 4,000 ACL HTML 렌더링 경로 | ✅ 검증 항목 포함 |
+| Windows GUI/CLI 패키지 | ✅ GitHub Actions |
+| Streamlit portable 패키지 | ✅ GitHub Actions |
+| GUI + Web 통합 ZIP | ✅ GitHub Actions |
+| 실제 운영 환경 결과 | 공개 자료에서는 민감정보를 제거한 검증 요약만 관리 |
 
-### 5. Streamlit 사용 시 보안 주의사항
+구체적인 검증 항목과 공개 가능한 증거 범위는 [검증 보고서](docs/VALIDATION_REPORT.md)에 정리합니다.
 
-- 접속 주소를 아는 사내 사용자는 웹앱에 접근할 수 있습니다.
-- 장비 계정/비밀번호는 코드에 저장하지 말고 실행 화면에서 입력하세요.
-- 서버 PC에서 실제 WLC 접속이 실행되므로, 서버 PC가 WLC에 접근 가능한 네트워크에 있어야 합니다.
-- 업로드한 Role 대역표와 생성된 결과 파일은 서버의 임시 작업 폴더에서 처리한 뒤 다운로드용 bytes만 세션에 보관합니다.
-- 사내 Role 대역표를 업로드하고 보고서 포함 옵션을 켜면 HTML/Excel 결과에 내부 대역 정보가 들어갑니다. 회사 외부 공유 전 반드시 내용을 확인하세요.
-- 같은 WLC에서 다른 웹 수집이 진행 중이면 새 요청은 실행하지 않고 기존 작업 종료 후 재시도를 안내합니다.
-- 인터넷 공개, 사용자별 로그인, 권한 분리, 감사 로그 보관이 필요한 환경에서는 별도 인증/프록시/접근제어 구성이 필요합니다.
+## 빠른 시작
 
-## Windows GUI 실행
-
-일반 사용자는 GUI 실행을 권장합니다.
-
-### Release ZIP로 실행
-
-GitHub Release에서 Windows 배포 파일을 받는 방식이 일반 사용자용 경로입니다.
-
-1. GitHub Releases에서 아래 파일 하나만 다운로드합니다.
-   - `wlc-role-acl-collector_vYYYY.MM.DD-HHMMSS_windows.zip`
-2. Windows PC에서 ZIP 압축을 풉니다.
-3. `gui` 폴더로 이동합니다.
-4. `WlcRoleAclCollectorGUI.exe`를 실행합니다.
-5. CLI가 필요하면 같은 폴더의 `WlcRoleAclCollectorCLI.exe`를 사용합니다.
-
-GitHub 화면의 `Source code (zip)` / `Source code (tar.gz)`는 자동 생성된 소스 코드 파일입니다. 일반 사용자가 실행할 파일이 아니므로 다운로드하지 않아도 됩니다.
-
-통합 Release ZIP 안에는 아래 파일이 포함됩니다.
-
-- `README_START_HERE_KO.txt`
-- `gui\WlcRoleAclCollectorGUI.exe`
-- `gui\WlcRoleAclCollectorCLI.exe`
-- `gui\USER_GUIDE_KO.md`, `gui\USER_GUIDE_KO.html`
-- `gui\DEVELOPER_GUIDE_KO.md`, `gui\DEVELOPER_GUIDE_KO.html`
-- `gui\ERROR_CODES_KO.md`, `gui\ERROR_CODES_KO.html`
-- `gui\DIAGNOSTIC_MODE_KO.md`, `gui\DIAGNOSTIC_MODE_KO.html`
-- `gui\SECURITY_MODEL_KO.md`, `gui\SECURITY_MODEL_KO.html`
-- `gui\config\role_networks.example.xlsx`
-- `gui\config\mock_scenarios\*.json`
-- `web\start_webapp.cmd`
-- `web\webapp_settings.cmd`
-- `web\README_WEBAPP_KO.txt`
-- `web\python\`
-- `web\app\app.py`
-- `web\config\role_networks.example.xlsx`
-
-ZIP 파일은 배포용 산출물입니다. 저장소에는 커밋하지 않습니다. SHA256 checksum은 별도 파일로 업로드하지 않고 GitHub Release 본문에 기록합니다.
-
-### Python 소스에서 실행
-
-개발 PC에서 소스 코드로 실행하려면 Python 3.11 이상이 필요합니다.
-
-```powershell
-cd "D:\Codex Project\Network\wlc_role_acl_collector"
-python -m pip install -e .
-python -m wlc_role_acl_collector.gui_app
-```
-
-GUI 입력 항목:
-
-- WLC IP
-- Report name: 선택 사항입니다. 비워두면 `wlc-장비IP` 형태로 자동 지정됩니다.
-- Protocol: `ssh` 또는 `telnet`
-- Port: SSH는 `22`, Telnet은 `23` 자동 기본값
-- Username
-- Password, Enable password
-- Output 폴더
-- 고급 옵션의 사내 Role 대역표: 선택 사항입니다. `Role 이름`, `네트워크 대역` 컬럼을 가진 Excel 파일을 넣으면 내부용 HTML/Excel 보고서에 로컬 기준 Role 대역과 WLC 추정값 비교 결과가 표시됩니다. CIDR(`10.40.1.0/24`) 입력을 권장하며, CIDR을 쓰지 않을 때만 `서브넷마스크` 컬럼이 필요합니다.
-- 고급 옵션의 Timeout seconds
-
-Timeout seconds는 명령 하나당 5~600초 범위이며 기본값은 60초입니다. 전체 수집은 최대 60분으로 제한되어 반복 Timeout이 계속되면 `duration_limit`을 기록하고 가능한 결과까지만 부분 완료로 생성합니다.
-
-사내 Role 대역표는 실제 Excel 통합 문서 형식(`.xlsx` 또는 `.xlsm`)이어야 합니다. CSV, HTML, 구형 `.xls` 파일의 확장자만 `.xlsx`로 바꾸면 열 수 없습니다. GUI의 `작성법` 버튼에서 앱 내부 작성 가이드를 볼 수 있고, `샘플 열기` 버튼으로 제공된 `config\role_networks.example.xlsx`를 열 수 있습니다. 샘플 파일의 `Role_Networks` 시트를 복사/수정해서 사용하고, `작성가이드` 시트에서 예시와 주의사항을 확인하세요. 프로그램은 `Role_Networks` Sheet가 있으면 Sheet 순서와 관계없이 그 Sheet를 우선 읽고, 없을 때만 첫 번째 Sheet를 읽으며 화면에 fallback 안내를 표시합니다.
-
-기본 화면은 `접속 정보 입력 → 분석 시작 → 수집 상태 확인 → 결과 확인` 순서입니다. 사내 Role 대역표, Timeout seconds, 안전 진단은 `고급 옵션 표시`를 눌렀을 때 나타납니다.
-
-`분석 시작`을 누르면 WLC 접속부터 명령 수집, 보고서 생성까지 순서대로 진행합니다. `실행 취소`는 현재 명령의 응답 또는 Timeout 후 다음 명령을 실행하지 않고 세션을 닫습니다. 프로그램 창을 닫을 때도 worker와 장비 세션 정리가 끝난 뒤 종료합니다.
-
-완료 후에는 `정상 완료`, `부분 완료`, `수집 실패` 상태를 먼저 확인합니다. 부분 완료이면 실패 명령, 영향 영역, 영향 Role/SSID를 확인하고 해당 정보는 재수집 전까지 확정된 값으로 사용하지 않습니다. HTML 첫 화면에는 수집 신뢰도, 실패 영향 범위, 권장 조치가 함께 표시됩니다. 동적 Role 가능성은 장애 건수와 분리된 참고 정보로 표시합니다.
-
-ACL에 `alias <이름>`이 있으면 자동으로 `show netdestination <이름>`을 실행합니다. 보고서의 `Role_ACL_Detail`에는 source/destination 상세가 붙고, `Alias_Detail` 시트에는 alias 내부 host/network/range/name 목록이 정리됩니다.
-
-기본 결과 저장 위치:
-
-```text
-%USERPROFILE%\Documents\WlcRoleAclCollector\outputs
-```
-
-실패해도 결과 폴더에 아래 파일이 남습니다.
-
-- `run.log`
-- `raw\<controller>.txt`
-- `report_status.json`: `writing`, `completed`, `failed` 중 하나로 보고서 저장 상태 표시
-
-`report_status.json`은 파일 저장 완료 여부이고, 화면/HTML의 수집 상태는 장비 명령 완전성입니다. 파일 저장이 `completed`여도 선택 명령 실패가 있으면 수집 상태는 `partial`일 수 있습니다.
-
-## 실패 진단
-
-- `Authentication failed`: ID/PW 오류, 계정 잠금, WLC 로그인 권한을 확인합니다.
-- `Connection timed out or was refused`: IP, SSH/Telnet 포트, 방화벽, WLC SSH/Telnet 활성화 여부를 확인합니다.
-- `Command failed after login`: 로그인은 되었지만 `show configuration effective` 또는 Role별 명령 권한/지원 여부를 확인합니다.
-- `부분 완료`: 실패 명령과 영향 Role/SSID를 확인하고 해당 영역을 재수집 전 확정 판단하지 않습니다.
-- `duration_limit`: 전체 60분 상한에 도달했습니다. 반복 Timeout 대상과 장비 부하를 확인한 뒤 재실행합니다.
-
-실패 메시지에는 가능한 경우 실패 명령 ID, 실제 명령어, `run.log` 경로가 함께 표시됩니다.
-
-## Windows 배포 패키지 만들기
-
-Python이 없는 사용자에게 배포할 때 Windows GUI/CLI EXE ZIP과 Streamlit portable ZIP을 내부 산출물로 만든 뒤, 최종 사용자용 통합 ZIP 하나로 묶습니다.
-
-이 작업은 Windows PC 또는 GitHub Actions의 `windows-latest` runner에서 검증합니다. macOS 개발 PC에서는 소스 코드 수정, 테스트, 문서 검증을 수행하고, Windows 실행/portable 패키지 최종 검증은 GitHub Actions 또는 Windows PC에서 확인합니다.
-
-```powershell
-cd "D:\Codex Project\Network\wlc_role_acl_collector"
-.\build_windows_gui_exe.ps1
-.\build_windows_streamlit_portable.ps1
-.\build_windows_combined_release.ps1
-```
-
-결과:
-
-- `dist\WlcRoleAclCollectorGUI.exe`
-- `dist\WlcRoleAclCollectorCLI.exe`
-- `dist\WlcRoleAclCollectorGUI_v0.1.0.zip`
-- `dist\WlcRoleAclCollectorWeb_v0.1.0.zip`
-- `dist\WlcRoleAclCollectorWindows_v0.1.0.zip`
-
-GitHub Release에는 최종 통합 ZIP 하나만 아래 이름으로 업로드합니다. SHA256 checksum은 Release notes에 기록합니다.
+일반 사용자는 GitHub **Releases**의 Windows 통합 ZIP을 사용합니다.
 
 ```text
 wlc-role-acl-collector_vYYYY.MM.DD-HHMMSS_windows.zip
 ```
 
-배포 ZIP 구조와 checksum은 다음 스크립트로 검증합니다.
+압축을 완전히 푼 뒤 목적에 맞는 실행 경로를 선택합니다.
 
-```powershell
-python .\tools\verify_release_package.py --dist .\dist --smoke-cli
-python .\tools\verify_streamlit_portable_package.py --dist .\dist --smoke
-python .\tools\verify_combined_release_package.py --dist .\dist --smoke
-```
-
-`--smoke-cli`는 Windows에서 ZIP을 풀고 `WlcRoleAclCollectorCLI.exe --help`를 실행합니다. Windows가 아닌 환경에서는 CLI smoke 실행을 건너뛰고 ZIP 구조 검증만 수행합니다.
-`--smoke`는 Windows에서 Streamlit portable ZIP을 풀고 `start_webapp.cmd --smoke`로 내장 Python, Streamlit, 앱 모듈 import를 확인합니다. 성공 출력 한 줄 외의 stdout이나 stderr가 있으면 배치 파일이 종료 코드 0을 반환하더라도 실패 처리합니다.
-
-## GitHub Release 자동 배포
-
-- PR 단계: `pull_request` to `main`에서 테스트, Windows GUI/CLI ZIP 빌드, Streamlit portable ZIP 빌드, 통합 ZIP 빌드, ZIP 구조 검증을 수행합니다. Release는 만들지 않습니다.
-- main push 단계: `push` to `main`에서 테스트, 통합 ZIP 빌드/검증, SHA256 계산, KST 기준 tag 생성, 공개 GitHub Release 생성을 수행합니다.
-- 자동 tag 형식은 `vYYYY.MM.DD-HHMMSS`입니다. 같은 초에 tag가 이미 있으면 suffix를 붙입니다.
-- Release title은 `wlc-role-acl-collector <tag>` 형식입니다.
-- Release notes는 GitHub Actions에서 한국어로 생성되며 변경 커밋, 기준 SHA, 브랜치명, 검증 명령, 빌드 명령, 산출물 파일명, SHA256 checksum을 포함합니다.
-- Release asset으로 직접 업로드되는 파일은 `wlc-role-acl-collector_vYYYY.MM.DD-HHMMSS_windows.zip` 하나입니다. GitHub가 자동으로 보여주는 `Source code` 항목은 실행용 파일이 아닙니다.
-
-Release 준비 전에 `README.md`, `RELEASE_NOTES.md`, `CHANGELOG.md`를 함께 확인합니다. 실제 코드에 없는 기능, 내부 IP, 장비명, 계정, 비밀번호, 실제 로그, 고객 정보는 문서에 넣지 않습니다.
-
-## CLI 실행
-
-GUI가 기본 사용 방식이지만 CLI도 사용할 수 있습니다.
-
-```powershell
-python -m wlc_role_acl_collector collect
-```
-
-로컬 Role 대역 Excel을 함께 사용할 때:
-
-```powershell
-python -m wlc_role_acl_collector collect --role-networks config\role_networks.example.xlsx
-```
-
-입력 예시:
+### Windows GUI
 
 ```text
-WLC IP: 10.10.10.10
-Report name [wlc-10.10.10.10]:
-Protocol [ssh/telnet] (default: ssh):
-Port [22]:
-Username: admin
-Password:
-Enable password (optional):
-Add another controller? [y/N]:
+gui\WlcRoleAclCollectorGUI.exe
 ```
 
-결과는 `outputs\<timestamp>\` 아래에 생성됩니다.
+권장 흐름:
 
-- `ssid_role_acl_report.xlsx`
-- `ssid_role_acl_report.html`
-- `raw\<controller>.txt`
-- `report_status.json`
+1. WLC 주소와 SSH/Telnet 접속 정보를 입력합니다.
+2. 필요한 경우 Enable password와 Role 대역표 Excel을 지정합니다.
+3. `분석 시작`을 실행합니다.
+4. `정상 완료 / 부분 완료 / 수집 실패` 상태를 확인합니다.
+5. HTML/Excel 결과에서 SSID → Role → ACL 관계를 확인합니다.
 
-CLI 종료 코드는 자동화에서 반드시 확인합니다.
+### 로컬 웹앱
 
-- `0`: 모든 필수/선택 명령 성공
-- `1`: 필수 수집 실패, 예상 밖 장비별 수집/파싱 실패, 로컬 저장 또는 보고서 생성 실패
-- `2`: 입력 또는 Role network Excel 오류
-- `3`: 보고서는 생성됐지만 하나 이상의 선택 명령이 실패한 부분 완료
+```text
+web\start_webapp.cmd
+```
 
-여러 WLC를 지정한 경우 한 대상의 수집·파싱·안전 진단 예외는 해당 대상으로 기록하고 다음 WLC를 계속 처리합니다. 출력 폴더를 만들 수 없거나 raw/보고서를 안전하게 저장할 수 없는 경우에는 전체 실행을 중단하고 `WLC-RPT-*` 오류 코드를 반환합니다. CLI는 이러한 오류를 Python traceback으로 출력하지 않습니다.
+기본 접속 주소:
 
-## 수집 명령
+```text
+http://127.0.0.1:8763
+```
 
-장비에서 아래 명령을 실행합니다.
+원격 접속은 TLS·인증·접근통제가 별도로 승인된 환경에서만 구성하십시오.
 
-- `no paging`
-- `show clock`
-- `show version`
-- `show configuration effective`
-- `show ip interface brief`
-- `show user-table`
-- ACL에서 참조한 alias별 `show netdestination <alias>`
-- 추출된 Role별 `show rights <role>`
+더 자세한 실행 절차는 [사용자 가이드](docs/USER_GUIDE_KO.md)를 참고하십시오.
 
-`no paging`, `show clock`, `show version` 실패는 로그에 기록하고 계속 진행합니다. `show configuration effective` 출력이 없으면 보고서를 만들 수 없어 실패 처리합니다. Role별 `show rights <role>` 실패는 해당 Role만 실패로 기록하고 나머지 보고서 생성을 계속합니다.
+## 개발 및 검증
 
-`show user-table` 출력은 Role별 현재 접속자 수와 관측 대역 요약에만 사용하며, raw 결과 파일에는 원문 사용자 정보가 저장되지 않습니다. Excel에는 `Role_Network_Context` 시트가 추가되어 Role, Effective VLAN, 사용자 대역, 근거, 관측 사용자 수를 확인할 수 있습니다.
-
-## Role 대역 해석
-
-`Role_Network_Context`와 `SSID_Role_Map`에는 설정 기반 대역과 현재 접속자 관측값을 구분하기 위한 컬럼이 포함됩니다.
-
-- `network_confidence`: `Exact`는 Role에 `user-role vlan`이 직접 설정된 경우입니다. `Inherited`는 Virtual AP VLAN을 상속한 경우입니다. `Dynamic Possible`은 AAA/RADIUS/ClearPass/user-derivation으로 실제 Role/VLAN이 동적으로 바뀔 수 있는 경우입니다. `Unknown`은 설정에서 VLAN 경로를 찾지 못한 경우입니다.
-- `configured_vlan` / `configured_subnet`: 컨트롤러 설정 또는 `show ip interface brief`에서 확인한 VLAN과 subnet입니다.
-- `observed_user_count`, `observed_vlans`, `observed_networks`: `show user-table`에서 현재 관측된 접속자 요약입니다. 참고 근거일 뿐 Role의 공식 subnet으로 단정하지 않습니다.
-
-ACL의 Source/Destination 값이 `user`인 경우는 해당 Role을 받은 현재 사용자 IP를 의미합니다. `any`(`0.0.0.0/0`)와 다르며, `user` 표기만으로 Role의 subnet을 알 수는 없습니다.
-
-HTML 보고서의 ACL 주석은 입력 즉시 브라우저 `localStorage`에 임시 저장됩니다. `주석 포함 HTML 저장`을 누르면 최신 주석이 포함된 독립 HTML 파일을 저장합니다. `PDF 저장/인쇄`는 브라우저 인쇄 기능을 사용하며, PDF에서는 HTML처럼 접기/펼치기 같은 인터랙션이 유지되지 않습니다.
-
-각 Role 상단의 `Role 보고 설명`도 입력 즉시 브라우저에 자동 저장됩니다. 상급자 보고용 이미지는 Role을 선택한 뒤 `선택 Role PNG 저장`을 누르면 됩니다. PNG에는 선택한 Role 한 개와 현재 화면에서 표시 중인 Raw 컬럼, 다른 ACL, Alias 상세 상태가 반영되며 ACL 주석과 Role 설명은 읽기 쉬운 고정 텍스트로 변환됩니다. 내용이 매우 길면 ACL 단위로 여러 PNG가 생성되므로 브라우저의 여러 파일 다운로드 허용이 필요할 수 있습니다.
-
-## HTML Access Check
-
-생성된 HTML 보고서 하단의 `Access Check` 영역에서 Role, Source IP, Destination IP, Service를 입력하면 해당 Role에 연결된 ACL을 위에서부터 검사해 첫 번째 매칭 룰 기준으로 결과를 표시합니다. 장비에 다시 접속하지 않고 보고서 안에 포함된 ACL/Alias 데이터를 사용합니다.
-
-- `허용(Allowed)`: `permit` 룰에 매칭된 경우입니다.
-- `차단(Blocked)`: `deny` 룰에 매칭된 경우입니다.
-- `NAT/특수 Action 허용`: `src-nat`, `dst-nat`, `redirect`, `route`, `tunnel`, `forward` 같은 액션에 매칭된 경우입니다.
-- `기본 차단(Implicit deny)`: Source/Destination/Service 기준으로 매칭되는 룰이 없는 경우입니다.
-- `판정 불가(ACL/Alias 정보 불완전)`: 앞선 ACL이 매칭될 가능성이 있지만 Alias/name 상세가 없어 허용·차단을 확정할 수 없는 경우입니다. 뒤 규칙으로 넘어가 확정 판정하지 않습니다.
-- `조건부`: Service를 선택하지 않았고, 매칭된 ACL 룰이 `any`가 아닌 특정 service에 제한된 경우입니다. 정확한 판정에는 Service 선택이 필요합니다.
-
-Service 판정은 현재 ACL에 수집된 service token 기준입니다. 예를 들어 `svc-dns`, `svc-http`, `svc-https`, `any` 같은 값을 비교합니다. TCP/UDP 포트 번호를 직접 입력해 service object까지 정밀 해석하는 기능은 아직 포함하지 않습니다.
-
-보안모드에서는 Access Check 조회 이력을 기본 저장하지 않습니다. 내부 보관용으로 이력 저장을 별도 활성화한 HTML은 Role, Source IP, Destination IP, Service, 판정 결과, 매칭 ACL 룰이 남을 수 있으므로 외부 공유 전 내용을 확인해야 합니다.
-
-## 로컬 검증과 Git 기록
-
-이 프로젝트는 GitHub 원격 저장소 없이 로컬 git만으로도 롤백 지점을 관리할 수 있습니다. 현재 상태 확인과 최근 커밋 확인은 다음 명령을 사용합니다.
+Python 3.11 이상에서:
 
 ```powershell
-git status --short --branch
-git log --oneline -n 5
+python -m pip install -e ".[dev]"
+python -m pytest
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\validate.ps1
 ```
 
-테스트와 기본 정적 검증은 로컬 PowerShell 스크립트로 실행합니다.
+Windows 통합 패키지는 GitHub Actions 또는 Windows 환경에서 검증합니다.
 
-```powershell
-.\tools\validate.ps1
-```
+개발 구조와 변경 원칙은 [`DEVELOPMENT.md`](DEVELOPMENT.md), 세부 모듈 설명은 [개발자 가이드](docs/DEVELOPER_GUIDE_KO.md)를 참고하십시오.
 
-스크립트는 저장소의 `.venv\Scripts\python.exe`가 있으면 자동으로 우선 사용하고, 없으면 PATH의 Python을 사용합니다. 다른 Python을 명시하려면 `.\tools\validate.ps1 -PythonExe C:\path\to\python.exe` 형식으로 실행합니다.
+## 문서
 
-Streamlit 전환 관련 로컬 검증은 실제 WLC 접속 없이 fixture/offline 테스트로 확인합니다.
+| 문서 | 용도 |
+|---|---|
+| [사용자 가이드](docs/USER_GUIDE_KO.md) | 설치·실행·결과 확인 |
+| [개발자 가이드](docs/DEVELOPER_GUIDE_KO.md) | 모듈 구조와 개발 흐름 |
+| [검증 보고서](docs/VALIDATION_REPORT.md) | 자동/운영 검증 경계와 체크리스트 |
+| [보안 모델](docs/SECURITY_MODEL_KO.md) | 민감정보·접근·진단 경계 |
+| [오류 코드](docs/ERROR_CODES_KO.md) | 오류 의미와 1차 조치 |
+| [진단 모드](docs/DIAGNOSTIC_MODE_KO.md) | 비식별 현장 진단 |
+| [Release 운영](RELEASE_NOTES.md) | 배포 기준과 산출물 계약 |
+| [변경 이력](CHANGELOG.md) | 기능 변경 기록 |
 
-```powershell
-python -m pytest tests\test_web_logic.py tests\test_tooling.py -q
-python -m compileall -q app.py src tests tools
-python .\tools\verify_streamlit_portable_package.py --dist .\dist
-python .\tools\verify_combined_release_package.py --dist .\dist
-```
+## 현재 제외 범위
 
-브라우저 수동 확인 절차:
+- ClearPass/RADIUS 서버에서 동적 Role 직접 조회
+- service object의 모든 TCP/UDP 포트 정밀 해석
+- Streamlit 자체 사용자 로그인/권한 관리
+- 코드서명 / installer / MSIX
+- macOS에서 Windows EXE를 직접 생성하는 공식 빌드 경로
 
-1. `streamlit run app.py`를 실행합니다.
-2. 브라우저에 표시된 로컬 주소로 접속합니다.
-3. 접속 방식 선택, 프로토콜별 기본 포트, 입력 폼, Role 대역 Excel 업로드 영역, `수집 실행` 버튼, 진행 상태 영역, 결과 요약/미리보기 영역이 표시되는지 확인합니다.
-4. 실제 WLC 검증은 서버 PC가 사내망에서 장비에 접근 가능한 환경일 때만 수행합니다.
-
-첫 실행/접속 속도 검증은 Windows 배포 ZIP을 완전히 압축 해제한 뒤 `web\start_webapp.cmd`로 확인합니다. 배포 launcher는 Streamlit 파일 감시와 개발 모드를 끄고, portable 빌드 단계에서 주요 모듈을 미리 컴파일해 첫 실행 지연을 줄입니다.
-
-## Secure Role Network Handling
-
-Role network Excel files are treated as internal-only data. GUI and CLI behavior differ intentionally:
-
-- In the GUI, selecting the internal Role network workbook creates an internal-only HTML/Excel report that includes local Role networks and WLC comparison status.
-- In the CLI, local Role network values are not exported unless `--export-local-role-networks` is explicitly enabled.
-- The generated HTML Access Check does not persist lookup history by default.
-- Run logs record only the number of loaded Role network rows, not the Excel file path or subnet values.
-- `outputs/`, `config/private/`, and local sensitive workbook/report name patterns are ignored by local git.
-
-For CLI-created internal-only reports, use the explicit opt-in:
-
-```powershell
-python -m wlc_role_acl_collector collect --role-networks config\role_networks.example.xlsx --export-local-role-networks
-```
-
-Do not use the export option for files that may leave the company network.
-
-검증 스크립트는 `pytest`, Python `compileall`, HTML Access Check JavaScript 문법 검사, Role PNG JavaScript 문법 검사를 순서대로 실행합니다. Node.js가 설치되어 있지 않으면 JavaScript 문법 검사는 건너뛰고 경고만 표시합니다.
-
-직전 로컬 커밋으로 되돌릴 필요가 있을 때는 먼저 `git log --oneline`으로 대상 커밋을 확인하십시오. 작업 중인 변경을 보존해야 하면 `git diff`나 별도 백업을 먼저 확인한 뒤 롤백 방식을 결정하는 것이 안전합니다.
+이 저장소의 목적은 **Aruba 정책 객체를 많이 수집하는 것 자체가 아니라, 무선 서비스와 접근 제어 정책의 관계를 운영자가 추적 가능한 형태로 만드는 것**입니다.
