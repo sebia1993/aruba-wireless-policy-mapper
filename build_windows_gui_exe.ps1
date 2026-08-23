@@ -55,7 +55,10 @@ function Compress-ArchiveWithRetry {
 }
 
 Write-Host "Installing runtime and build dependencies..."
-& $PythonExe -m pip install -e ".[dev]"
+& $PythonExe -m pip install --require-hashes -r requirements-lock.txt
+if ($LASTEXITCODE -ne 0) { throw "Locked dependency installation failed." }
+& $PythonExe -m pip install --no-deps --no-build-isolation -e .
+if ($LASTEXITCODE -ne 0) { throw "Project installation failed." }
 
 Write-Host "Generating HTML guide documents..."
 & $PythonExe ".\tools\generate_doc_html.py"
@@ -82,6 +85,8 @@ $diagnosticModeGuide = Join-Path $PSScriptRoot "docs\DIAGNOSTIC_MODE_KO.md"
 $diagnosticModeGuideHtml = Join-Path $PSScriptRoot "docs\DIAGNOSTIC_MODE_KO.html"
 $securityModelGuide = Join-Path $PSScriptRoot "docs\SECURITY_MODEL_KO.md"
 $securityModelGuideHtml = Join-Path $PSScriptRoot "docs\SECURITY_MODEL_KO.html"
+$dependencyAuditGuide = Join-Path $PSScriptRoot "docs\DEPENDENCY_AUDIT_EXCEPTIONS_KO.md"
+$dependencyAuditGuideHtml = Join-Path $PSScriptRoot "docs\DEPENDENCY_AUDIT_EXCEPTIONS_KO.html"
 $mockScenarioDir = Join-Path $PSScriptRoot "config\mock_scenarios"
 
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
@@ -146,6 +151,8 @@ Copy-Item -LiteralPath $diagnosticModeGuide -Destination (Join-Path $releaseRoot
 Copy-Item -LiteralPath $diagnosticModeGuideHtml -Destination (Join-Path $releaseRoot "DIAGNOSTIC_MODE_KO.html") -Force
 Copy-Item -LiteralPath $securityModelGuide -Destination (Join-Path $releaseRoot "SECURITY_MODEL_KO.md") -Force
 Copy-Item -LiteralPath $securityModelGuideHtml -Destination (Join-Path $releaseRoot "SECURITY_MODEL_KO.html") -Force
+Copy-Item -LiteralPath $dependencyAuditGuide -Destination (Join-Path $releaseRoot "DEPENDENCY_AUDIT_EXCEPTIONS_KO.md") -Force
+Copy-Item -LiteralPath $dependencyAuditGuideHtml -Destination (Join-Path $releaseRoot "DEPENDENCY_AUDIT_EXCEPTIONS_KO.html") -Force
 New-Item -ItemType Directory -Force -Path (Join-Path $releaseRoot "config") | Out-Null
 Copy-Item -LiteralPath $roleNetworkTemplate -Destination (Join-Path $releaseRoot "config") -Force
 Copy-Item -LiteralPath $mockScenarioDir -Destination (Join-Path $releaseRoot "config") -Recurse -Force

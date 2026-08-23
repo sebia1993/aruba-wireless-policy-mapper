@@ -82,15 +82,32 @@ ZIP 안에는 설명서가 두 가지 형식으로 포함됩니다.
 
 ```powershell
 cd "D:\Project\Network\wlc_role_acl_collector"
-python -m pip install -e .
+python -m pip install --require-hashes -r requirements-lock.txt
+python -m pip install --no-deps --no-build-isolation -e .
 python -m wlc_role_acl_collector.gui_app
 ```
+
+### SSH 서버 키 최초 승인
+
+SSH는 승인된 서버 키와 일치할 때만 연결합니다. 최초 접속 전 아래 순서로 키를 등록합니다.
+
+1. WLC 관리 화면, 자산대장 또는 네트워크 담당자에게서 SSH 서버 키의 SHA-256 지문을 별도 경로로 확인합니다.
+2. 통합 ZIP의 웹 폴더에서는 `trust_host_key.cmd`를 실행하고 WLC 주소와 SSH 포트를 입력합니다. 소스 또는 CLI에서는 아래 명령을 실행합니다.
+
+```powershell
+python -m wlc_role_acl_collector trust-host-key --host 192.0.2.10 --port 22
+```
+
+3. 화면에 표시된 지문이 별도 경로의 값과 완전히 같을 때만 정확히 `TRUST`를 입력합니다.
+4. 이후 저장된 키가 달라지면 수집은 로그인 정보를 보내기 전에 차단됩니다. 장비 교체 등 정당한 변경인지 확인하기 전에는 `known_hosts`를 삭제하거나 바꾸지 마십시오.
+
+Telnet은 서버 키 검증과 암호화를 제공하지 않습니다. 계정과 장비 출력이 평문으로 전송되므로 격리된 관리망에서 위험을 승인한 경우에만 사용하고, SSH 실패 시 대체 수단으로 자동 선택되지 않습니다.
 
 ### Streamlit 웹앱을 사용하는 경우
 
 통합 ZIP의 `web\start_webapp.cmd`를 실행한 뒤 같은 PC에서 `http://127.0.0.1:8763`을 엽니다. 기본 설정에서는 다른 PC가 접속할 수 없습니다.
 
-다른 PC 접속을 위해 `webapp_settings.cmd`를 `0.0.0.0`으로 바꾸면 장비 ID/PW가 암호화되지 않은 HTTP 구간을 통과합니다. 회사에서 TLS, 접근통제, 사용자 인증을 별도로 승인하고 구성한 경우에만 원격 모드를 사용하십시오.
+접속 주소는 `127.0.0.1`로 고정됩니다. `webapp_settings.cmd`에서는 포트만 바꿀 수 있으며, 인증·TLS가 없는 원격 노출을 막기 위해 외부 인터페이스 바인딩은 지원하지 않습니다.
 
 같은 WLC에서 다른 웹 수집이 진행 중이면 새 작업은 시작되지 않습니다. 기존 작업이 끝난 뒤 다시 실행합니다.
 

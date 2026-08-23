@@ -17,12 +17,13 @@ st.set_page_config(page_title="WLC Role ACL Collector", layout="wide")
 
 
 def main() -> None:
+    _enforce_loopback_binding()
     st.title("WLC Role ACL Collector")
-    st.caption("사내망 내부 공용 PC에서 실행하고, 사용자는 브라우저로 접속해 WLC Role/ACL 보고서를 생성합니다.")
+    st.caption("실행한 Windows PC에서 WLC Role/ACL 보고서를 생성하는 로컬 웹앱입니다.")
 
     st.info(
-        "인터넷 공개용 서비스가 아닙니다. 접속 주소를 아는 사내 사용자는 접근할 수 있으므로 "
-        "장비 계정과 내부 대역 정보 취급에 주의하세요."
+        "원격 공개용 서비스가 아닙니다. 앱은 loopback 주소에서만 실행되며, "
+        "장비 계정과 내부 대역 정보는 현재 실행 세션에서만 입력하세요."
     )
 
     _render_sidebar_notice()
@@ -39,11 +40,18 @@ def _render_sidebar_notice() -> None:
     with st.sidebar:
         st.subheader("기본 접속 범위")
         st.code("http://127.0.0.1:8763", language="text")
-        st.write("기본 설정에서는 웹앱을 실행한 PC에서만 접속할 수 있습니다.")
+        st.write("웹앱을 실행한 PC에서만 접속할 수 있습니다.")
         st.warning(
-            "다른 PC 접속을 허용하면 HTTP 구간에서 장비 계정이 보호되지 않습니다. "
-            "승인된 보안 구성이 없으면 로컬 접속만 사용하세요."
+            "외부 인터페이스 바인딩은 인증·TLS가 없어 차단됩니다. "
+            "여러 사용자가 접속하는 서버 형태로 배포하지 마세요."
         )
+
+
+def _enforce_loopback_binding() -> None:
+    address = str(st.get_option("server.address") or "localhost").strip().casefold()
+    if address not in {"localhost", "127.0.0.1", "::1", "[::1]"}:
+        st.error("보호되지 않은 원격 노출을 막기 위해 Streamlit은 loopback 주소에서만 실행할 수 있습니다.")
+        st.stop()
 
 
 def _render_input_form() -> tuple[bool, WebCollectionRequest]:
@@ -55,6 +63,11 @@ def _render_input_form() -> tuple[bool, WebCollectionRequest]:
         horizontal=True,
         key="connection_protocol",
     )
+    if protocol == "telnet":
+        st.warning(
+            "Telnet은 계정과 장비 출력이 암호화되지 않습니다. SSH에서 Telnet으로 자동 전환하지 않으며, "
+            "격리된 관리망에서 위험을 승인한 경우에만 직접 선택하세요."
+        )
     with st.form("collection_form", clear_on_submit=False):
         col1, col2 = st.columns(2)
         with col1:

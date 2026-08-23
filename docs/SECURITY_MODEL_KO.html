@@ -152,12 +152,23 @@
     </ul>
     <h2>웹앱 접속 정책</h2>
     <ul>
-      <li>Streamlit portable 기본 주소는 <code>127.0.0.1</code>이며 실행 PC에서만 접속합니다.</li>
-      <li><code>0.0.0.0</code> 원격 모드는 TLS, 접근통제, 사용자 인증이 별도로 승인·구성된 경우에만 사용합니다.</li>
-      <li>기본 HTTP 원격 접속에서는 장비 ID/PW가 전송 구간에서 암호화되지 않습니다.</li>
+      <li>Streamlit portable 주소는 <code>127.0.0.1</code>로 고정하며 실행 PC에서만 접속합니다.</li>
+      <li><code>0.0.0.0</code> 등 외부 인터페이스 바인딩은 인증·TLS가 없어 실행 단계와 앱 단계에서 차단합니다.</li>
+      <li>원격 HTTP 모드는 예외 설정을 포함해 지원하지 않습니다. 여러 사용자가 쓰는 서버로 배포하지 않습니다.</li>
       <li>같은 WLC에 대한 웹 수집은 한 번에 하나만 실행합니다.</li>
       <li>브라우저에는 Python traceback을 직접 표시하지 않습니다.</li>
     </ul>
+    <h2>장비 접속 정책</h2>
+    <ul>
+      <li>SSH는 앱 전용 <code>known_hosts</code>에 승인된 서버 키만 허용합니다.</li>
+      <li>최초 SSH 접속 전 <code>trust_host_key.cmd</code> 또는 <code>trust-host-key</code> 명령으로 SHA-256 지문을 별도 관리 경로와 대조한 뒤 정확히 <code>TRUST</code>를 입력합니다.</li>
+      <li>저장된 키와 현재 키가 다르면 자동 교체하거나 우회하지 않고 자격 증명을 보내기 전에 연결을 차단합니다.</li>
+      <li>Paramiko 4.0에서 공개된 RSA/SHA-1 경로는 서버 키 probe와 실제 Netmiko 연결 모두에서 <code>ssh-rsa</code> 서명 알고리즘을 비활성화합니다. 실제 연결은 SHA2-only 교환 뒤 인증 전에 맞춤 policy로 앱 전용 고정 키의 재료를 비교하므로 RSA known_hosts 항목이 SHA-1을 다시 우선하도록 두지 않습니다. RSA 키 재료는 RSA-SHA2를 지원하는 장비에서만 사용합니다.</li>
+      <li>Telnet은 계정과 장비 출력이 평문으로 전송됩니다. 격리된 관리망에서 위험을 승인한 경우에만 직접 선택합니다.</li>
+      <li>SSH 실패를 Telnet으로 자동 전환하지 않습니다.</li>
+      <li>WLC 출력에서 발견한 Alias와 Role 이름은 허용 문자 검증을 통과한 경우에만 추가 조회 명령에 사용합니다.</li>
+    </ul>
+    <p>의존성 감사의 고정 예외, 보완 통제, 재검토 기한은 [의존성 감사 예외](DEPENDENCY_AUDIT_EXCEPTIONS_KO.md)에 기록합니다. 새 고정 버전이 나오면 예외를 연장하지 않고 우선 업그레이드합니다.</p>
     <h2>개발 규칙</h2>
     <ul>
       <li>새 로그나 리포트를 만들 때는 allowlist 기반으로 안전 필드만 저장합니다.</li>

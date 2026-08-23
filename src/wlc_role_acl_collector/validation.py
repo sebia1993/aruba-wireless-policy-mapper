@@ -10,6 +10,8 @@ MIN_COMMAND_TIMEOUT_SECONDS = 5
 MAX_COMMAND_TIMEOUT_SECONDS = 600
 MAX_COLLECTION_DURATION_SECONDS = 60 * 60
 _HOST_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+_AOS_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@/+\- ]{0,127}$")
+_AOS_UNQUOTED_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@/+\-]{0,127}$")
 
 
 def validate_wlc_address(value: object) -> str:
@@ -55,3 +57,27 @@ def validate_timeout_seconds(value: object) -> int:
             f"{MAX_COMMAND_TIMEOUT_SECONDS} 사이여야 합니다."
         )
     return timeout
+
+
+def validate_aos_identifier(value: object, *, kind: str) -> str:
+    """AOS 객체 이름을 CLI 인자로 안전하게 사용할 수 있는지 확인합니다."""
+
+    identifier = str(value or "")
+    if identifier != identifier.strip() or not _AOS_IDENTIFIER_PATTERN.fullmatch(identifier):
+        raise ValueError(f"안전하지 않은 {kind} 이름을 감지해 동적 조회 명령을 차단했습니다.")
+    return identifier
+
+
+def build_show_netdestination_command(alias: object) -> str:
+    return _build_show_identifier_command("show netdestination", alias, kind="Alias")
+
+
+def build_show_rights_command(role: object) -> str:
+    return _build_show_identifier_command("show rights", role, kind="Role")
+
+
+def _build_show_identifier_command(prefix: str, value: object, *, kind: str) -> str:
+    identifier = validate_aos_identifier(value, kind=kind)
+    if _AOS_UNQUOTED_IDENTIFIER_PATTERN.fullmatch(identifier):
+        return f"{prefix} {identifier}"
+    return f'{prefix} "{identifier}"'

@@ -17,6 +17,7 @@ from pathlib import Path
 
 REQUIRED_FILES = {
     "start_webapp.cmd",
+    "trust_host_key.cmd",
     "webapp_settings.cmd",
     "README_WEBAPP_KO.txt",
     "python/python.exe",

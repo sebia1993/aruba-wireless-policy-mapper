@@ -30,6 +30,11 @@ GUIDES = (
     GuideDocument("ERROR_CODES_KO.md", "ERROR_CODES_KO.html", "WLC Role ACL Collector 오류 코드"),
     GuideDocument("DIAGNOSTIC_MODE_KO.md", "DIAGNOSTIC_MODE_KO.html", "WLC Role ACL Collector 진단 모드"),
     GuideDocument("SECURITY_MODEL_KO.md", "SECURITY_MODEL_KO.html", "WLC Role ACL Collector 보안 모델"),
+    GuideDocument(
+        "DEPENDENCY_AUDIT_EXCEPTIONS_KO.md",
+        "DEPENDENCY_AUDIT_EXCEPTIONS_KO.html",
+        "WLC Role ACL Collector 의존성 감사 예외",
+    ),
 )
 
 

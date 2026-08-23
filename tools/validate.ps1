@@ -36,19 +36,37 @@ try {
     }
 
     Write-Host "Python: $resolvedPythonExe"
-    Write-Host "[1/4] pytest"
+    Write-Host "[1/7] pytest"
     & $resolvedPythonExe -m pytest -q
     if ($LASTEXITCODE -ne 0) {
         throw "pytest failed with exit code $LASTEXITCODE."
     }
 
-    Write-Host "[2/4] compileall"
+    Write-Host "[2/7] compileall"
     & $resolvedPythonExe -m compileall -q app.py src tests tools
     if ($LASTEXITCODE -ne 0) {
         throw "compileall failed with exit code $LASTEXITCODE."
     }
 
-    Write-Host "[3/4] Access Check JavaScript syntax"
+    Write-Host "[3/7] installed dependency consistency"
+    & $resolvedPythonExe -m pip check
+    if ($LASTEXITCODE -ne 0) {
+        throw "pip check failed with exit code $LASTEXITCODE."
+    }
+
+    Write-Host "[4/7] locked development dependency audit"
+    & $resolvedPythonExe -m pip_audit -r requirements-lock.txt --strict --ignore-vuln CVE-2026-44405
+    if ($LASTEXITCODE -ne 0) {
+        throw "Development dependency audit failed with exit code $LASTEXITCODE."
+    }
+
+    Write-Host "[5/7] locked web dependency audit"
+    & $resolvedPythonExe -m pip_audit -r requirements-web-lock.txt --strict --ignore-vuln CVE-2026-44405
+    if ($LASTEXITCODE -ne 0) {
+        throw "Web dependency audit failed with exit code $LASTEXITCODE."
+    }
+
+    Write-Host "[6/7] Access Check JavaScript syntax"
     $node = Get-Command node -ErrorAction SilentlyContinue
     if ($node) {
         $tempAccessScript = Join-Path ([System.IO.Path]::GetTempPath()) "wlc_access_check_script.js"
@@ -63,7 +81,7 @@ try {
                 throw "Access Check JavaScript syntax check failed with exit code $LASTEXITCODE."
             }
 
-            Write-Host "[4/4] Role PNG JavaScript syntax"
+            Write-Host "[7/7] Role PNG JavaScript syntax"
             & $resolvedPythonExe -c "from pathlib import Path; import sys; from wlc_role_acl_collector.report import _role_image_export_script; Path(sys.argv[1]).write_text(_role_image_export_script(), encoding='utf-8')" $tempRoleImageScript
             if ($LASTEXITCODE -ne 0) {
                 throw "Role PNG JavaScript extraction failed with exit code $LASTEXITCODE."
@@ -80,7 +98,7 @@ try {
             }
         }
     } else {
-        Write-Host "[4/4] Role PNG JavaScript syntax"
+        Write-Host "[7/7] Role PNG JavaScript syntax"
         Write-Warning "Node.js was not found. Skipping JavaScript syntax check."
     }
 

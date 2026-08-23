@@ -1,7 +1,5 @@
-import sys
 import threading
 from pathlib import Path
-from types import SimpleNamespace
 
 import wlc_role_acl_collector.collector as collector
 from wlc_role_acl_collector.collector import collect_from_controller
@@ -39,7 +37,11 @@ class FakeConnection:
 
 
 def _install_fake_netmiko(monkeypatch, connection):
-    monkeypatch.setitem(sys.modules, "netmiko", SimpleNamespace(ConnectHandler=lambda **_params: connection))
+    monkeypatch.setattr(
+        collector,
+        "_open_connection",
+        lambda _params, *, protocol: connection,
+    )
 
 
 def test_collect_continues_when_disable_paging_fails(monkeypatch):
@@ -226,3 +228,68 @@ def test_collect_rejects_timeout_outside_shared_api_contract():
         assert "5에서 600" in str(exc)
     else:
         raise AssertionError("Expected timeout validation error")
+
+
+def test_ssh_connect_params_require_app_known_hosts_and_telnet_does_not(tmp_path):
+    credentials = ControllerCredentials(username="admin", password="secret")
+    known_hosts = tmp_path / "known_hosts"
+
+    ssh_params = collector._build_connect_params(
+        controller=Controller(name="ssh", host="192.0.2.10", protocol="ssh"),
+        credentials=credentials,
+        timeout=30,
+        known_hosts_path=known_hosts,
+    )
+    assert ssh_params["ssh_strict"] is True
+    assert ssh_params["system_host_keys"] is False
+    assert ssh_params["alt_host_keys"] is True
+    assert ssh_params["alt_key_file"] == str(known_hosts)
+    assert ssh_params["disabled_algorithms"] == {
+        "keys": ["ssh-rsa"],
+        "pubkeys": ["ssh-rsa"],
+    }
+
+    telnet_params = collector._build_connect_params(
+        controller=Controller(
+            name="telnet",
+            host="192.0.2.10",
+            protocol="telnet",
+            port=23,
+            device_type="generic_telnet",
+        ),
+        credentials=credentials,
+        timeout=30,
+        known_hosts_path=known_hosts,
+    )
+    assert "ssh_strict" not in telnet_params
+    assert "alt_key_file" not in telnet_params
+    assert "disabled_algorithms" not in telnet_params
+
+
+def test_collect_never_sends_unsafe_discovered_alias(monkeypatch):
+    connection = FakeConnection(
+        responses={
+            "show configuration effective": "synthetic config",
+        }
+    )
+    _install_fake_netmiko(monkeypatch, connection)
+    monkeypatch.setattr(collector, "discover_aliases_from_config", lambda _output: ['corp"; reload'])
+
+    result = collect_from_controller(
+        Controller(name="wlc", host="192.0.2.10"),
+        credentials=ControllerCredentials(username="admin", password="secret"),
+    )
+
+    assert any(command.command_id == "invalid_netdestination_identifier" for command in result.commands)
+    assert not any("reload" in command for command in connection.commands)
+
+
+def test_credentials_repr_does_not_expose_secrets():
+    credentials = ControllerCredentials(
+        username="portfolio-user",
+        password="secret-password",
+        enable_password="secret-enable",
+    )
+    rendered = repr(credentials)
+    assert "secret-password" not in rendered
+    assert "secret-enable" not in rendered

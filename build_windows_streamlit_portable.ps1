@@ -74,8 +74,8 @@ function Compress-ArchiveWithRetry {
 }
 
 Write-Host "Installing host build dependencies..."
-Invoke-External -FilePath $PythonExe -Arguments @("-m", "pip", "install", "--upgrade", "pip") -ErrorMessage "pip upgrade failed."
-Invoke-External -FilePath $PythonExe -Arguments @("-m", "pip", "install", "-e", ".[web]") -ErrorMessage "Project web dependency install failed."
+Invoke-External -FilePath $PythonExe -Arguments @("-m", "pip", "install", "--require-hashes", "-r", "requirements-lock.txt") -ErrorMessage "Locked host dependency install failed."
+Invoke-External -FilePath $PythonExe -Arguments @("-m", "pip", "install", "--no-deps", "--no-build-isolation", "-e", ".") -ErrorMessage "Project install failed."
 
 $version = (& $PythonExe -c "from wlc_role_acl_collector import __version__; print(__version__)").Trim()
 if ($LASTEXITCODE -ne 0 -or -not $version) {
@@ -136,14 +136,19 @@ $pthLines | Set-Content -LiteralPath $pthPath -Encoding ASCII
 Write-Host "Installing web app dependencies into portable runtime..."
 Invoke-External `
     -FilePath $PythonExe `
-    -Arguments @("-m", "pip", "install", "--upgrade", "--no-warn-script-location", "--target", $sitePackages, ".[web]") `
-    -ErrorMessage "Portable dependency install failed."
+    -Arguments @("-m", "pip", "install", "--require-hashes", "--no-warn-script-location", "--target", $sitePackages, "-r", "requirements-web-lock.txt") `
+    -ErrorMessage "Portable locked dependency install failed."
+Invoke-External `
+    -FilePath $PythonExe `
+    -Arguments @("-m", "pip", "install", "--no-deps", "--no-build-isolation", "--no-warn-script-location", "--target", $sitePackages, ".") `
+    -ErrorMessage "Portable project install failed."
 
 New-Item -ItemType Directory -Force -Path (Join-Path $releaseRoot "app") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $releaseRoot "config") | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "app.py") -Destination (Join-Path $releaseRoot "app\app.py") -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "config\role_networks.example.xlsx") -Destination (Join-Path $releaseRoot "config\role_networks.example.xlsx") -Force
 Copy-Item -LiteralPath (Join-Path $templateDir "start_webapp.cmd") -Destination (Join-Path $releaseRoot "start_webapp.cmd") -Force
+Copy-Item -LiteralPath (Join-Path $templateDir "trust_host_key.cmd") -Destination (Join-Path $releaseRoot "trust_host_key.cmd") -Force
 Copy-Item -LiteralPath (Join-Path $templateDir "webapp_settings.cmd") -Destination (Join-Path $releaseRoot "webapp_settings.cmd") -Force
 Copy-Item -LiteralPath (Join-Path $templateDir "README_WEBAPP_KO.txt") -Destination (Join-Path $releaseRoot "README_WEBAPP_KO.txt") -Force
 

@@ -28,6 +28,8 @@ REQUIRED_FILES = {
     "DIAGNOSTIC_MODE_KO.html",
     "SECURITY_MODEL_KO.md",
     "SECURITY_MODEL_KO.html",
+    "DEPENDENCY_AUDIT_EXCEPTIONS_KO.md",
+    "DEPENDENCY_AUDIT_EXCEPTIONS_KO.html",
     "config/role_networks.example.xlsx",
 }
 

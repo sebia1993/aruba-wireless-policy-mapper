@@ -19,7 +19,7 @@ class Controller:
     enable_password_env: str = ""
 
 
-@dataclass
+@dataclass(repr=False)
 class ControllerCredentials:
     username: str
     password: str

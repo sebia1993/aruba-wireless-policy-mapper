@@ -142,11 +142,15 @@ CLI collect 종료 코드는 `0=성공`, `1=필수 수집·장비별 런타임·
 
 다중 컨트롤러 영향 범위 계산은 실패 command row의 controller와 같은 ACL/SSID 행만 확장해야 합니다. `collection_health.infer_collection_impact_scope()`에서 다른 컨트롤러의 Role/SSID까지 영향 대상으로 섞지 않습니다.
 
-Streamlit은 `_ACTIVE_TARGETS`와 `_target_collection_slot()`으로 같은 WLC에 대한 중복 수집을 즉시 거부합니다. 기본 launcher 주소는 `127.0.0.1`이며, 원격 HTTP 노출은 기본 동작이 아닙니다. 브라우저 화면에는 Python traceback을 직접 출력하지 않습니다.
+Streamlit은 `_ACTIVE_TARGETS`와 `_target_collection_slot()`으로 같은 WLC에 대한 중복 수집을 즉시 거부합니다. launcher와 앱 모두 loopback 주소만 허용해 원격 HTTP 노출을 차단합니다. 브라우저 화면에는 Python traceback을 직접 출력하지 않습니다.
 
 `app.py`의 접속 방식 선택은 form 밖에 있습니다. Streamlit form 안의 widget 변경은 제출 전 rerun되지 않기 때문에, SSH/Telnet 변경 시 포트 22/23을 즉시 갱신하려면 이 구조를 유지해야 합니다. 포트 widget key도 프로토콜별로 분리합니다.
 
 `web_logic.run_web_collection()`은 입력 검증을 통과한 뒤 `workspace`, `role_networks`, `collection`, `raw_storage`, `parsing`, `report`, `download` 단계 중 현재 위치를 추적합니다. 예상하지 못한 오류는 원본 예외나 내부 경로 대신 안전한 오류 코드, 실패 단계, 한국어 권장 조치가 담긴 `WebCollectionResult(success=False)`로 반환합니다. 잘못된 Role 대역표와 동일 WLC 중복 실행은 사용자가 직접 수정할 수 있도록 기존 예외 계약을 유지합니다.
+
+SSH 연결은 `hostkeys.py`와 `collector._build_connect_params()`가 앱 전용 `known_hosts`를 공유합니다. `trust-host-key`는 인증 전에 서버 키를 probe하고 사용자가 지문을 별도 경로로 확인한 경우에만 최초 키를 저장합니다. Netmiko 연결은 `ssh_strict=True`, 시스템 키 비활성화, 앱 전용 키 파일 사용을 강제합니다. `ssh_connection.py`는 Paramiko 4.0이 RSA known_hosts 항목을 보고 `ssh-rsa` 우선순위를 되살리는 경로를 피하기 위해 키 파일을 `SSHClient`에 직접 로드하지 않고, SHA2-only 교환 뒤 인증 전에 `PinnedHostKeyPolicy`로 키 재료를 비교합니다. 변경된 키와 미승인 키를 자동 등록하거나 Telnet으로 우회하는 코드를 추가하지 않습니다.
+
+Telnet은 사용자가 명시적으로 선택한 경우에만 사용합니다. 평문 위험 안내를 유지하고 SSH 오류를 이유로 프로토콜을 자동 변경하지 않습니다. `validation.build_show_netdestination_command()`와 `build_show_rights_command()`는 장비 출력에서 발견한 식별자를 중앙에서 검증하므로 동적 명령을 문자열 보간으로 직접 만들지 않습니다.
 
 CLI, GUI, Web은 모두 `collection_health.assess_collection_results()` 결과를 사용합니다. 같은 `CollectionResult`를 표면마다 다르게 판정하지 않도록 상태 문자열을 별도로 재구현하지 않습니다.
 
@@ -423,7 +427,7 @@ mock 서버는 실행 중 중복 `start()`를 거부하고 `run_mock_server()`�
 - Role network Excel은 세션 전용
 - 내부 대역을 기본 보고서에 저장하지 않음
 - Access Check 이력 기본 미저장
-- Streamlit 기본 바인딩 `127.0.0.1`
+- Streamlit loopback 바인딩 강제 및 외부 인터페이스 차단
 - 진단 command ID의 실제 Role/Alias 이름을 `<ROLE:n>`, `<ALIAS:n>`으로 마스킹
 - 웹 화면에 Python traceback 미노출
 - `outputs/`, `config/private/`, 민감 파일 패턴 git ignore

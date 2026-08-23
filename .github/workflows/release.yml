@@ -4,72 +4,74 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: release-manual
+  group: release-version
   cancel-in-progress: false
 
 jobs:
   release:
     name: Build and publish release
+    if: github.ref == 'refs/heads/main'
     runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
           cache: pip
+          cache-dependency-path: |
+            requirements-lock.txt
+            requirements-web-lock.txt
 
-      - name: Install dependencies
+      - name: Install locked dependencies
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install --require-hashes -r requirements-lock.txt
+          if ($LASTEXITCODE -ne 0) { throw "Locked dependency installation failed." }
+          python -m pip install --no-deps --no-build-isolation -e .
+          if ($LASTEXITCODE -ne 0) { throw "Project installation failed." }
 
       - name: Create release metadata
         id: metadata
         shell: pwsh
         run: |
-          $projectName = python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['name'])"
-          $kst = [System.TimeZoneInfo]::FindSystemTimeZoneById("Korea Standard Time")
-          $kstNow = [System.TimeZoneInfo]::ConvertTime([System.DateTimeOffset]::UtcNow, $kst)
-          $baseTag = "v{0}" -f $kstNow.ToString("yyyy.MM.dd-HHmmss")
-          $candidate = $baseTag
-          $counter = 1
-
-          while ($true) {
-            $existingTag = git ls-remote --tags origin "refs/tags/$candidate"
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to check existing remote tags."
-            }
-            if (-not $existingTag) {
-              break
-            }
-            $candidate = "$baseTag-$counter"
-            $counter += 1
+          $version = (python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])").Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+            throw "Project version is not valid SemVer: $version"
           }
-
-          $assetName = "${projectName}_${candidate}_windows.zip"
-          "project_name=$projectName" >> $env:GITHUB_OUTPUT
-          "tag=$candidate" >> $env:GITHUB_OUTPUT
-          "asset_name=$assetName" >> $env:GITHUB_OUTPUT
+          $tag = "v$version"
+          git fetch --force --tags origin
+          if (git tag --list $tag) {
+            throw "Tag already exists and will not be replaced: $tag"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "asset_name=wlc-role-acl-collector_${tag}_windows.zip" >> $env:GITHUB_OUTPUT
+          "checksum_name=wlc-role-acl-collector_${tag}_windows.zip.sha256" >> $env:GITHUB_OUTPUT
+          "sbom_name=wlc-role-acl-collector_${tag}_sbom.cdx.json" >> $env:GITHUB_OUTPUT
 
       - name: Run validation
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\validate.ps1
 
-      - name: Build Windows release package
+      - name: Build Windows GUI and CLI package
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_gui_exe.ps1
 
-      - name: Verify Windows release package
+      - name: Verify GUI and CLI package
         shell: pwsh
         run: python .\tools\verify_release_package.py --dist .\dist --smoke-cli
 
@@ -89,26 +91,30 @@ jobs:
         shell: pwsh
         run: python .\tools\verify_combined_release_package.py --dist .\dist --smoke
 
-      - name: Prepare release asset
+      - name: Prepare release assets and SBOM
         id: assets
         shell: pwsh
         run: |
           $assetDir = Join-Path $PWD "release_assets"
           New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
-
-          $sourceZip = Get-ChildItem -Path ".\dist" -Filter "WlcRoleAclCollectorWindows_*.zip" |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 1
-          if (-not $sourceZip) {
-            throw "No combined Windows release zip was generated in dist."
+          $sourceZip = Join-Path $PWD "dist\WlcRoleAclCollectorWindows_v${{ steps.metadata.outputs.version }}.zip"
+          if (-not (Test-Path -LiteralPath $sourceZip -PathType Leaf)) {
+            throw "Combined Windows release ZIP was not generated: $sourceZip"
           }
 
-          $assetName = "${{ steps.metadata.outputs.asset_name }}"
-          $assetPath = Join-Path $assetDir $assetName
-          Copy-Item -LiteralPath $sourceZip.FullName -Destination $assetPath -Force
-
+          $assetPath = Join-Path $assetDir "${{ steps.metadata.outputs.asset_name }}"
+          $checksumPath = Join-Path $assetDir "${{ steps.metadata.outputs.checksum_name }}"
+          $sbomPath = Join-Path $assetDir "${{ steps.metadata.outputs.sbom_name }}"
+          Copy-Item -LiteralPath $sourceZip -Destination $assetPath -Force
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $assetPath).Hash.ToLowerInvariant()
+          "$hash  ${{ steps.metadata.outputs.asset_name }}" | Set-Content -LiteralPath $checksumPath -Encoding ASCII
+
+          cyclonedx-py requirements requirements-web-lock.txt --pyproject pyproject.toml --output-reproducible --output-format JSON --output-file $sbomPath
+          if ($LASTEXITCODE -ne 0) { throw "CycloneDX SBOM generation failed." }
+
           "asset_path=$assetPath" >> $env:GITHUB_OUTPUT
+          "checksum_path=$checksumPath" >> $env:GITHUB_OUTPUT
+          "sbom_path=$sbomPath" >> $env:GITHUB_OUTPUT
           "checksum=$hash" >> $env:GITHUB_OUTPUT
 
       - name: Verify final release asset
@@ -119,165 +125,91 @@ jobs:
             --expected-sha256 "${{ steps.assets.outputs.checksum }}" `
             --smoke
 
+      - name: Attest release assets
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release_assets/*
+
       - name: Create Korean release notes
         id: notes
         shell: pwsh
         run: |
-          $tag = "${{ steps.metadata.outputs.tag }}"
-          $projectName = "${{ steps.metadata.outputs.project_name }}"
-          $assetName = "${{ steps.metadata.outputs.asset_name }}"
-          $checksum = "${{ steps.assets.outputs.checksum }}"
-          $sha = "${{ github.sha }}"
-          $branch = "${{ github.ref_name }}"
-
-          $previousTag = $null
-          git describe --tags --abbrev=0 HEAD^ *> $null
-          if ($LASTEXITCODE -eq 0) {
-            $previousTag = (git describe --tags --abbrev=0 HEAD^).Trim()
-          }
-          $global:LASTEXITCODE = 0
-
-          if ($previousTag) {
-            $range = "$previousTag..$sha"
-            $commitLines = @(git log --pretty=format:"- %h %s" $range)
-            $changedFiles = @(git diff --name-only $range)
-          } else {
-            $range = "최근 커밋"
-            $commitLines = @(git log --pretty=format:"- %h %s" -n 20 $sha)
-            $changedFiles = @(git show --pretty="" --name-only $sha)
-          }
-
-          if (-not $commitLines) {
-            $commitLines = @("- 변경 커밋을 자동으로 찾지 못했습니다.")
-          }
-          $commitText = $commitLines -join [Environment]::NewLine
-
-          $areas = New-Object System.Collections.Generic.List[string]
-          function Add-Area([string] $text) {
-            if (-not $script:areas.Contains($text)) {
-              $script:areas.Add($text)
-            }
-          }
-
-          foreach ($file in $changedFiles) {
-            if ($file -like "src/wlc_role_acl_collector/*") {
-              Add-Area "- 수집/분석: WLC 수집, Parser, Role/ACL 평가 또는 보고서 로직이 변경되었습니다."
-            } elseif ($file -eq "app.py") {
-              Add-Area "- 웹앱: Streamlit 화면 또는 실행 흐름이 변경되었습니다."
-            } elseif ($file -like "tests/*") {
-              Add-Area "- 검증: 자동 회귀 테스트가 추가 또는 변경되었습니다."
-            } elseif ($file -like "config/*") {
-              Add-Area "- 샘플/설정: 배포에 포함되는 비식별 샘플 또는 설정 구조가 변경되었습니다."
-            } elseif ($file -like "docs/*" -or $file -eq "README.md") {
-              Add-Area "- 문서: 운영/검증/사용 문서가 변경되었습니다."
-            } elseif ($file -like ".github/workflows/*" -or $file -like "*.ps1" -or $file -like "tools/*") {
-              Add-Area "- 배포/도구: Windows 빌드, 검증 또는 Release 자동화가 변경되었습니다."
-            }
-          }
-          if ($areas.Count -eq 0) {
-            Add-Area "- 기타: 저장소 변경 사항이 포함되어 있습니다."
-          }
-          $areaText = $areas -join [Environment]::NewLine
-
           $notesPath = Join-Path $PWD "release_notes.md"
           $notes = @"
-          # $projectName $tag
+          # Aruba Wireless Policy Mapper ${{ steps.metadata.outputs.tag }}
 
-          Aruba AOS8 WLC의 SSID·AAA Profile·Role·ACL·Alias 관계를 수집·분석하는 Windows 배포본입니다.
+          Aruba AOS8 WLC의 SSID·AAA Profile·Role·ACL·Alias 관계를 읽기 전용으로 수집하고 변경 영향을 분석하는 Windows 배포본입니다.
 
           ## 이번 릴리즈
-          $areaText
+          - SSH 서버 키를 로그인 전에 검증하고 앱 전용 known_hosts에 고정합니다.
+          - 변경된 키와 미승인 키를 차단하며 SSH 실패를 Telnet으로 자동 전환하지 않습니다.
+          - Alias·Role 기반 동적 명령은 중앙 검증을 통과한 식별자만 실행합니다.
+          - Streamlit은 loopback 주소에서만 실행되며 원격 HTTP 노출을 차단합니다.
+          - Telnet은 격리된 관리망에서 위험을 승인해 직접 선택한 경우에만 사용합니다.
 
           ## 운영 영향
-          - 장비 설정을 변경하는 기능은 추가하지 않습니다.
-          - 실제 운영망 정보는 Release asset이나 Release notes에 포함하지 않습니다.
-          - GUI, CLI, 로컬 Streamlit 웹앱을 하나의 Windows 통합 ZIP으로 제공합니다.
-          - 기존 결과를 사용할 때는 `정상 완료 / 부분 완료 / 수집 실패` 상태와 영향 Role/SSID를 함께 확인하십시오.
+          - 장비 설정을 변경하지 않는 읽기 전용 도구입니다.
+          - SSH 최초 접속 전 web\trust_host_key.cmd로 SHA-256 서버 키 지문을 확인해야 합니다.
+          - 코드서명은 아직 제공하지 않으므로 SHA-256, SBOM, GitHub build provenance를 함께 확인하십시오.
 
           ## 검증 결과
-          - 기준 커밋: `$sha`
-          - 브랜치: `$branch`
-          - `tools\validate.ps1` 통과
-          - Windows GUI/CLI 패키지 빌드 및 smoke 검증
-          - Streamlit portable 패키지 빌드 및 smoke 검증
-          - GUI + Web 통합 ZIP 빌드 및 SHA-256 검증
+          - 기준 커밋: ${{ github.sha }}
+          - Windows pytest·compileall·의존성 감사 통과: 미처리 취약점 0건, CVE-2026-44405 보완 통제 예외 1건
+          - GUI/CLI, Streamlit portable, 통합 ZIP build 및 smoke 검증
+          - 잠금 의존성, CycloneDX SBOM, SHA-256 sidecar 생성
 
           ## 다운로드
-          - 일반 사용자용: `$assetName`
-          - SHA-256: `$checksum`
-          - GUI: ZIP 압축 해제 후 `gui\WlcRoleAclCollectorGUI.exe`
-          - 웹앱: ZIP 압축 해제 후 `web\start_webapp.cmd`
-          - GitHub의 `Source code (zip)` / `Source code (tar.gz)`는 실행용 배포 파일이 아닙니다.
+          - 실행용 통합 ZIP: ${{ steps.metadata.outputs.asset_name }}
+          - SHA-256: ${{ steps.assets.outputs.checksum }}
+          - 체크섬 파일: ${{ steps.metadata.outputs.checksum_name }}
+          - SBOM: ${{ steps.metadata.outputs.sbom_name }}
+          - GitHub의 Source code ZIP/TAR는 실행용 배포 파일이 아닙니다.
 
           ## 알려진 범위
-          - ClearPass/RADIUS 서버의 동적 Role을 직접 조회하지 않습니다.
+          - 실제 운영 WLC 검증이나 현장 성능 수치를 주장하지 않습니다.
+          - Paramiko 수정 릴리스가 아직 없어 CVE-2026-44405를 정확히 한 건 예외 처리하며 RSA/SHA-1 경로를 코드에서 차단합니다.
+          - ClearPass/RADIUS의 동적 Role을 직접 조회하지 않습니다.
           - 모든 service object를 TCP/UDP 포트 번호까지 완전 해석하지 않습니다.
-          - Streamlit 자체 사용자 인증/권한 관리와 코드서명은 현재 범위가 아닙니다.
-
-          <details>
-          <summary>세부 커밋</summary>
-
-          비교 기준: $range
-
-          $commitText
-
-          </details>
+          - Authenticode 코드서명, installer, MSIX는 현재 범위가 아닙니다.
           "@
           $notes = $notes -replace "(?m)^          ", ""
           $notes | Set-Content -LiteralPath $notesPath -Encoding UTF8
           "notes_path=$notesPath" >> $env:GITHUB_OUTPUT
 
-      - name: Create Git tag
+      - name: Create annotated Git tag
+        id: tag
         shell: pwsh
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag "${{ steps.metadata.outputs.tag }}" "${{ github.sha }}"
+          git tag -a "${{ steps.metadata.outputs.tag }}" "${{ github.sha }}" -m "Aruba Wireless Policy Mapper ${{ steps.metadata.outputs.tag }}"
           git push origin "refs/tags/${{ steps.metadata.outputs.tag }}"
+          if ($LASTEXITCODE -ne 0) { throw "Release tag push failed." }
+          "created=true" >> $env:GITHUB_OUTPUT
 
-      - name: Create draft GitHub Release
-        id: create_release
-        shell: pwsh
+      - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: pwsh
         run: |
           gh release create "${{ steps.metadata.outputs.tag }}" `
             "${{ steps.assets.outputs.asset_path }}#${{ steps.metadata.outputs.asset_name }}" `
+            "${{ steps.assets.outputs.checksum_path }}#${{ steps.metadata.outputs.checksum_name }}" `
+            "${{ steps.assets.outputs.sbom_path }}#${{ steps.metadata.outputs.sbom_name }}" `
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
-            --title "${{ steps.metadata.outputs.project_name }} ${{ steps.metadata.outputs.tag }}" `
+            --title "Aruba Wireless Policy Mapper ${{ steps.metadata.outputs.tag }}" `
             --notes-file "${{ steps.notes.outputs.notes_path }}" `
             --verify-tag `
-            --draft
-
-      - name: Publish GitHub Release
-        id: publish_release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view "${{ steps.metadata.outputs.tag }}" --repo "${{ github.repository }}" --json tagName,isDraft,assets
-          gh release edit "${{ steps.metadata.outputs.tag }}" `
-            --repo "${{ github.repository }}" `
-            --draft=false `
             --latest
 
-      - name: Remove incomplete draft release
-        if: failure() && steps.metadata.outputs.tag != '' && steps.publish_release.outcome != 'success'
-        shell: pwsh
+      - name: Remove only this run's incomplete release and tag
+        if: failure() && steps.tag.outputs.created == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: pwsh
         run: |
-          $tag = "${{ steps.metadata.outputs.tag }}"
-
-          gh release delete "$tag" --repo "${{ github.repository }}" --yes --cleanup-tag
-          if ($LASTEXITCODE -ne 0) {
-            Write-Warning "No draft release was deleted for $tag."
-            $global:LASTEXITCODE = 0
-          }
-
-          git push origin ":refs/tags/$tag"
-          if ($LASTEXITCODE -ne 0) {
-            Write-Warning "No remote tag was deleted for $tag."
-            $global:LASTEXITCODE = 0
-          }
+          gh release delete "${{ steps.metadata.outputs.tag }}" --repo "${{ github.repository }}" --yes
+          $global:LASTEXITCODE = 0
+          git push origin ":refs/tags/${{ steps.metadata.outputs.tag }}"
+          $global:LASTEXITCODE = 0

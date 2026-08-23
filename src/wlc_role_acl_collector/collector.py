@@ -14,8 +14,14 @@ from typing import Callable
 
 from .aos8_parser import discover_aliases_from_config, discover_roles_from_config
 from .config import resolve_credentials
+from .hostkeys import default_known_hosts_path, hardened_disabled_algorithms
 from .models import CollectionResult, CommandOutput, Controller, ControllerCredentials
-from .validation import MAX_COLLECTION_DURATION_SECONDS, validate_timeout_seconds
+from .validation import (
+    MAX_COLLECTION_DURATION_SECONDS,
+    build_show_netdestination_command,
+    build_show_rights_command,
+    validate_timeout_seconds,
+)
 
 ProgressCallback = Callable[[str, dict[str, object]], None]
 CANCELLED_COMMAND_ID = "cancelled"
@@ -40,6 +46,7 @@ def collect_from_controller(
     progress_callback: ProgressCallback | None = None,
     cancel_event: threading.Event | None = None,
     max_duration_seconds: int = MAX_COLLECTION_DURATION_SECONDS,
+    known_hosts_path: Path | None = None,
 ) -> CollectionResult:
     if max_duration_seconds <= 0:
         raise ValueError("max_duration_seconds must be greater than zero")
@@ -48,11 +55,6 @@ def collect_from_controller(
     result = CollectionResult(controller=controller)
     deadline = time.monotonic() + max_duration_seconds
 
-    try:
-        from netmiko import ConnectHandler
-    except ImportError as exc:  # pragma: no cover
-        raise RuntimeError("netmiko is required for live WLC collection") from exc
-
     # 여기서부터가 실제 장비와 통신하는 유일한 구간입니다.
     # 이후 단계는 CollectionResult에 담긴 텍스트만 보고 동작하게 분리해 둡니다.
     connection_timeout = min(timeout, max_duration_seconds)
@@ -60,6 +62,7 @@ def collect_from_controller(
         controller=controller,
         credentials=credentials,
         timeout=connection_timeout,
+        known_hosts_path=known_hosts_path,
     )
 
     connection = None
@@ -67,7 +70,7 @@ def collect_from_controller(
         if _cancel_requested(cancel_event):
             return _mark_cancelled(result, progress_callback)
         _emit(progress_callback, "connect", host=controller.host, protocol=controller.protocol, port=controller.port)
-        connection = ConnectHandler(**params)
+        connection = _open_connection(params, protocol=controller.protocol)
         _emit(progress_callback, "connect_done", host=controller.host)
         if _cancel_requested(cancel_event):
             return _mark_cancelled(result, progress_callback)
@@ -144,14 +147,32 @@ def collect_from_controller(
 
         # 설정 안에서 alias 이름만 먼저 찾고, 각 alias의 실제 host/network/range는 추가 명령으로 보강합니다.
         aliases = discover_aliases_from_config(config_output)
+        try:
+            alias_commands = [(alias, build_show_netdestination_command(alias)) for alias in aliases]
+        except ValueError as exc:
+            result.commands.append(
+                CommandOutput(
+                    command_id="invalid_netdestination_identifier",
+                    command="show netdestination <차단됨>",
+                    success=False,
+                    error=str(exc),
+                )
+            )
+            _emit(
+                progress_callback,
+                "command_error",
+                command_id="invalid_netdestination_identifier",
+                command="show netdestination <차단됨>",
+                error=str(exc),
+            )
+            return result
         _emit(progress_callback, "aliases_discovered", total=len(aliases))
-        for index, alias in enumerate(aliases, start=1):
+        for index, (alias, command) in enumerate(alias_commands, start=1):
             if _cancel_requested(cancel_event):
                 return _mark_cancelled(result, progress_callback)
             command_timeout = _next_command_timeout(timeout, deadline)
             if command_timeout is None:
                 return _mark_duration_limit(result, progress_callback, max_duration_seconds)
-            command = f'show netdestination "{alias}"' if " " in alias else f"show netdestination {alias}"
             _emit(
                 progress_callback,
                 "command_start",
@@ -201,14 +222,32 @@ def collect_from_controller(
 
         # Role 이름도 설정에서 먼저 찾은 뒤 show rights로 실제 적용 ACL을 보강합니다.
         roles = discover_roles_from_config(config_output)
+        try:
+            role_commands = [(role, build_show_rights_command(role)) for role in roles]
+        except ValueError as exc:
+            result.commands.append(
+                CommandOutput(
+                    command_id="invalid_role_identifier",
+                    command="show rights <차단됨>",
+                    success=False,
+                    error=str(exc),
+                )
+            )
+            _emit(
+                progress_callback,
+                "command_error",
+                command_id="invalid_role_identifier",
+                command="show rights <차단됨>",
+                error=str(exc),
+            )
+            return result
         _emit(progress_callback, "roles_discovered", total=len(roles))
-        for index, role in enumerate(roles, start=1):
+        for index, (role, command) in enumerate(role_commands, start=1):
             if _cancel_requested(cancel_event):
                 return _mark_cancelled(result, progress_callback)
             command_timeout = _next_command_timeout(timeout, deadline)
             if command_timeout is None:
                 return _mark_duration_limit(result, progress_callback, max_duration_seconds)
-            command = f'show rights "{role}"' if " " in role else f"show rights {role}"
             _emit(
                 progress_callback,
                 "command_start",
@@ -419,8 +458,9 @@ def _build_connect_params(
     controller: Controller,
     credentials: ControllerCredentials,
     timeout: int,
+    known_hosts_path: Path | None = None,
 ) -> dict:
-    return {
+    params = {
         "device_type": controller.device_type,
         "host": controller.host,
         "port": controller.port,
@@ -433,6 +473,30 @@ def _build_connect_params(
         "banner_timeout": timeout,
         "fast_cli": False,
     }
+    if controller.protocol.lower() == "ssh":
+        params.update(
+            {
+                "ssh_strict": True,
+                "system_host_keys": False,
+                "alt_host_keys": True,
+                "alt_key_file": str(known_hosts_path or default_known_hosts_path()),
+                "disabled_algorithms": hardened_disabled_algorithms(),
+            }
+        )
+    return params
+
+
+def _open_connection(params: dict, *, protocol: str):
+    try:
+        if protocol.lower() == "ssh":
+            from .ssh_connection import connect_with_pinned_host_key
+
+            return connect_with_pinned_host_key(**dict(params))
+        from netmiko import ConnectHandler
+
+        return ConnectHandler(**params)
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError("netmiko와 paramiko가 live WLC 수집에 필요합니다.") from exc
 
 
 def _emit(callback: ProgressCallback | None, event: str, **payload: object) -> None:

@@ -1,4 +1,7 @@
 from pathlib import Path
+import runpy
+
+import pytest
 
 from streamlit.testing.v1 import AppTest
 
@@ -20,3 +23,16 @@ def test_streamlit_connection_labels_and_protocol_default_ports():
 
     assert not app.exception
     assert app.number_input(key="connection_port_telnet").value == 23
+    assert any("Telnet" in item.value and "자동 전환" in item.value for item in app.warning)
+
+
+def test_streamlit_runtime_blocks_non_loopback_binding(monkeypatch):
+    namespace = runpy.run_path(str(APP_PATH))
+    streamlit_module = namespace["st"]
+    stopped = RuntimeError("stopped")
+    monkeypatch.setattr(streamlit_module, "get_option", lambda _name: "0.0.0.0")
+    monkeypatch.setattr(streamlit_module, "error", lambda _message: None)
+    monkeypatch.setattr(streamlit_module, "stop", lambda: (_ for _ in ()).throw(stopped))
+
+    with pytest.raises(RuntimeError, match="stopped"):
+        namespace["_enforce_loopback_binding"]()
