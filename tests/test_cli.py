@@ -201,6 +201,35 @@ def test_cli_rejects_timeout_outside_supported_range(capsys):
     assert "5에서 600" in capsys.readouterr().err
 
 
+def test_cli_trust_host_key_validates_target_and_calls_interactive_trust(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        cli,
+        "trust_host_key_interactive",
+        lambda host, port, *, timeout: captured.update(host=host, port=port, timeout=timeout),
+    )
+
+    exit_code = main(["trust-host-key", "--host", "192.0.2.10", "--port", "2222", "--timeout", "9"])
+
+    assert exit_code == cli.COLLECT_EXIT_OK
+    assert captured == {"host": "192.0.2.10", "port": 2222, "timeout": 9.0}
+
+
+def test_cli_trust_host_key_reports_rejection_without_traceback(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli,
+        "trust_host_key_interactive",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("SSH 서버 키를 승인하지 않았습니다.")),
+    )
+
+    exit_code = main(["trust-host-key", "--host", "192.0.2.10"])
+
+    assert exit_code == cli.COLLECT_EXIT_INPUT_ERROR
+    error = capsys.readouterr().err
+    assert "승인 실패" in error
+    assert "Traceback" not in error
+
+
 def test_cli_invalid_controller_file_returns_input_error_without_traceback(tmp_path, capsys):
     exit_code = main(
         [

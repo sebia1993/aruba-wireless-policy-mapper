@@ -6,6 +6,27 @@
 
 ## Unreleased
 
+## 0.2.0
+
+### 접속 안전성
+
+- SSH는 앱 전용 `known_hosts`와 Netmiko strict 검증을 사용하며, 승인되지 않은 키와 변경된 키를 차단합니다.
+- 장비 계정을 입력하기 전에 SHA-256 서버 키 지문을 확인·승인하는 `trust-host-key` 명령을 추가했습니다.
+- SSH 실패를 Telnet으로 자동 전환하지 않으며, Telnet은 운영자가 직접 선택한 경우에만 사용합니다.
+- Streamlit은 `localhost`, `127.0.0.1`, `::1` 이외 주소에서 실행을 중단합니다.
+
+### 명령 안전성
+
+- 설정에서 발견한 Role·Alias 이름을 중앙 검증기로 확인한 뒤에만 `show rights`와 `show netdestination` 명령을 생성합니다.
+- 따옴표, 명령 연결 문자, 줄바꿈, 제어문자가 포함된 이름은 장비로 보내지 않고 안전 오류로 기록합니다.
+- 자격 증명 객체의 문자열 표현에서 ID·비밀번호·Enable password가 노출되지 않도록 차단했습니다.
+
+### 검증과 배포
+
+- PR뿐 아니라 `main` push에서도 Windows 패키지 검증을 실행합니다.
+- SemVer `v0.2.0`, SHA-256 sidecar, CycloneDX SBOM, GitHub build provenance를 릴리스 계약으로 추가했습니다.
+- MIT License와 채용 담당자용 포트폴리오 요약을 추가했습니다.
+
 ### 문서 / 운영 체계
 
 - README를 `운영 문제 → 설계 판단 → 분석 구조 → 검증 → 빠른 시작` 순서로 재구성했습니다.
@@ -55,7 +76,7 @@
 - 안전 진단 모드는 민감정보를 마스킹한 HTML/JSON 진단 결과를 생성합니다.
 - Role/Alias command ID는 안정 라벨로 치환합니다.
 - 실제 WLC 주소, 계정, 원문 출력, 내부 Role 대역표는 저장소나 공개 Release에 포함하지 않습니다.
-- Streamlit 기본 바인딩은 `127.0.0.1`이며 원격 사용은 별도 TLS/인증/접근통제를 전제로 합니다.
+- Streamlit 바인딩을 loopback 주소로 강제하고 외부 인터페이스 실행을 차단합니다.
 
 ### 검증
 

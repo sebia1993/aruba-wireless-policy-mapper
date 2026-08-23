@@ -8,15 +8,17 @@ ZIP 안에 내장 Python, 앱 코드, 실행에 필요한 라이브러리가 함
 -----------
 
 1) GitHub Release에서 아래 파일을 다운로드합니다.
-   - wlc-role-acl-collector_vYYYY.MM.DD-HHMMSS_streamlit_windows_portable.zip
-   - wlc-role-acl-collector_vYYYY.MM.DD-HHMMSS_streamlit_windows_portable.zip.sha256
+   - wlc-role-acl-collector_v0.2.0_windows.zip 안의 web 폴더
 
 2) ZIP 파일을 원하는 폴더에 압축 해제합니다.
    예: C:\Tools\wlc-role-acl-collector-web
 
-3) 압축을 푼 폴더에서 start_webapp.cmd 를 더블클릭합니다.
+3) SSH를 사용할 WLC는 최초 1회 아래 명령으로 서버 키 지문을 확인·승인합니다.
+   trust_host_key.cmd 192.0.2.10 22
 
-4) 브라우저에서 아래 주소로 접속합니다.
+4) 압축을 푼 폴더에서 start_webapp.cmd 를 더블클릭합니다.
+
+5) 브라우저에서 아래 주소로 접속합니다.
    - 실행한 PC에서 접속: http://127.0.0.1:8763
    - 기본 설정에서는 다른 PC 접속 불가
 
@@ -33,17 +35,12 @@ OneDrive, 네트워크 드라이브보다 C:\WLC\wlc-role-acl-collector 같은 �
 
 set "WLC_WEB_PORT=8763"
 
-기본값은 아래와 같이 실행 PC에서만 접속할 수 있습니다.
+접속 주소는 start_webapp.cmd에서 127.0.0.1로 고정됩니다. 0.0.0.0 등 외부 인터페이스는 지원하지 않습니다.
 
-set "WLC_WEB_ADDRESS=127.0.0.1"
-
-3. 방화벽과 네트워크
+3. 실행 PC와 네트워크
 -------------------
 
-다른 PC 접속을 위해 0.0.0.0으로 변경하면 장비 계정이 암호화되지 않은 HTTP 구간을 통과합니다.
-회사에서 TLS, 접근통제, 사용자 인증을 승인하고 구성한 경우에만 원격 모드를 사용합니다.
-원격 모드를 승인해 사용한다면 Windows 방화벽에서 TCP 8763 허용 대상을 제한합니다.
-서버 역할을 하는 실행 PC가 WLC에 접속 가능한 네트워크에 있어야 합니다.
+실행 PC가 WLC에 접속 가능한 관리 네트워크에 있어야 합니다.
 실행 PC가 절전모드에 들어가거나 전원이 꺼지면 웹앱 접속도 끊깁니다.
 
 4. Role 대역 Excel
@@ -54,13 +51,13 @@ set "WLC_WEB_ADDRESS=127.0.0.1"
 Excel에 Role_Networks Sheet가 있으면 해당 Sheet를 우선 사용하고, 없으면 첫 번째 Sheet를 사용합니다.
 
 접속 방식은 입력 폼 위에서 먼저 선택합니다. SSH는 포트 22, Telnet은 포트 23이 자동 기본값입니다.
+Telnet은 계정과 장비 출력이 암호화되지 않으며 SSH 실패 시 자동 전환되지 않습니다.
 실패 시에는 오류 코드, 실패 단계, 권장 조치를 먼저 확인하고 필요할 때만 기술 세부 정보를 펼치십시오.
 
 5. 주의사항
 -----------
 
-이 웹앱은 인터넷 공개용 서비스가 아닙니다.
-접속 주소를 아는 사내 사용자는 화면에 접근할 수 있습니다.
+이 웹앱은 실행한 PC에서만 사용하는 로컬 도구이며 원격 서비스로 공개할 수 없습니다.
 장비 계정, 비밀번호, 내부 대역 정보는 코드나 파일에 저장하지 말고 실행 화면에서만 입력하세요.
 같은 WLC에서 이미 수집이 진행 중이면 기존 작업이 끝난 뒤 다시 실행하세요.
 결과가 부분 완료이면 실패 명령, 영향 영역, 영향 Role/SSID를 확인하고 해당 정보는 재수집 전 확정 판단하지 마세요.

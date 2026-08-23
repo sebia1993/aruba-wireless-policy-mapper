@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wlc-role-acl-collector"
-version = "0.1.0"
+version = "0.2.0"
 description = "Collect Aruba AOS8 WLC SSID, role, and ACL mappings and generate Excel/HTML reports."
 requires-python = ">=3.11"
 dependencies = [
@@ -17,9 +17,13 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "cyclonedx-bom>=7.0",
+  "pip-audit>=2.9",
   "pyinstaller>=6.0",
   "pytest>=8.0",
+  "setuptools>=68",
   "streamlit>=1.36",
+  "wheel>=0.45",
 ]
 web = [
   "streamlit>=1.36",

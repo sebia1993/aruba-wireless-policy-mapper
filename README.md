@@ -6,6 +6,17 @@
 
 > 실제 운영 데이터는 저장소에 포함하지 않습니다. 문서와 화면 예시는 비식별 샘플·Mock 데이터만 사용합니다.
 
+## 포트폴리오 요약
+
+| 채용 관점 | 내용 |
+|---|---|
+| 해결한 문제 | 여러 WLC CLI 화면을 따라가며 확인하던 SSID 접근 정책을 하나의 관계도와 보고서로 연결 |
+| 담당 범위 | 문제 정의, SSH/Telnet 수집, Parser, ACL 평가, GUI·로컬 Web·CLI, Windows 패키징과 CI/CD |
+| 핵심 판단 | 수집하지 못한 정책은 임의 추정하지 않고 `부분 완료/판정 불가`로 구분하며, 동적 CLI 인자는 전송 전에 차단 검증 |
+| 보안 경계 | SSH 서버 키 고정, 변경 키 차단, Streamlit loopback 강제, Telnet 평문 위험과 비자동 전환 명시 |
+| 검증 증거 | Mock/fixture, 대량 Role·ACL 회귀, Windows GUI·Web 통합 ZIP과 smoke 자동 검증 |
+| 증거의 한계 | 자동·합성 검증이며 실제 운영 장비 성과나 현장 안전성을 입증하는 수치로 해석하지 않음 |
+
 ## 한눈에 보기
 
 | 항목 | 내용 |
@@ -13,7 +24,7 @@
 | 대상 | Aruba AOS8 WLC |
 | 분석 흐름 | SSID → AAA Profile → 기본 Role → ACL → Alias / NetDestination |
 | 기본 Role | `initial-role`, `mac-default-role`, `dot1x-default-role` |
-| 접속 | SSH 또는 Telnet |
+| 접속 | SSH 또는 Telnet 직접 선택, 자동 전환 없음 |
 | 장비 변경 | **없음 — 조회 중심 수집, 설정 변경 명령 사용 안 함** |
 | 결과 | Excel, CSV, HTML |
 | 추가 분석 | Role별 ACL 상세, Access Check, Role 대역 비교, VLAN/사용자 관측 정보 |
@@ -157,7 +168,10 @@ wlc_role_acl_<세션>.html
 ## 안전 및 운영 원칙
 
 - 장비 계정과 비밀번호를 코드에 저장하지 않습니다.
-- 원격 웹앱 공개를 기본값으로 사용하지 않습니다. Streamlit 기본 주소는 `127.0.0.1`입니다.
+- SSH는 자격 증명 입력 전에 SHA-256 서버 키 지문을 검토하고 앱 전용 `known_hosts`에 고정합니다.
+- 승인되지 않은 SSH 키와 변경된 키는 차단하며, SSH 실패를 Telnet으로 자동 전환하지 않습니다.
+- Telnet은 계정과 장비 출력이 암호화되지 않으므로 격리된 관리망에서 위험을 승인한 경우에만 직접 선택합니다.
+- Streamlit은 `127.0.0.1` 등 loopback 주소에서만 실행되고 외부 인터페이스 바인딩은 차단됩니다.
 - GUI/Web/CLI에서 실제 WLC 수집과 테스트 fixture를 분리합니다.
 - Raw 장비 출력과 내부 Role 대역표는 공개 저장소에 포함하지 않습니다.
 - 안전 진단 결과는 주소·계정·Role/ACL 원문 등 운영 정보를 마스킹합니다.
@@ -189,7 +203,7 @@ wlc_role_acl_<세션>.html
 일반 사용자는 GitHub **Releases**의 Windows 통합 ZIP을 사용합니다.
 
 ```text
-wlc-role-acl-collector_vYYYY.MM.DD-HHMMSS_windows.zip
+wlc-role-acl-collector_v0.2.0_windows.zip
 ```
 
 압축을 완전히 푼 뒤 목적에 맞는 실행 경로를 선택합니다.
@@ -203,6 +217,7 @@ gui/
   WlcRoleAclCollectorCLI.exe
 web/
   start_webapp.cmd
+  trust_host_key.cmd
   webapp_settings.cmd
 ```
 
@@ -217,10 +232,16 @@ gui\WlcRoleAclCollectorGUI.exe
 권장 흐름:
 
 1. WLC 주소와 SSH/Telnet 접속 정보를 입력합니다.
-2. 필요한 경우 Enable password와 Role 대역표 Excel을 지정합니다.
-3. `분석 시작`을 실행합니다.
-4. `정상 완료 / 부분 완료 / 수집 실패` 상태를 확인합니다.
-5. HTML/Excel 결과에서 SSID → Role → ACL 관계를 확인합니다.
+2. SSH를 선택했다면 최초 1회 아래 명령으로 별도 관리 경로에서 확인한 서버 키 지문을 승인합니다.
+
+```powershell
+.\WlcRoleAclCollectorCLI.exe trust-host-key --host 192.0.2.10 --port 22
+```
+
+3. 필요한 경우 Enable password와 Role 대역표 Excel을 지정합니다.
+4. `분석 시작`을 실행합니다.
+5. `정상 완료 / 부분 완료 / 수집 실패` 상태를 확인합니다.
+6. HTML/Excel 결과에서 SSID → Role → ACL 관계를 확인합니다.
 
 ### 로컬 웹앱
 
@@ -234,7 +255,7 @@ web\start_webapp.cmd
 http://127.0.0.1:8763
 ```
 
-원격 접속은 TLS·인증·접근통제가 별도로 승인된 환경에서만 구성하십시오.
+웹앱은 실행한 PC의 loopback 주소에서만 동작합니다. 서버 또는 원격 공용 서비스로 배포하지 마십시오.
 
 더 자세한 실행 절차는 [사용자 가이드](docs/USER_GUIDE_KO.md)를 참고하십시오.
 
@@ -243,7 +264,8 @@ http://127.0.0.1:8763
 Python 3.11 이상에서:
 
 ```powershell
-python -m pip install -e ".[dev]"
+python -m pip install --require-hashes -r requirements-lock.txt
+python -m pip install --no-deps --no-build-isolation -e .
 python -m pytest
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\validate.ps1
 ```
@@ -260,6 +282,7 @@ Windows 통합 패키지는 GitHub Actions 또는 Windows 환경에서 검증합
 | [개발자 가이드](docs/DEVELOPER_GUIDE_KO.md) | 모듈 구조와 개발 흐름 |
 | [검증 보고서](docs/VALIDATION_REPORT.md) | 자동/운영 검증 경계와 체크리스트 |
 | [보안 모델](docs/SECURITY_MODEL_KO.md) | 민감정보·접근·진단 경계 |
+| [의존성 감사 예외](docs/DEPENDENCY_AUDIT_EXCEPTIONS_KO.md) | 고정 취약점 예외·보완 통제·제거 기한 |
 | [오류 코드](docs/ERROR_CODES_KO.md) | 오류 의미와 1차 조치 |
 | [진단 모드](docs/DIAGNOSTIC_MODE_KO.md) | 비식별 현장 진단 |
 | [Release 운영](RELEASE_NOTES.md) | 배포 기준과 산출물 계약 |
@@ -274,3 +297,15 @@ Windows 통합 패키지는 GitHub Actions 또는 Windows 환경에서 검증합
 - macOS에서 Windows EXE를 직접 생성하는 공식 빌드 경로
 
 이 저장소의 목적은 **Aruba 정책 객체를 많이 수집하는 것 자체가 아니라, 무선 서비스와 접근 제어 정책의 관계를 운영자가 추적 가능한 형태로 만드는 것**입니다.
+
+## 함께 보는 네트워크 자동화 프로젝트
+
+| 프로젝트 | 보여주는 역량 |
+|---|---|
+| [Aruba Cluster Health Dashboard](https://github.com/sebia1993/aruba-cluster-health-dashboard) | 무선 클러스터 관측값의 상관분석과 오탐 억제 |
+| [Aruba MM Session Cleanup](https://github.com/sebia1993/aruba-mm-session-cleanup) | 상태 변경 자동화의 승인·대상 고정·사후 검증 |
+| [Aruba 2930F Config Backup](https://github.com/sebia1993/aruba-2930f-config-backup) | 읽기 전용 설정 수집과 SSH 지문·결과 무결성 통제 |
+
+## 라이선스와 보안 제보
+
+프로젝트 코드는 [MIT License](LICENSE)로 배포합니다. 민감한 취약점은 공개 Issue 대신 GitHub Security의 비공개 취약점 제보 기능을 사용하십시오.

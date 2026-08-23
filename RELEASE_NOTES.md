@@ -24,7 +24,9 @@ GitHub Actions의 `Release` workflow를 수동 실행하며, 다음과 같이 �
 일반 사용자에게 직접 제공하는 Release asset은 다음 Windows 통합 ZIP 하나입니다.
 
 ```text
-wlc-role-acl-collector_vYYYY.MM.DD-HHMMSS_windows.zip
+wlc-role-acl-collector_v0.2.0_windows.zip
+wlc-role-acl-collector_v0.2.0_windows.zip.sha256
+wlc-role-acl-collector_v0.2.0_sbom.cdx.json
 ```
 
 GitHub가 자동 표시하는 `Source code (zip)`과 `Source code (tar.gz)`는 실행용 배포 파일이 아닙니다.
@@ -46,9 +48,12 @@ gui/
   DIAGNOSTIC_MODE_KO.html
   SECURITY_MODEL_KO.md
   SECURITY_MODEL_KO.html
+  DEPENDENCY_AUDIT_EXCEPTIONS_KO.md
+  DEPENDENCY_AUDIT_EXCEPTIONS_KO.html
   config/
 web/
   start_webapp.cmd
+  trust_host_key.cmd
   webapp_settings.cmd
   README_WEBAPP_KO.txt
   python/
@@ -56,7 +61,9 @@ web/
   config/
 ```
 
-SHA-256은 Release notes에 기록합니다.
+SHA-256은 Release notes와 별도 `.sha256` asset에 기록합니다. CycloneDX JSON SBOM과 GitHub build provenance도 함께 공개합니다.
+
+Paramiko 수정 릴리스가 아직 없는 `CVE-2026-44405`는 정확히 한 건만 감사 예외로 고정합니다. 서버 키 probe와 실제 연결에서 RSA/SHA-1을 비활성화하고 맞춤 고정 키 policy로 인증 전에 키 재료를 검증하며, 근거·제거 조건·재검토 기한은 `docs/DEPENDENCY_AUDIT_EXCEPTIONS_KO.md`에 공개합니다.
 
 ## Release 전 검증
 
@@ -68,6 +75,8 @@ PR Validation이 성공한 상태에서 수동 Release workflow를 실행합니�
 python -m pytest -q
 python -m compileall -q src tests tools
 python -m pip check
+python -m pip_audit -r requirements-lock.txt --strict --ignore-vuln CVE-2026-44405
+python -m pip_audit -r requirements-web-lock.txt --strict --ignore-vuln CVE-2026-44405
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\validate.ps1
 ```
 

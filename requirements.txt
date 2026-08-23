@@ -1,1 +1,2 @@
--e .[web]
+--require-hashes
+-r requirements-lock.txt

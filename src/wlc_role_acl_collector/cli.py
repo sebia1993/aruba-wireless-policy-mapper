@@ -13,12 +13,13 @@ from .collection_health import (
 from .config import load_controllers
 from .diagnostic_mode import run_diagnostic
 from .diagnostics import FailureInfo, classify_error_message
+from .hostkeys import trust_host_key_interactive
 from .interactive import prompt_controller_targets
 from .mock_server import run_mock_server
 from .models import CollectionResult, CommandOutput, ControllerTarget
 from .report import build_parsed_controllers, create_run_dir, write_raw_result, write_reports
 from .role_networks import RoleNetworkDefinitionError, load_role_network_definitions
-from .validation import validate_timeout_seconds
+from .validation import validate_port, validate_timeout_seconds, validate_wlc_address
 
 
 COLLECT_EXIT_OK = 0
@@ -78,6 +79,14 @@ def main(argv: list[str] | None = None) -> int:
     mock_parser.add_argument("--host", default="127.0.0.1", help="local listen address")
     mock_parser.add_argument("--port", type=int, default=0, help="local listen port; 0 selects a free port")
 
+    trust_parser = subparsers.add_parser(
+        "trust-host-key",
+        help="Review and pin one SSH server key before entering device credentials",
+    )
+    trust_parser.add_argument("--host", required=True, help="WLC IP or hostname")
+    trust_parser.add_argument("--port", type=int, default=22, help="SSH port")
+    trust_parser.add_argument("--timeout", type=float, default=15.0, help="server-key probe timeout seconds")
+
     args = parser.parse_args(argv)
     if args.command == "collect":
         return _collect(args)
@@ -86,7 +95,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "mock-server":
         run_mock_server(args.protocol, args.scenario, host=args.host, port=args.port)
         return 0
+    if args.command == "trust-host-key":
+        return _trust_host_key(args)
     return 2
+
+
+def _trust_host_key(args: argparse.Namespace) -> int:
+    try:
+        host = validate_wlc_address(args.host)
+        port = validate_port(args.port)
+        timeout = float(args.timeout)
+        if not 1.0 <= timeout <= 60.0:
+            raise ValueError("서버 키 확인 Timeout은 1초에서 60초 사이여야 합니다.")
+        trust_host_key_interactive(host, port, timeout=timeout)
+    except (OSError, RuntimeError, PermissionError, ValueError) as exc:
+        print(f"SSH 서버 키 승인 실패: {exc}", file=sys.stderr)
+        return COLLECT_EXIT_INPUT_ERROR
+    return COLLECT_EXIT_OK
 
 
 def _collect(args: argparse.Namespace) -> int:

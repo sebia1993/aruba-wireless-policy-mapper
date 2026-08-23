@@ -2,6 +2,8 @@ import pytest
 
 from wlc_role_acl_collector.validation import (
     MAX_COLLECTION_DURATION_SECONDS,
+    build_show_netdestination_command,
+    build_show_rights_command,
     validate_port,
     validate_timeout_seconds,
     validate_wlc_address,
@@ -41,3 +43,30 @@ def test_validate_port_rejects_out_of_range_and_non_numeric_values():
         validate_port(0)
     with pytest.raises(ValueError, match="숫자"):
         validate_port("ssh")
+
+
+def test_dynamic_show_commands_quote_spaces_without_changing_safe_identifiers():
+    assert build_show_rights_command("corp-employee") == "show rights corp-employee"
+    assert build_show_rights_command("corp employee") == 'show rights "corp employee"'
+    assert build_show_netdestination_command("dns_alias") == "show netdestination dns_alias"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        'corp"; reload',
+        "corp; reload",
+        "corp && reload",
+        "corp || reload",
+        "corp\nshow running-config",
+        "corp\r\nreload",
+        " corp",
+        "corp ",
+        "corp\\reload",
+    ],
+)
+def test_dynamic_show_commands_reject_cli_injection_boundaries(value):
+    with pytest.raises(ValueError, match="차단"):
+        build_show_rights_command(value)
+    with pytest.raises(ValueError, match="차단"):
+        build_show_netdestination_command(value)

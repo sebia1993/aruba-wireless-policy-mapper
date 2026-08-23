@@ -245,9 +245,11 @@
     <p>CLI collect 종료 코드는 <code>0=성공</code>, <code>1=필수 수집·장비별 런타임·파싱·저장 실패</code>, <code>2=입력 오류</code>, <code>3=선택 명령 일부 실패</code>입니다. 자동화에서 보고서 파일 존재 여부만 보지 말고 종료 코드를 함께 확인해야 합니다.</p>
     <p><code>cli._collect()</code>은 대상 설정, 결과 폴더 생성, 장비별 수집, raw 저장, 장비별 파싱, 최종 보고서 저장을 별도 예외 경계로 처리합니다. 장비별 수집/파싱 예외는 <code>collection_runtime</code> 또는 <code>parse_runtime</code> CommandOutput으로 바꾸고 다음 WLC를 계속 처리합니다. 로컬 저장 실패는 결과 무결성을 보장할 수 없으므로 <code>WLC-RPT-001/002</code>를 표시하고 전체 실행을 종료합니다. <code>_diagnose()</code>도 대상별 예외를 격리합니다.</p>
     <p>다중 컨트롤러 영향 범위 계산은 실패 command row의 controller와 같은 ACL/SSID 행만 확장해야 합니다. <code>collection_health.infer_collection_impact_scope()</code>에서 다른 컨트롤러의 Role/SSID까지 영향 대상으로 섞지 않습니다.</p>
-    <p>Streamlit은 <code>_ACTIVE_TARGETS</code>와 <code>_target_collection_slot()</code>으로 같은 WLC에 대한 중복 수집을 즉시 거부합니다. 기본 launcher 주소는 <code>127.0.0.1</code>이며, 원격 HTTP 노출은 기본 동작이 아닙니다. 브라우저 화면에는 Python traceback을 직접 출력하지 않습니다.</p>
+    <p>Streamlit은 <code>_ACTIVE_TARGETS</code>와 <code>_target_collection_slot()</code>으로 같은 WLC에 대한 중복 수집을 즉시 거부합니다. launcher와 앱 모두 loopback 주소만 허용해 원격 HTTP 노출을 차단합니다. 브라우저 화면에는 Python traceback을 직접 출력하지 않습니다.</p>
     <p><code>app.py</code>의 접속 방식 선택은 form 밖에 있습니다. Streamlit form 안의 widget 변경은 제출 전 rerun되지 않기 때문에, SSH/Telnet 변경 시 포트 22/23을 즉시 갱신하려면 이 구조를 유지해야 합니다. 포트 widget key도 프로토콜별로 분리합니다.</p>
     <p><code>web_logic.run_web_collection()</code>은 입력 검증을 통과한 뒤 <code>workspace</code>, <code>role_networks</code>, <code>collection</code>, <code>raw_storage</code>, <code>parsing</code>, <code>report</code>, <code>download</code> 단계 중 현재 위치를 추적합니다. 예상하지 못한 오류는 원본 예외나 내부 경로 대신 안전한 오류 코드, 실패 단계, 한국어 권장 조치가 담긴 <code>WebCollectionResult(success=False)</code>로 반환합니다. 잘못된 Role 대역표와 동일 WLC 중복 실행은 사용자가 직접 수정할 수 있도록 기존 예외 계약을 유지합니다.</p>
+    <p>SSH 연결은 <code>hostkeys.py</code>와 <code>collector._build_connect_params()</code>가 앱 전용 <code>known_hosts</code>를 공유합니다. <code>trust-host-key</code>는 인증 전에 서버 키를 probe하고 사용자가 지문을 별도 경로로 확인한 경우에만 최초 키를 저장합니다. Netmiko 연결은 <code>ssh_strict=True</code>, 시스템 키 비활성화, 앱 전용 키 파일 사용을 강제합니다. <code>ssh_connection.py</code>는 Paramiko 4.0이 RSA known_hosts 항목을 보고 <code>ssh-rsa</code> 우선순위를 되살리는 경로를 피하기 위해 키 파일을 <code>SSHClient</code>에 직접 로드하지 않고, SHA2-only 교환 뒤 인증 전에 <code>PinnedHostKeyPolicy</code>로 키 재료를 비교합니다. 변경된 키와 미승인 키를 자동 등록하거나 Telnet으로 우회하는 코드를 추가하지 않습니다.</p>
+    <p>Telnet은 사용자가 명시적으로 선택한 경우에만 사용합니다. 평문 위험 안내를 유지하고 SSH 오류를 이유로 프로토콜을 자동 변경하지 않습니다. <code>validation.build_show_netdestination_command()</code>와 <code>build_show_rights_command()</code>는 장비 출력에서 발견한 식별자를 중앙에서 검증하므로 동적 명령을 문자열 보간으로 직접 만들지 않습니다.</p>
     <p>CLI, GUI, Web은 모두 <code>collection_health.assess_collection_results()</code> 결과를 사용합니다. 같은 <code>CollectionResult</code>를 표면마다 다르게 판정하지 않도록 상태 문자열을 별도로 재구현하지 않습니다.</p>
     <h3><code>validation.py</code>와 <code>collection_health.py</code></h3>
     <p><code>validation.py</code>는 다음 공통 계약을 소유합니다.</p>
@@ -484,7 +486,7 @@ access_history_enabled=False</code></pre>
       <li>Role network Excel은 세션 전용</li>
       <li>내부 대역을 기본 보고서에 저장하지 않음</li>
       <li>Access Check 이력 기본 미저장</li>
-      <li>Streamlit 기본 바인딩 <code>127.0.0.1</code></li>
+      <li>Streamlit loopback 바인딩 강제 및 외부 인터페이스 차단</li>
       <li>진단 command ID의 실제 Role/Alias 이름을 <code>&lt;ROLE:n&gt;</code>, <code>&lt;ALIAS:n&gt;</code>으로 마스킹</li>
       <li>웹 화면에 Python traceback 미노출</li>
       <li><code>outputs/</code>, <code>config/private/</code>, 민감 파일 패턴 git ignore</li>
