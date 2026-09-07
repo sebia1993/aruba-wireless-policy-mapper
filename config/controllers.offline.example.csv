@@ -1,0 +1,2 @@
+name,host,protocol,port,device_type,username_env,password_env,enable_password_env
+sample_controller,192.0.2.10,ssh,22,aruba_os,,,
