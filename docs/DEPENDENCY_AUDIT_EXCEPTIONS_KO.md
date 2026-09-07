@@ -16,7 +16,7 @@
 
 2026-09-08 재확인 결과 [PyPI의 Paramiko 5.0.0](https://pypi.org/project/paramiko/5.0.0/)이 공개되어 있고, [공식 변경 이력](https://www.paramiko.org/changelog.html#5.0.0)은 RSA/SHA-1 서명과 SHA-1 key exchange 지원 제거를 명시합니다. 같은 날 [GitHub Advisory](https://github.com/advisories/GHSA-r374-rxx8-8654)의 `Patched versions`는 `None`으로 표시됩니다. Advisory의 필드만으로 수정 후보 배포가 없다고 판단하지 않습니다.
 
-현재 저장소는 4.0.0 잠금 파일을 사용하며 5.0.0 교체·SSH 회귀·Windows 통합 패키지 검증은 완료되지 않았습니다. 서명 외 KEX 지원 변경과 맞춤 호스트 키 정책의 호환성도 확인해야 하므로 후속 업그레이드 검증이 필요합니다. 이 미해결 상태에서 애플리케이션이 적용하는 임시 보완 통제는 다음과 같습니다.
+현재 저장소는 4.0.0 잠금 파일을 사용하며 5.0.0 교체·SSH 회귀·Windows 통합 패키지 검증은 완료되지 않았습니다. 잠긴 Netmiko 4.7.0의 [PyPI 메타데이터](https://pypi.org/pypi/netmiko/4.7.0/json)는 `paramiko<5.0,>=3.5.0`을 요구하므로 Paramiko만 5.0.0으로 바꿀 수 없습니다. Netmiko 호환 버전, 서명 외 KEX 지원 변경, 맞춤 호스트 키 정책을 함께 검토해야 합니다. 이 미해결 상태에서 애플리케이션이 적용하는 임시 보완 통제는 다음과 같습니다.
 
 - 서버 키를 가져오는 사전 probe와 실제 Netmiko 연결 모두에 `disabled_algorithms={"keys": ["ssh-rsa"], "pubkeys": ["ssh-rsa"]}`를 전달합니다.
 - Paramiko `SSHClient`에는 RSA 항목이 든 `known_hosts`를 직접 로드하지 않습니다. 맞춤 `PinnedHostKeyPolicy`가 SHA2-only key exchange 뒤, 자격 증명 인증 전에 앱 전용 파일의 키 재료를 직접 비교해 Paramiko 4.0의 RSA 우선순위 재설정을 우회합니다.
