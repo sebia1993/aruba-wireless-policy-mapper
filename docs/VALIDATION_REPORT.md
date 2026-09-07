@@ -55,7 +55,7 @@
 | 번호 | 항목 | 합격 기준 |
 |---:|---|---|
 | 1 | Excel | 수집/분석 결과와 상태 정보를 열 수 있는 통합문서로 생성 |
-| 2 | CSV | SSID/Role 매핑 결과를 독립적으로 확인 가능 |
+| 2 | 생성 상태 JSON | `report_status.json`에서 파일 생성 상태와 수집 상태를 구분 |
 | 3 | HTML | 관리자 요약과 Role/ACL 상세를 브라우저에서 확인 가능 |
 | 4 | Access Check | 보고서 내부에서 입력값에 대한 정책 평가 가능 |
 | 5 | Role PNG | 선택 Role의 ACL 내용을 이미지로 저장 가능 |
@@ -105,7 +105,7 @@ python .\tools\verify_combined_release_package.py --dist .\dist --smoke
 | Alias | NetDestination 범위 해석 일치 |
 | 동적 Role | 기본 Role과 동적 Role 가능성 표시가 혼동되지 않음 |
 | 부분 실패 | 의도적으로 실패 조건을 만들었을 때 영향 범위 표시 확인 |
-| 결과 파일 | Excel/CSV/HTML 정상 열림 |
+| 결과 파일 | Excel/HTML 정상 열림 |
 | Access Check | 대표 허용/차단/판정불가 조건을 수동 정책과 대조 |
 | 반복 실행 | 이전 실행의 임시 상태가 다음 실행을 오염시키지 않음 |
 | 종료/취소 | 열린 세션과 임시 작업이 정리됨 |
@@ -119,7 +119,7 @@ python .\tools\verify_combined_release_package.py --dist .\dist --smoke
 - 대상: Aruba AOS8 WLC
 - SSID → AAA → Role → ACL 관계 수집: 확인
 - Alias / NetDestination 해석: 확인
-- Excel / CSV / HTML 보고서: 확인
+- Excel / HTML 보고서: 확인
 - 부분 완료 및 오류 분류: 확인
 - 장비 설정 변경: 없음 확인
 - 실제 주소·장비명·정책 원문: 비공개

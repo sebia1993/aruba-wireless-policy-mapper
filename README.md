@@ -17,6 +17,10 @@
 | 검증 증거 | Mock/fixture, 대량 Role·ACL 회귀, Windows GUI·Web 통합 ZIP과 smoke 자동 검증 |
 | 증거의 한계 | 자동·합성 검증이며 실제 운영 장비 성과나 현장 안전성을 입증하는 수치로 해석하지 않음 |
 
+## 채용 검토자를 위한 읽는 순서
+
+[포트폴리오 검토 안내](docs/PORTFOLIO_REVIEW_KO.md)에서 **설계 질문 → 실제 코드 → 실패 사례 테스트 → 장비 없는 재현 → 검증 한계** 순서로 확인할 수 있습니다. 아래 운영 설명과 함께 읽으면 기능 주장과 공개 근거를 대조할 수 있습니다.
+
 ## 한눈에 보기
 
 | 항목 | 내용 |
@@ -26,7 +30,7 @@
 | 기본 Role | `initial-role`, `mac-default-role`, `dot1x-default-role` |
 | 접속 | SSH 또는 Telnet 직접 선택, 자동 전환 없음 |
 | 장비 변경 | **없음 — 조회 중심 수집, 설정 변경 명령 사용 안 함** |
-| 결과 | Excel, CSV, HTML |
+| 결과 | Excel, HTML, 생성 상태 JSON |
 | 추가 분석 | Role별 ACL 상세, Access Check, Role 대역 비교, VLAN/사용자 관측 정보 |
 | 실행 방식 | Windows GUI / 로컬 Streamlit 웹앱 / CLI |
 | 오프라인 운영 | Windows 통합 ZIP 제공, Python 별도 설치 불필요 |
@@ -55,7 +59,7 @@ Aruba 무선 환경에서 특정 SSID의 실제 접근 정책을 확인하려면
 | 동적 Role을 기본 Role로 오인할 위험 | ClearPass/RADIUS 동적 Role은 **가능성**으로 분리하고 직접 수집한 값처럼 표시하지 않음 |
 | 일부 명령 실패 시 결과 신뢰도 판단 필요 | `정상 완료 / 부분 완료 / 수집 실패` 상태와 영향 Role/SSID를 함께 계산 |
 | 불완전한 Alias/ACL에서 잘못된 접근 허용 판정 위험 | 선행 정보가 부족하면 Access Check를 억지로 통과시키지 않고 `판정 불가`로 중단 |
-| 동일 작업을 반복할 때 사람이 Excel을 다시 정리 | Excel/CSV/HTML을 동일 수집 모델에서 자동 생성 |
+| 동일 작업을 반복할 때 사람이 Excel을 다시 정리 | Excel/HTML을 동일 수집 모델에서 자동 생성 |
 | 내부 Role 대역표와 WLC 추정값 비교 필요 | 선택적으로 `Role_Networks` Excel을 읽어 로컬 기준과 수집값 비교 |
 | 현장 장애 재현 시 운영 정보 공유가 어려움 | IP·계정·원문을 제거한 안전 진단 보고서와 안정 오류 코드 사용 |
 
@@ -75,7 +79,7 @@ flowchart LR
     F --> G
 
     G --> H["SSID → AAA → Role → ACL"]
-    H --> I["Excel / CSV"]
+    H --> I["Excel"]
     H --> J["HTML 보고서"]
     H --> K["Access Check"]
 
@@ -138,15 +142,17 @@ Excel / HTML / Access Check
 
 ## 주요 결과물
 
-수집이 끝나면 날짜시간과 세션 구분값을 사용해 결과 파일을 생성합니다.
+수집이 끝나면 날짜시간과 충돌 방지 구분값을 사용하는 실행 디렉터리에 결과를 생성합니다. CSV는 장비 목록 입력 형식이며 자동 보고서 출력은 Excel과 HTML입니다.
 
 ```text
-wlc_role_acl_<세션>.xlsx
-wlc_role_acl_<세션>_ssid_role_map.csv
-wlc_role_acl_<세션>.html
+<출력 루트>/<실행 디렉터리>/
+├── ssid_role_acl_report.xlsx
+├── ssid_role_acl_report.html
+├── report_status.json
+└── raw/
 ```
 
-### Excel / CSV
+### Excel
 
 - SSID와 AAA Profile 관계
 - 기본 Role 종류별 매핑
