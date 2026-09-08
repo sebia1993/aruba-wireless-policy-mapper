@@ -49,8 +49,10 @@ def main() -> None:
             app.password_var.set("documentation-only")
             app.output_dir_var.set(r"C:\DocumentationDemo\WlcReports")
             app.status_var.set("문서용 합성 입력 · 실제 장비 접속 없음")
+            app._select_menu_tab("설정")
             capture_window(app, output / "01-settings.png")
             app._select_menu_tab("수집 및 분석")
+            app._set_running(True)
             app._set_stage("reporting")
             app.status_var.set(
                 "합성 raw fixture를 분석하는 단계 예시 · 실제 SSH 연결 없음"
@@ -71,6 +73,11 @@ def main() -> None:
             assert reports["html"].is_file() and reports["xlsx"].is_file()
             app._set_result_summary(summary)
             app._set_stage("completed")
+            app._set_running(False)
+            app.last_run_dir = Path(directory)
+            app.last_html = reports["html"]
+            app.last_xlsx = reports["xlsx"]
+            app._set_result_buttons(folder_enabled=True, report_enabled=True)
             app.status_var.set(
                 "오프라인 합성 fixture 분석 완료 · 장비 운영 상태를 증명하지 않습니다."
             )
