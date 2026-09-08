@@ -31,7 +31,12 @@ def main() -> None:
         gui.default_gui_output_dir = lambda: Path(directory)
         app = gui.WlcRoleAclCollectorGui()
         try:
+            app.maxsize(1920, 1400)
             app.geometry("1360x960+0+0")
+            app.update()
+            assert app.winfo_width() >= 1300 and app.winfo_height() >= 950, (
+                app.geometry()
+            )
             app.host_var.set("192.0.2.10")
             app.name_var.set("sample_controller")
             app.username_var.set("netops-demo")
