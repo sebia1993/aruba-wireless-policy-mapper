@@ -1,6 +1,6 @@
-# WLC Role ACL Collector Design Screenshots
+# 2026-06-30 Legacy Design Screenshots
 
-이 폴더는 디자인 검토용 화면 캡처 묶음입니다.
+이 폴더는 2026-06-30 시점의 디자인 검토용 화면 캡처 묶음입니다. 현재 Dark CustomTkinter GUI와 다르며, 당시 앱 버전·캡처 OS·소스 SHA는 이 폴더만으로 확정할 수 없습니다. 현재 화면과 재현 정보는 [화면별 사용 흐름](../docs/USAGE_SCREENSHOTS_KO.md)을 참고하세요. 과거 Access Check 이미지는 검사 실행 전 상태입니다.
 
 ## App Flow
 
@@ -24,5 +24,5 @@
 
 ## Source HTML Samples
 
-- `_work/reports/20260630_142457/ssid_role_acl_report.html`
-- `_work/diagnostics/20260630_142457/diagnostic_summary.html`
+- [보존된 샘플 수집 보고서](source_html/sample_ssid_role_acl_report.html)
+- [보존된 샘플 진단 보고서](source_html/sample_diagnostic_summary.html)
