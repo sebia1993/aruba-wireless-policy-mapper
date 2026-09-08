@@ -116,29 +116,13 @@ Excel / HTML / Access Check
 
 ## 실행 및 결과 화면
 
-아래 이미지는 저장소의 **디자인 검토용 비식별 샘플 화면**입니다. 실제 운영망 주소·계정·설정 원문은 포함하지 않습니다.
+[화면별 사용 흐름](docs/USAGE_SCREENSHOTS_KO.md)에서 현재 앱의 설정 → 분석 단계 → 보고서 해석 → 로그를 확인할 수 있습니다. 아래는 Windows의 실제 CustomTkinter 창이며 합성 입력과 오프라인 fixture 계산 결과를 사용했습니다. 실제 SSH 연결은 하지 않았습니다.
 
-### 접속 정보 입력
+![현재 앱의 합성 설정](docs/images/01-settings.png)
 
-![WLC Role ACL Collector 접속 화면](design_screenshots/app_flow/01_app_ready_connection.png)
+![실제 오프라인 fixture로 계산한 결과 요약](docs/images/03-reports.png)
 
-### 수집 완료
-
-![WLC Role ACL Collector 수집 완료 화면](design_screenshots/app_flow/05_app_completed_results.png)
-
-### HTML 보고서 요약
-
-![WLC Role ACL Collector HTML 보고서](design_screenshots/html_files/11_html_report_overview.jpg)
-
-### Role / ACL 상세 분석
-
-![WLC Role ACL Collector Role ACL Detail](design_screenshots/html_files/12_html_report_role_acl_detail.jpg)
-
-### Access Check
-
-![WLC Role ACL Collector Access Check](design_screenshots/html_files/13_html_report_access_check.jpg)
-
-전체 화면 묶음은 [`design_screenshots/`](design_screenshots/)에서 확인할 수 있습니다.
+SSID → Role → ACL 상세와 Access Check의 이전 HTML 예시는 [2026-06-30 legacy 갤러리](design_screenshots/README.md)에 보존했습니다. 이전 흰색 GUI와 실행 전 Access Check 화면을 현재 앱이나 검증된 정책 판정의 증거로 해석하지 마십시오.
 
 ## 주요 결과물
 

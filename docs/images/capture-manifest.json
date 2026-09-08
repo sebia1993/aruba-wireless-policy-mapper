@@ -1,0 +1,29 @@
+{
+  "application": "Aruba WLC Ops Analyzer v2.0",
+  "application_version": "0.2.0",
+  "source_commit": "522b6da3bb1b38aa8cb6a6381805ac4e112e024e",
+  "capture_os": "Windows-10-10.0.26100-SP0",
+  "python": "3.11.9",
+  "method": "Actual CustomTkinter window / PrintWindow; synthetic stage injection; checked-in offline raw -> parser/report/summary; UI v2.0 title is distinct from package 0.2.0",
+  "data": "synthetic documentation fixtures only",
+  "network": "socket connection attempts blocked; no device or account access",
+  "workflow_run": "34176520732",
+  "images": [
+    {
+      "file": "01-settings.png",
+      "sha256": "2956b3367aadc16e8ebff344b20738db8227faa5a34fb53f1af666731ab07228"
+    },
+    {
+      "file": "02-analysis.png",
+      "sha256": "33bad55294b63ed273e1a71e5527a26c98cb8aa6ca43ac63b4ed078d93cb9ea6"
+    },
+    {
+      "file": "03-reports.png",
+      "sha256": "f96c84005dff64b9029a0c242890f93b382df94f8d5b6cb4c45a7d64e3835da0"
+    },
+    {
+      "file": "04-log.png",
+      "sha256": "6f0d9a920846766ef9e2a114f8a02dba982cf408580b1ed8383e079179bdb1f4"
+    }
+  ]
+}
