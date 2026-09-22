@@ -92,6 +92,8 @@ class MockWlcServer:
                         _send(handler_self.request, "logout\n")
                         return
                     response = scenario.response_for(command)
+                    if response == "__MOCK_CLOSE__":
+                        return
                     _send(handler_self.request, f"\n{response}\n{scenario.prompt}")
 
         server = _ThreadingTcpServer((self.host, self.port), Handler)
@@ -231,7 +233,11 @@ def _ssh_command_loop(channel, scenario: MockScenario) -> None:
             if command.casefold() in {"exit", "quit", "logout"}:
                 channel.send("logout\n")
                 return
-            channel.send(f"\n{scenario.response_for(command)}\n{scenario.prompt}")
+            response = scenario.response_for(command)
+            if response == "__MOCK_CLOSE__":
+                channel.close()
+                return
+            channel.send(f"\n{response}\n{scenario.prompt}")
 
 
 def _split_command_buffer(buffer: str) -> tuple[str, str]:
