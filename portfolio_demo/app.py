@@ -173,7 +173,7 @@ def _demo_request(host: str, port: int) -> WebCollectionRequest:
         username="demo-user",
         password="demo-password",
         enable_password="",
-        timeout=15,
+        timeout=5,
         export_local_role_networks=False,
     )
 
