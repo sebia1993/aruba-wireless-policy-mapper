@@ -257,5 +257,11 @@ def _read_line(sock: socket.socket) -> str:
         if not data:
             return b"".join(chunks).decode("utf-8", errors="ignore").strip()
         if data in {b"\n", b"\r"}:
+            # Telnet clients commonly terminate a line with CRLF. If the
+            # previous call consumed CR, the next call can see the leftover
+            # LF first. Ignore leading newline bytes so username/password and
+            # command reads stay aligned for both LF and CRLF clients.
+            if not chunks:
+                continue
             return b"".join(chunks).decode("utf-8", errors="ignore").strip()
         chunks.append(data)
