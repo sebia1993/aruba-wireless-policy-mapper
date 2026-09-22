@@ -1,2 +1,5 @@
---require-hashes
--r requirements-lock.txt
+streamlit==1.62.0
+pandas==3.0.5
+netmiko==4.7.0
+openpyxl==3.1.5
+paramiko==4.0.0
