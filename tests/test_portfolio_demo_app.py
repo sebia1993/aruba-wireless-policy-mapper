@@ -3,7 +3,7 @@ from pathlib import Path
 from streamlit.testing.v1 import AppTest
 
 
-APP_PATH = Path(__file__).parents[1] / "portfolio_demo_app.py"
+APP_PATH = Path(__file__).parents[1] / "portfolio_demo" / "app.py"
 
 
 def test_portfolio_demo_runs_real_offline_collection_pipeline():
