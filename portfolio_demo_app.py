@@ -17,7 +17,7 @@ from wlc_role_acl_collector.web_logic import (
     run_web_collection,
 )
 
-DEMO_FIXTURE = APP_ROOT / "tests" / "fixtures" / "sample_controller"
+DEMO_FIXTURE_ROOT = APP_ROOT / "tests" / "fixtures"
 
 st.set_page_config(page_title="WLC Role ACL Collector · Demo Mode", layout="wide")
 
@@ -25,14 +25,14 @@ st.set_page_config(page_title="WLC Role ACL Collector · Demo Mode", layout="wid
 def _demo_request() -> WebCollectionRequest:
     return WebCollectionRequest(
         host="192.0.2.10",
-        controller_name="DEMO-WLC",
+        controller_name="sample_controller",
         protocol="ssh",
         port=22,
         username="",
         password="",
         enable_password="",
         timeout=60,
-        offline_raw_dir=DEMO_FIXTURE,
+        offline_raw_dir=DEMO_FIXTURE_ROOT,
         export_local_role_networks=False,
     )
 
