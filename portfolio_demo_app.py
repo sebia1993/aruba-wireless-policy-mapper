@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 import streamlit as st
+
+APP_ROOT = Path(__file__).resolve().parent
+SRC_ROOT = APP_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 from wlc_role_acl_collector.web_logic import (
     WebCollectionRequest,
@@ -11,7 +17,6 @@ from wlc_role_acl_collector.web_logic import (
     run_web_collection,
 )
 
-APP_ROOT = Path(__file__).resolve().parent
 DEMO_FIXTURE = APP_ROOT / "tests" / "fixtures" / "sample_controller"
 
 st.set_page_config(page_title="WLC Role ACL Collector · Demo Mode", layout="wide")
