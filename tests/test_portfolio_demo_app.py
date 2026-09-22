@@ -30,7 +30,7 @@ def test_portfolio_demo_runs_real_collection_and_report_pipeline():
 
     result = app.session_state["demo_last_result"]
     assert result.success
-    assert result.summary["collection_status"] == "complete"
+    assert result.summary["collection_status"] == "completed"
     assert result.artifacts["html"].data
     assert result.artifacts["xlsx"].data
     assert result.artifacts["csv"].data
