@@ -395,7 +395,7 @@ def test_github_actions_validate_main_and_publish_versioned_release():
 
     assert "pull_request:" in pr_workflow
     assert "push:" in pr_workflow
-    assert "branches: [main]" in pr_workflow
+    assert "branches: [main, portfolio-demo-mode]" in pr_workflow
     assert "contents: read" in pr_workflow
     assert "--require-hashes -r requirements-lock.txt" in pr_workflow
     assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in pr_workflow
