@@ -22,7 +22,7 @@ def test_portfolio_demo_runs_real_collection_and_report_pipeline():
     app.button(key="demo_run").click().run(timeout=60)
 
     assert not app.exception
-    assert any("보고서 생성이 완료되었습니다." in item.value for item in app.success)
+    assert any("정상 완료" in item.value for item in app.success)
     metric_labels = {item.label: item.value for item in app.metric}
     assert int(metric_labels["SSID"]) >= 1
     assert int(metric_labels["Role"]) >= 1
@@ -50,7 +50,10 @@ def test_portfolio_demo_partial_collection_is_reported_by_real_health_logic():
     assert result.summary["collection_status"] == "partial"
     assert int(result.summary["failed_command_count"]) >= 1
     assert result.artifacts["html"].data
-    assert any("ERROR rights::guest-logon" in line for line in app.session_state["demo_last_logs"])
+    assert any(
+        "ERROR rights::guest-logon" in line
+        for line in app.session_state["demo_last_logs"]
+    )
 
 
 def test_portfolio_demo_auth_failure_uses_real_collector_failure_path():
@@ -65,3 +68,25 @@ def test_portfolio_demo_auth_failure_uses_real_collector_failure_path():
     assert result.summary["collection_status"] == "failed"
     assert result.summary["failure_stage"]
     assert any("RUN FAILED" in line for line in app.session_state["demo_last_logs"])
+
+
+def test_guided_result_rerun_preserves_report_and_run_identity():
+    app = _new_app()
+    app.button(key="demo_run").click().run(timeout=60)
+    assert not app.exception
+    token = app.session_state.guided_run_id
+    result = app.session_state.demo_last_result
+    assert any('data-phase="result"' in h.proto.body for h in app.get("html"))
+    app.run()
+    assert app.session_state.guided_run_id == token
+    assert app.session_state.demo_last_result is result
+    assert app.session_state.guide_events
+
+
+def test_missing_configuration_shows_failure_in_guided_view():
+    app = _new_app()
+    app.selectbox(key="demo_scenario").set_value("missing_config").run()
+    app.button(key="demo_run").click().run(timeout=60)
+    assert not app.exception
+    assert not app.session_state.demo_last_result.success
+    assert any('data-phase="error"' in h.proto.body for h in app.get("html"))
