@@ -3,12 +3,18 @@ from pathlib import Path
 import threading
 import tempfile
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 import pytest
 
 import wlc_role_acl_collector.web_logic as web_logic
 from wlc_role_acl_collector.collector import collect_from_offline_raw
-from wlc_role_acl_collector.models import CommandOutput, Controller
+from wlc_role_acl_collector.models import (
+    CollectionResult,
+    CommandOutput,
+    Controller,
+    ParsedController,
+    SsidRoleMapping,
+)
 from wlc_role_acl_collector.web_logic import (
     WebCollectionBusyError,
     WebCollectionRequest,
@@ -35,7 +41,15 @@ def test_run_web_collection_offline_returns_preview_and_downloads():
     )
 
     assert result.success is True
-    assert result.summary["ssid_count"] > 0
+    assert result.summary["ssid_count"] == 2
+    assert len(result.preview_rows) > result.summary["ssid_count"]
+    workbook = load_workbook(BytesIO(result.artifacts["xlsx"].data), read_only=True)
+    try:
+        overview = list(workbook["Overview"].values)
+        ssid_column = overview[0].index("ssid_count")
+        assert result.summary["ssid_count"] == overview[1][ssid_column]
+    finally:
+        workbook.close()
     assert result.summary["role_network_rows"] == 1
     assert result.preview_rows
     assert result.acl_preview_rows
@@ -45,6 +59,45 @@ def test_run_web_collection_offline_returns_preview_and_downloads():
     assert b"guest-logon" in result.artifacts["csv"].data
     assert result.artifacts["html"].data.startswith(b"<!doctype html>")
     assert any(event == "complete" for event, _payload in events)
+
+
+@pytest.mark.parametrize(
+    ("controller_ssids", "expected"),
+    [
+        ([[]], 0),
+        ([["GUEST-LAB", "GUEST-LAB"]], 1),
+        ([["GUEST-LAB", "GUEST-LAB", "CORP"]], 2),
+        ([["GUEST-LAB", "GUEST-LAB"], ["GUEST-LAB"]], 2),
+    ],
+)
+def test_web_summary_counts_unique_ssids_per_controller(controller_ssids, expected):
+    parsed = []
+    for index, ssids in enumerate(controller_ssids):
+        controller = Controller(name=f"sample_controller_{index}", host="192.0.2.10")
+        mappings = [
+            SsidRoleMapping(
+                controller=controller.name,
+                ap_group=f"sample-group-{row}",
+                virtual_ap="sample-vap",
+                ssid_profile="sample-ssid-profile",
+                ssid=ssid,
+                aaa_profile="sample-aaa",
+                role_type="initial-role" if row == 0 else "mac-default-role",
+                role="sample-role",
+                vlan="30",
+                forward_mode="tunnel",
+                access_summary="",
+            )
+            for row, ssid in enumerate(ssids)
+        ]
+        parsed.append(ParsedController(controller=controller, ssid_role_mappings=mappings))
+
+    summary = web_logic._build_success_summary(
+        CollectionResult(controller=parsed[0].controller), parsed, None
+    )
+
+    assert summary["ssid_count"] == expected
+    assert sum(len(item.ssid_role_mappings) for item in parsed) == sum(map(len, controller_ssids))
 
 
 def test_run_web_collection_rejects_concurrent_collection_for_same_wlc(monkeypatch):
