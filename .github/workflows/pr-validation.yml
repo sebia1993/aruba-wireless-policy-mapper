@@ -2,9 +2,9 @@ name: PR Validation
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, portfolio-demo-mode]
   push:
-    branches: [main]
+    branches: [main, portfolio-demo-mode]
 
 permissions:
   contents: read
@@ -69,3 +69,15 @@ jobs:
       - name: Verify combined Windows package
         shell: pwsh
         run: python .\tools\verify_combined_release_package.py --dist .\dist --smoke
+
+  public-demo:
+    name: Public demo scenarios
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r portfolio_demo/requirements.txt pytest
+      - run: python -m pytest tests/test_portfolio_demo_app.py -q
