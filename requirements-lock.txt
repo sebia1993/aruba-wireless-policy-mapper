@@ -943,9 +943,9 @@ narwhals==2.25.0 \
     --hash=sha256:1f0f403e8c7e4463cde9bfe78b12fdd809e3ae3dda6d9b2f802934fb9c7a6a8f \
     --hash=sha256:62c036c810662bf7820b7737077176313bc59350eeeefb808510f388c743e4b2
     # via altair
-netmiko==4.7.0 \
-    --hash=sha256:406684e45b3822e17efa0f8e376644995693ff40a750c297ccce0c58e873f29d \
-    --hash=sha256:94cf7bfe5daed1d058444ce1637e10177df22f903683a53d1fbee47553488c65
+netmiko==4.8.0 \
+    --hash=sha256:6264cf8afcbd9c10efb832bacabb9a89370452d522f6c20532d2ad0fefcbdd69 \
+    --hash=sha256:b4875b36604bcc7a72339f3b4d3091ce545ce0b4629f77f7844413b1c380d0e6
     # via wlc-role-acl-collector (pyproject.toml)
 ntc-templates==9.2.0 \
     --hash=sha256:79fef745d12b6dbdc1f7c00665327790adc91fd981199b0a9adb04f4b365cd97 \
@@ -1169,9 +1169,9 @@ pandas==3.0.5 \
     # via
     #   wlc-role-acl-collector (pyproject.toml)
     #   streamlit
-paramiko==4.0.0 \
-    --hash=sha256:0e20e00ac666503bf0b4eda3b6d833465a2b7aff2e2b3d79a8bba5ef144ee3b9 \
-    --hash=sha256:6a25f07b380cc9c9a88d2b920ad37167ac4667f8d9886ccebd8f90f654b5d69f
+paramiko==5.0.0 \
+    --hash=sha256:36763b5b95c2a0dcfdf1abc48e48156ee425b21efe2f0e787c2dd5a95c0e5e79 \
+    --hash=sha256:b7044611c30140d9a75261653210e2002977b71a0497ff3ba0d98d7edbf62f7c
     # via
     #   wlc-role-acl-collector (pyproject.toml)
     #   netmiko
