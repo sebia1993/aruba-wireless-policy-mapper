@@ -1,4 +1,7 @@
+from io import BytesIO
 from pathlib import Path
+
+from openpyxl import load_workbook
 
 from streamlit.testing.v1 import AppTest
 
@@ -24,7 +27,7 @@ def test_portfolio_demo_runs_real_collection_and_report_pipeline():
     assert not app.exception
     assert any("정상 완료" in item.value for item in app.success)
     metric_labels = {item.label: item.value for item in app.metric}
-    assert int(metric_labels["SSID"]) >= 1
+    assert int(metric_labels["SSID"]) == 1
     assert int(metric_labels["Role"]) >= 1
     assert int(metric_labels["ACL Rule"]) >= 1
 
@@ -34,6 +37,14 @@ def test_portfolio_demo_runs_real_collection_and_report_pipeline():
     assert result.artifacts["html"].data
     assert result.artifacts["xlsx"].data
     assert result.artifacts["csv"].data
+    assert len(result.preview_rows) == 2  # initial-role and mac-default-role
+    assert {row["ssid"] for row in result.preview_rows} == {"GUEST-LAB"}
+    workbook = load_workbook(BytesIO(result.artifacts["xlsx"].data), read_only=True)
+    try:
+        overview = list(workbook["Overview"].values)
+        assert overview[1][overview[0].index("ssid_count")] == result.summary["ssid_count"] == 1
+    finally:
+        workbook.close()
     assert any("CONNECT OK" in line for line in app.session_state["demo_last_logs"])
     assert any("REPORT READY" in line for line in app.session_state["demo_last_logs"])
 

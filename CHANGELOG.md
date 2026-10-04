@@ -6,6 +6,10 @@
 
 ## Unreleased
 
+- Web 요약의 SSID 수를 Role 매핑 행 수가 아닌 Controller별 고유 SSID 수로 계산해 HTML/Excel 요약과 일치시켰습니다.
+- README에 공개 Mock WLC 데모와 별도 소스 브랜치, 합성 데이터·실제 장비 접속 차단 경계를 명시했습니다.
+- 개발·Web 의존성 잠금 파일의 `urllib3`를 2.8.0으로 갱신했습니다.
+
 ## 0.2.0
 
 ### 접속 안전성
