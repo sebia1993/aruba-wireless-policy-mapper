@@ -287,7 +287,9 @@ def _build_success_summary(
     parsed: list[ParsedController],
     role_network_summary: RoleNetworkLoadSummary | None,
 ) -> dict[str, object]:
-    ssid_count = sum(len(item.ssid_role_mappings) for item in parsed)
+    # One SSID may have several default-role/AP-group mappings. Match the
+    # report's per-controller unique SSID count rather than counting those rows.
+    ssid_count = sum(len({mapping.ssid for mapping in item.ssid_role_mappings}) for item in parsed)
     role_count = sum(len(item.role_policies) for item in parsed)
     acl_rule_count = sum(len(policy.rules) for item in parsed for policy in item.role_policies.values())
     alias_count = sum(len(item.netdestination_aliases) for item in parsed)
