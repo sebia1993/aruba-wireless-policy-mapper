@@ -70,7 +70,9 @@ def collect_from_controller(
         if _cancel_requested(cancel_event):
             return _mark_cancelled(result, progress_callback)
         _emit(progress_callback, "connect", host=controller.host, protocol=controller.protocol, port=controller.port)
-        connection = _open_connection(params, protocol=controller.protocol)
+        connection = _open_connection(
+            params, protocol=controller.protocol, deadline=deadline, cancel_event=cancel_event
+        )
         _emit(progress_callback, "connect_done", host=controller.host)
         if _cancel_requested(cancel_event):
             return _mark_cancelled(result, progress_callback)
@@ -296,6 +298,12 @@ def collect_from_controller(
                 return _mark_cancelled(result, progress_callback)
         _emit(progress_callback, "complete", command_count=len(result.commands))
     except Exception as exc:
+        if _cancel_requested(cancel_event):
+            return _mark_cancelled(result, progress_callback)
+        from .ssh_connection import SSHSetupDeadlineExceeded
+
+        if isinstance(exc, SSHSetupDeadlineExceeded) and time.monotonic() >= deadline:
+            return _mark_duration_limit(result, progress_callback, max_duration_seconds)
         result.commands.append(
             CommandOutput(
                 command_id="connect",
@@ -486,12 +494,17 @@ def _build_connect_params(
     return params
 
 
-def _open_connection(params: dict, *, protocol: str):
+def _open_connection(
+    params: dict, *, protocol: str, deadline: float | None = None,
+    cancel_event: threading.Event | None = None,
+):
     try:
         if protocol.lower() == "ssh":
             from .ssh_connection import connect_with_pinned_host_key
 
-            return connect_with_pinned_host_key(**dict(params))
+            return connect_with_pinned_host_key(
+                **dict(params), _deadline=deadline, _cancel_event=cancel_event
+            )
         from netmiko import ConnectHandler
 
         return ConnectHandler(**params)

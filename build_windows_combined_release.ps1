@@ -3,56 +3,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-Set-Location $PSScriptRoot
-
-function Wait-ForReadableFile {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path,
-        [int]$Attempts = 20,
-        [int]$DelayMilliseconds = 500
-    )
-
-    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
-        try {
-            $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
-            $stream.Close()
-            return
-        }
-        catch {
-            if ($attempt -eq $Attempts) {
-                throw "File is not ready for reading: $Path`n$($_.Exception.Message)"
-            }
-            Start-Sleep -Milliseconds $DelayMilliseconds
-        }
-    }
-}
-
-function Compress-ArchiveWithRetry {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path,
-        [Parameter(Mandatory = $true)]
-        [string]$DestinationPath,
-        [int]$Attempts = 5
-    )
-
-    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
-        try {
-            if (Test-Path $DestinationPath) {
-                Remove-Item -LiteralPath $DestinationPath -Force
-            }
-            Compress-Archive -Path $Path -DestinationPath $DestinationPath -Force -ErrorAction Stop
-            return
-        }
-        catch {
-            if ($attempt -eq $Attempts) {
-                throw
-            }
-            Start-Sleep -Seconds 1
-        }
-    }
-}
+Set-Location -LiteralPath $PSScriptRoot
+. (Join-Path $PSScriptRoot "tools\windows_packaging.ps1")
 
 $version = (& $PythonExe -c "from wlc_role_acl_collector import __version__; print(__version__)").Trim()
 if ($LASTEXITCODE -ne 0 -or -not $version) {
@@ -68,40 +20,34 @@ $releaseRoot = Join-Path $buildDir "release"
 $combinedZip = Join-Path $distDir "WlcRoleAclCollectorWindows_v${version}.zip"
 $readmeTemplate = Join-Path $PSScriptRoot "packaging\combined_release\README_START_HERE_KO.txt"
 
-$guiZip = Get-ChildItem -Path $distDir -Filter "WlcRoleAclCollectorGUI_*.zip" |
-    Sort-Object LastWriteTime -Descending |
-    Select-Object -First 1
-if (-not $guiZip) {
-    throw "No Windows GUI/CLI ZIP was found in dist."
-}
+$packages = Get-CurrentReleasePackages -DistDirectory $distDir -Version $version
+$guiZip = $packages.Gui
+$webZip = $packages.Web
 
-$webZip = Get-ChildItem -Path $distDir -Filter "WlcRoleAclCollectorWeb_*.zip" |
-    Sort-Object LastWriteTime -Descending |
-    Select-Object -First 1
-if (-not $webZip) {
-    throw "No Streamlit portable ZIP was found in dist."
-}
+[System.IO.Directory]::CreateDirectory($guiExtractDir) | Out-Null
+[System.IO.Directory]::CreateDirectory($webExtractDir) | Out-Null
+[System.IO.Directory]::CreateDirectory((Join-Path $releaseRoot "gui")) | Out-Null
+[System.IO.Directory]::CreateDirectory((Join-Path $releaseRoot "web")) | Out-Null
 
-New-Item -ItemType Directory -Force -Path $guiExtractDir | Out-Null
-New-Item -ItemType Directory -Force -Path $webExtractDir | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $releaseRoot "gui") | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $releaseRoot "web") | Out-Null
+Write-Host "Extracting GUI/CLI ZIP: $guiZip"
+Expand-Archive -LiteralPath $guiZip -DestinationPath $guiExtractDir -Force
 
-Write-Host "Extracting GUI/CLI ZIP: $($guiZip.FullName)"
-Expand-Archive -LiteralPath $guiZip.FullName -DestinationPath $guiExtractDir -Force
-
-Write-Host "Extracting Streamlit portable ZIP: $($webZip.FullName)"
-Expand-Archive -LiteralPath $webZip.FullName -DestinationPath $webExtractDir -Force
+Write-Host "Extracting Streamlit portable ZIP: $webZip"
+Expand-Archive -LiteralPath $webZip -DestinationPath $webExtractDir -Force
 
 Copy-Item -LiteralPath $readmeTemplate -Destination (Join-Path $releaseRoot "README_START_HERE_KO.txt") -Force
-Copy-Item -Path (Join-Path $guiExtractDir "*") -Destination (Join-Path $releaseRoot "gui") -Recurse -Force
-Copy-Item -Path (Join-Path $webExtractDir "*") -Destination (Join-Path $releaseRoot "web") -Recurse -Force
+Get-ChildItem -LiteralPath $guiExtractDir | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $releaseRoot "gui") -Recurse -Force
+}
+Get-ChildItem -LiteralPath $webExtractDir | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $releaseRoot "web") -Recurse -Force
+}
 
 Write-Host "Creating combined Windows release ZIP..."
-Get-ChildItem -Path $releaseRoot -Recurse -File | ForEach-Object {
+Get-ChildItem -LiteralPath $releaseRoot -Recurse -File | ForEach-Object {
     Wait-ForReadableFile -Path $_.FullName
 }
-Compress-ArchiveWithRetry -Path (Join-Path $releaseRoot "*") -DestinationPath $combinedZip
+Compress-ArchiveWithRetry -DirectoryPath $releaseRoot -DestinationPath $combinedZip
 
 Write-Host ""
 Write-Host "Combined release build completed."

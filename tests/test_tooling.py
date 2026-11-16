@@ -151,8 +151,6 @@ def test_combined_release_build_contract():
     )
 
     for expected in (
-        "WlcRoleAclCollectorGUI_*.zip",
-        "WlcRoleAclCollectorWeb_*.zip",
         "WlcRoleAclCollectorWindows_v${version}.zip",
         "README_START_HERE_KO.txt",
         '"gui"',

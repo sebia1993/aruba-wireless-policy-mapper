@@ -31,9 +31,12 @@ def main() -> None:
     if submitted:
         _run_collection(request)
 
+    failed_result = st.session_state.get("last_failed_result")
+    if isinstance(failed_result, WebCollectionResult):
+        _render_result(failed_result)
     result = st.session_state.get("last_result")
     if isinstance(result, WebCollectionResult):
-        _render_result(result)
+        _render_result(result, previous=result.success and bool(st.session_state.get("last_attempt_failed")))
 
 
 def _render_sidebar_notice() -> None:
@@ -125,7 +128,12 @@ def _render_input_form() -> tuple[bool, WebCollectionRequest]:
 
 
 def _run_collection(request: WebCollectionRequest) -> None:
-    st.session_state.pop("last_result", None)
+    previous = st.session_state.get("last_result")
+    preserve_previous = isinstance(previous, WebCollectionResult) and previous.success
+    if not preserve_previous:
+        st.session_state.pop("last_result", None)
+    st.session_state.pop("last_failed_result", None)
+    st.session_state["last_attempt_failed"] = True
     status_box = st.empty()
     progress_bar = st.progress(0)
     log_box = st.empty()
@@ -154,7 +162,11 @@ def _run_collection(request: WebCollectionRequest) -> None:
         with st.spinner("WLC 정보를 수집하고 보고서를 생성하는 중입니다."):
             result = run_web_collection(request, progress_callback=on_progress)
         progress_bar.progress(100)
-        st.session_state["last_result"] = result
+        if result.success or not preserve_previous:
+            st.session_state["last_result"] = result
+        else:
+            st.session_state["last_failed_result"] = result
+        st.session_state["last_attempt_failed"] = not result.success
         if result.success:
             if result.summary.get("collection_status") == "partial":
                 status_box.warning("보고서는 생성되었지만 일부 수집 명령이 실패했습니다.")
@@ -181,9 +193,12 @@ def _run_collection(request: WebCollectionRequest) -> None:
         log_box.code("\n".join(logs[-80:]), language="text")
 
 
-def _render_result(result: WebCollectionResult) -> None:
+def _render_result(result: WebCollectionResult, *, previous: bool = False) -> None:
     st.divider()
-    st.subheader("결과 요약")
+    st.subheader("이전 성공 결과" if previous else "결과 요약")
+    if previous:
+        st.warning("이번 수집은 완료되지 않았습니다. 아래는 이전에 생성한 결과이며 계속 내려받을 수 있습니다.")
+        st.caption(f"이전 결과 실행 ID: {result.run_id}")
     if result.success:
         summary = result.summary
         if summary.get("collection_status") == "partial":

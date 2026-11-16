@@ -8,7 +8,7 @@ import pytest
 from openpyxl import load_workbook
 
 from wlc_role_acl_collector.collector import collect_from_offline_raw
-from wlc_role_acl_collector.models import CommandOutput, Controller, RoleNetworkDefinition
+from wlc_role_acl_collector.models import CollectionResult, CommandOutput, Controller, RoleNetworkDefinition
 from wlc_role_acl_collector.report import (
     _access_check_script,
     _acl_rows_html,
@@ -45,6 +45,77 @@ def test_create_run_dir_adds_safe_label_and_collision_suffix(monkeypatch, tmp_pa
     assert second.name == "20260630_120000_000001_inside_wlc_001"
     assert first.is_dir()
     assert second.is_dir()
+
+
+@pytest.mark.parametrize(
+    ("first_controller", "second_controller"),
+    [
+        (Controller("same", "192.0.2.10"), Controller("same", "192.0.2.11")),
+        (Controller("a/b", "192.0.2.10"), Controller("a?b", "192.0.2.11")),
+        (Controller("WLC", "192.0.2.10"), Controller("wlc", "192.0.2.11")),
+        (Controller("same", "192.0.2.10"), Controller("same", "192.0.2.10", port=2222)),
+    ],
+)
+def test_raw_files_preserve_colliding_controller_evidence(tmp_path, first_controller, second_controller):
+    first = CollectionResult(first_controller, [CommandOutput("sample", "show sample", output="FIRST")])
+    second = CollectionResult(second_controller, [CommandOutput("sample", "show sample", output="SECOND")])
+
+    first_path = write_raw_result(first, tmp_path)
+    second_path = write_raw_result(second, tmp_path)
+
+    assert first_path.name.casefold() != second_path.name.casefold()
+    assert "FIRST" in first_path.read_text(encoding="utf-8")
+    assert "SECOND" in second_path.read_text(encoding="utf-8")
+    first.commands.append(CommandOutput("parse_runtime", "parse", success=False, error="synthetic parse error"))
+    assert write_raw_result(first, tmp_path) == first_path
+    assert "synthetic parse error" in first_path.read_text(encoding="utf-8")
+    assert "SECOND" in second_path.read_text(encoding="utf-8")
+    repeated = CollectionResult(first_controller, [CommandOutput("sample", "show sample", output="UPDATED")])
+    assert write_raw_result(repeated, tmp_path) == first_path
+    assert len(list(tmp_path.glob("*.txt"))) == 2
+
+
+def test_raw_file_does_not_overwrite_unidentified_existing_evidence(tmp_path):
+    previous = tmp_path / "sample.txt"
+    previous.write_text("previous evidence without an identity header", encoding="utf-8")
+    result = CollectionResult(Controller("sample", "192.0.2.10"), [CommandOutput("sample", "show sample", output="NEW")])
+
+    current = write_raw_result(result, tmp_path)
+
+    assert current != previous
+    assert previous.read_text(encoding="utf-8") == "previous evidence without an identity header"
+    assert "NEW" in current.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("existing_reports", [False, True])
+def test_report_completion_status_failure_rolls_back_artifacts(monkeypatch, tmp_path, existing_reports):
+    import os
+
+    result = collect_from_offline_raw(Controller("sample_controller", "192.0.2.10"), Path(__file__).parent / "fixtures")
+    parsed = build_parsed_controllers([result])
+    artifacts = [tmp_path / "ssid_role_acl_report.xlsx", tmp_path / "ssid_role_acl_report.html"]
+    if existing_reports:
+        for artifact in artifacts:
+            artifact.write_bytes(b"previous completed artifact")
+    real_replace = os.replace
+
+    def deny_completed_status(source, destination):
+        if Path(destination).name == "report_status.json":
+            if json.loads(Path(source).read_text(encoding="utf-8"))["status"] == "completed":
+                raise PermissionError("synthetic completed-status lock")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", deny_completed_status)
+    with pytest.raises(PermissionError, match="completed-status lock"):
+        write_reports(parsed_controllers=parsed, collection_results=[result], output_dir=tmp_path)
+
+    for artifact in artifacts:
+        if existing_reports:
+            assert artifact.read_bytes() == b"previous completed artifact"
+        else:
+            assert not artifact.exists()
+    assert json.loads((tmp_path / "report_status.json").read_text(encoding="utf-8"))["status"] == "failed"
+    assert not list(tmp_path.glob(".*.staging.*"))
 
 
 def test_write_excel_and_html_report(tmp_path):

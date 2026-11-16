@@ -133,3 +133,182 @@ test('restoring a different draft at the same revision invalidates the review fi
   assert.match(env.window.document.getElementById('ann-review-button').textContent,/0 Role/);
   env.close();
 });
+
+function deferredFile(env, mode='open') {
+  let resolve, reject;
+  const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});
+  env.window.document.getElementById(mode==='open'?'ann-open':'ann-reuse').click();
+  const input=env.window.document.getElementById('ann-file');
+  Object.defineProperty(input,'files',{value:[{size:100,text:()=>promise}],configurable:true});
+  input.dispatchEvent(new env.window.Event('change',{bubbles:true}));
+  return {resolve:p=>resolve(JSON.stringify(p)),reject};
+}
+const flushReads=()=>new Promise(resolve=>setImmediate(resolve));
+function unloadBlocked(env) {
+  const event=new env.window.Event('beforeunload',{cancelable:true});
+  env.window.dispatchEvent(event);
+  return event.defaultPrevented;
+}
+
+test('latest selected file wins when reads finish out of order', async () => {
+  const env=mount();
+  try {
+    const first=deferredFile(env),second=deferredFile(env);
+    const a=fixture(),b=fixture();a.projectId='first-file';b.projectId='second-file';
+    second.resolve(b);await flushReads();first.resolve(a);await flushReads();
+    assert.equal(env.app.getProject().projectId,'second-file');
+  } finally {env.close();}
+});
+
+test('pending reuse cannot mutate or display controller mapping in a newly opened project', async () => {
+  for (const unknown of [false,true]) {
+    const env=mount();
+    try {
+      const read=deferredFile(env,'reuse'),next=fixture(),previous=fixture();
+      next.projectId='new-work';next.annotations.rules={};
+      previous.snapshot.controllers[0].identityKnown=!unknown;
+      assert.equal(env.app.openText(JSON.stringify(next)),true);
+      read.resolve(previous);await flushReads();
+      assert.deepEqual(env.app.getProject(),next);
+      assert.equal(env.window.document.getElementById('ann-import-map').hidden,true);
+    } finally {env.close();}
+  }
+});
+
+test('stale read failures do not replace a newer success status', async () => {
+  const env=mount();
+  try {
+    const first=deferredFile(env),second=deferredFile(env),next=fixture();next.projectId='latest';
+    second.resolve(next);await flushReads();
+    const status=env.window.document.getElementById('ann-status').textContent;
+    first.reject(Error('old failure'));await flushReads();
+    assert.equal(env.window.document.getElementById('ann-status').textContent,status);
+  } finally {env.close();}
+});
+
+test('restoring a different saved-revision draft warns on unload and replacement until downloaded', () => {
+  for (const save of ['saveProject','saveHtml']) {
+    const base=fixture(),draft=fixture();draft.revision=1;draft.annotations.rules['rule-a'].text='recovered note';
+    const data=new Map(),storage={setItem:(k,v)=>data.set(k,v),getItem:k=>data.get(k),removeItem:k=>data.delete(k)};
+    Editor.saveRecovery(storage,base,draft);
+    const env=mount(base,storage);
+    try {
+      const input=env.window.document.querySelector('[data-note-id="rule-a"]');
+      input.value='different revision one';input.dispatchEvent(new env.window.Event('input',{bubbles:true}));
+      assert.equal(env.app[save](),true);assert.equal(unloadBlocked(env),false);
+      assert.equal(env.app.restoreDraft(),true);assert.equal(unloadBlocked(env),true);
+      let confirmations=0;env.window.confirm=()=>{confirmations++;return false;};
+      assert.equal(env.app.openText(JSON.stringify(fixture())),false);assert.equal(confirmations,1);
+      assert.equal(env.app.getProject().annotations.rules['rule-a'].text,'recovered note');
+      assert.equal(env.app[save](),true);assert.equal(unloadBlocked(env),false);
+    } finally {env.close();}
+  }
+});
+
+function nearTextLimit(p=fixture(), headroom=100) {
+  p.snapshot.roles.push({...p.snapshot.roles[0],id:'role-padding',name:'SYNTHETIC-PADDING',bindingRaw:[]});
+  const padding=p.snapshot.roles[1].bindingRaw;
+  for(let i=0;i<20;i++)padding.push('');
+  // Build a valid synthetic document with the requested amount of aggregate headroom.
+  const size=value=>typeof value==='string'?value.length:Array.isArray(value)?value.reduce((n,v)=>n+size(v),0):value&&typeof value==='object'?Object.entries(value).reduce((n,[k,v])=>n+k.length+size(v),0):0;
+  let remaining=20000000-headroom-size(p);
+  for(let i=0;i<padding.length;i++){padding[i]='p'.repeat(Math.min(1000000,remaining));remaining-=padding[i].length;}
+  return Core.validateProject(p);
+}
+
+test('aggregate text-limit rejection preserves project, input, recovery and download ability', () => {
+  const p=nearTextLimit(),data=new Map(),storage={getItem:k=>data.get(k),setItem:(k,v)=>data.set(k,v)};
+  const env=mount(p,storage),errors=[];
+  env.window.addEventListener('error',event=>{errors.push(event.error);event.preventDefault();});
+  try {
+    const input=env.window.document.querySelector('[data-note-id="rule-a"]');
+    input.value='x'.repeat(300);input.dispatchEvent(new env.window.Event('input',{bubbles:true}));
+    assert.deepEqual(env.app.getProject(),p);
+    assert.equal(errors.length,0);assert.equal(input.value,p.annotations.rules['rule-a'].text);
+    assert.equal(data.size,0);assert.equal(unloadBlocked(env),false);
+    assert.equal(env.window.document.getElementById('ann-status').dataset.state,'error');
+    assert.equal(env.app.saveProject(),true);assert.equal(env.downloads(),1);
+    input.value='ok';input.dispatchEvent(new env.window.Event('input',{bubbles:true}));
+    assert.equal(env.app.getProject().annotations.rules['rule-a'].text,'ok');
+    assert.equal(data.size,1);assert.equal(unloadBlocked(env),true);
+  } finally {env.close();}
+});
+
+
+test('status, template and orphan-link edits reject aggregate growth without partial changes', () => {
+  for(const action of ['status','template','link']) {
+    const base=fixture();
+    base.annotations.rules['rule-a'].status='unreviewed';
+    base.annotations.rules['rule-a'].confirmedAt='';
+    if(action==='link') base.unresolvedAnnotations.push({id:'orphan-a',kind:'rule',controllerId:'controller-a',controllerName:'WLC-A',roleName:'EMPLOYEE',acl:'EMPLOYEE',raw:'any any any permit',annotation:{...base.annotations.rules['rule-a'],text:'previous note'},reason:'synthetic conflict',candidateIds:['rule-a'],sourceProjectId:'previous',sourceSnapshotId:'previous-snapshot'});
+    const p=nearTextLimit(base,1),env=mount(p);
+    try {
+      if(action==='status') {
+        const select=env.window.document.querySelector('[data-status-id="rule-a"]');
+        select.value='reviewed';select.dispatchEvent(new env.window.Event('change',{bubbles:true}));
+        assert.equal(select.value,'unreviewed');
+      } else if(action==='template') {
+        env.window.document.querySelector('[data-template-id="role-a"]').click();
+        assert.equal(env.window.document.querySelector('[data-note-id="role-a"]').value,'');
+      } else {
+        const select=env.window.document.querySelector('[data-link-target="orphan-a"]');
+        select.focus();select.value='rule-a';
+        env.window.document.querySelector('[data-link-orphan="orphan-a"]').click();
+      }
+      assert.deepEqual(env.app.getProject(),p);
+      assert.equal(unloadBlocked(env),false);
+      assert.equal(env.window.document.getElementById('ann-status').dataset.state,'error');
+      assert.equal(env.app.saveProject(),true);
+    } finally {env.close();}
+  }
+});
+
+test('manual orphan linking commits valid notes, preserves conflicts and warns until saved', () => {
+  const p=fixture();
+  p.unresolvedAnnotations.push({id:'orphan-a',kind:'rule',controllerId:'controller-a',controllerName:'WLC-A',roleName:'EMPLOYEE',acl:'EMPLOYEE',raw:'any any any permit',annotation:{...p.annotations.rules['rule-a'],text:'previous note'},reason:'synthetic conflict',candidateIds:['rule-a'],sourceProjectId:'previous',sourceSnapshotId:'previous-snapshot'});
+  const env=mount(p);
+  try {
+    const select=env.window.document.querySelector('[data-link-target="orphan-a"]');
+    select.focus();select.value='rule-a';env.window.document.querySelector('[data-link-orphan="orphan-a"]').click();
+    const next=Core.validateProject(env.app.getProject());
+    assert.equal(next.annotations.rules['rule-a'].text,'previous note');
+    assert.equal(next.annotations.rules['rule-a'].status,'needs_review');
+    assert.equal(next.unresolvedAnnotations.length,1);
+    assert.equal(next.unresolvedAnnotations[0].annotation.text,p.annotations.rules['rule-a'].text);
+    assert.equal(next.changes.length,1);assert.equal(next.revision,1);
+    assert.equal(unloadBlocked(env),true);assert.equal(env.app.saveProject(),true);assert.equal(unloadBlocked(env),false);
+  } finally {env.close();}
+});
+
+function collidingRecordIds() {
+  const p=fixture(),note=p.annotations.rules['rule-a'];
+  p.snapshot.roles[0].id='shared';p.snapshot.rules[0].roleId='shared';p.snapshot.rules[0].id='shared';
+  p.annotations.roles={shared:{...note,text:'role note'}};
+  p.annotations.rules={shared:{...note,text:'rule note'}};
+  return p;
+}
+
+test('rejected edits restore the correct kind when role and rule IDs coincide', () => {
+  const p=collidingRecordIds();p.revision=Number.MAX_SAFE_INTEGER;
+  const env=mount(p);
+  try {
+    const role=env.window.document.querySelector('[data-note-kind="roles"][data-note-id="shared"]');
+    const rule=env.window.document.querySelector('[data-note-kind="rules"][data-note-id="shared"]');
+    rule.value='rejected rule edit';rule.dispatchEvent(new env.window.Event('input',{bubbles:true}));
+    assert.equal(role.value,'role note');assert.equal(rule.value,'rule note');
+    assert.deepEqual(env.app.getProject(),p);assert.equal(unloadBlocked(env),false);
+    assert.equal(env.window.document.getElementById('ann-status').dataset.state,'error');
+  } finally {env.close();}
+});
+
+test('successful edits update only the matching kind status when IDs coincide', () => {
+  const env=mount(collidingRecordIds());
+  try {
+    const rule=env.window.document.querySelector('[data-note-kind="rules"][data-note-id="shared"]');
+    rule.value='updated rule';rule.dispatchEvent(new env.window.Event('input',{bubbles:true}));
+    assert.equal(env.window.document.querySelector('[data-status-kind="roles"][data-status-id="shared"]').value,'reviewed');
+    assert.equal(env.window.document.querySelector('[data-status-kind="rules"][data-status-id="shared"]').value,'unreviewed');
+    assert.equal(env.app.getProject().annotations.roles.shared.text,'role note');
+    assert.equal(env.app.getProject().annotations.rules.shared.text,'updated rule');
+  } finally {env.close();}
+});

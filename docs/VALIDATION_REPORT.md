@@ -66,11 +66,22 @@
 
 ## 3. 자동 검증
 
+### v0.3.1 안정화 회귀 범위
+
+- `tests/test_ssh_connection.py`, `tests/test_hostkeys.py`, `tests/test_collector.py`: 합성 SSH 채널·PTY·셸 무응답, 시간 제한·취소 후 소켓/스레드 종료, 초기화 실패 정리, 프로세스 간 서버 키 승인 경합과 변경 키 거절.
+- `tests/test_report.py`, `tests/test_atomic_io.py`: 동명·정규화·대소문자·포트별 원본 파일 보존, 완료 상태 교체 실패 시 보고서 복원, 임시 파일 잠금과 원래 오류 보존.
+- `tests/test_streamlit_app.py`: 실패한 재수집 뒤 이전 다운로드 유지·표시, 성공한 재수집의 결과 교체.
+- `tests/js/annotation_editor.test.js`: 파일 읽기 완료 순서 역전·오래된 오류, 같은 리비전 복구의 미저장 판단, 용량 제한을 넘는 편집의 원자적 거절, Role/규칙 ID가 같을 때 올바른 입력 제어.
+- `tests/test_role_networks.py`: 헤더 선검증과 행 단위 처리를 포함한 기존 Excel 입력 계약.
+- `tests/test_windows_packaging.py`는 Windows에서 `tools/test_windows_packaging.ps1`을 실행합니다. 실제 빌드 스크립트를 합성 패키지·다운로드·복사 오류로 실행하여 정확한 버전 선택, 손상 캐시 복구, 제한된 재시도, 공백·대괄호 경로와 ZIP 구조를 확인합니다. Linux에서는 이 Windows 전용 항목이 명시적으로 제외되며 PR/Release의 Windows pytest에서 실행됩니다.
+
+이 회귀들은 기존 기능을 유지하는 오류 경로 보강의 증거입니다. 실제 WLC 장애 발생 빈도나 사용자 Windows·인쇄 환경의 수동 검증 결과로 해석하지 않습니다.
+
 기본 테스트:
 
 ```powershell
-python -m pytest
 npm ci --ignore-scripts
+python -m pytest
 npm test
 ```
 

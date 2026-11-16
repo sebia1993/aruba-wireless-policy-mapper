@@ -8,6 +8,8 @@ import hmac
 import os
 import socket
 import tempfile
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -119,30 +121,74 @@ def approve_unknown_host_key(
     """검토한 최초 키만 추가하며 기존 키는 자동 교체하지 않습니다."""
 
     path = known_hosts_path or default_known_hosts_path()
-    state = check_host_key(observation, known_hosts_path=path)
-    if state == "trusted":
-        return path
-    if state == "changed":
-        raise RuntimeError("승인된 SSH 서버 키와 현재 키가 달라 저장을 차단했습니다.")
-
-    host_keys = _load_host_keys(path)
-    host_keys.add(observation.lookup_name, observation.key_type, observation.key)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp_name: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as handle:
-            temp_name = handle.name
-        host_keys.save(temp_name)
-        Path(temp_name).replace(path)
-    finally:
-        if temp_name:
-            Path(temp_name).unlink(missing_ok=True)
+    # The lock is a stable sidecar: locking the replaced known_hosts inode would
+    # allow a second writer to lock a different file after atomic publication.
+    with _host_keys_update_lock(path):
+        host_keys = _load_host_keys(path)
+        entry = host_keys.lookup(observation.lookup_name)
+        if entry:
+            if any(hmac.compare_digest(key.asbytes(), observation.key.asbytes()) for key in entry.values()):
+                return path
+            raise RuntimeError("승인된 SSH 서버 키와 현재 키가 달라 저장을 차단했습니다.")
+        host_keys.add(observation.lookup_name, observation.key_type, observation.key)
+        temp_name: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=path.parent,
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                temp_name = handle.name
+            host_keys.save(temp_name)
+            Path(temp_name).replace(path)
+        finally:
+            if temp_name:
+                Path(temp_name).unlink(missing_ok=True)
     return path
+
+
+@contextmanager
+def _host_keys_update_lock(path: Path):
+    """Serialize approval transactions across threads/processes on Windows/POSIX.
+
+    Keep the sidecar after unlocking; unlinking it would split lock ownership
+    between a waiting process and the next process that creates the file.
+    """
+    resolved_path = path.resolve()
+    lock_path = resolved_path.with_name(resolved_path.name + ".lock")
+    with lock_path.open("a+b") as handle:
+        if os.name == "nt":
+            import errno
+            import msvcrt
+
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"\0")
+                handle.flush()
+            while True:
+                handle.seek(0)
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError as exc:
+                    if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                        raise
+                    time.sleep(0.05)
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def trust_host_key_interactive(

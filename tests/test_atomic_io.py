@@ -32,6 +32,44 @@ def test_atomic_output_path_keeps_existing_file_when_writer_fails(tmp_path):
     assert not list(tmp_path.glob(".*.tmp*"))
 
 
+def test_atomic_cleanup_failure_preserves_original_write_error(monkeypatch, tmp_path):
+    real_unlink = Path.unlink
+
+    def deny_temporary_cleanup(path, *args, **kwargs):
+        if ".tmp" in path.name:
+            raise PermissionError("synthetic cleanup lock")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", deny_temporary_cleanup)
+    with pytest.raises(RuntimeError, match="original write failed") as caught:
+        with atomic_output_path(tmp_path / "result.txt") as temporary:
+            temporary.write_text("partial", encoding="utf-8")
+            raise RuntimeError("original write failed")
+
+    assert any("cleanup" in note for note in caught.value.__notes__)
+    assert not (tmp_path / "result.txt").exists()
+
+
+def test_backup_cleanup_lock_does_not_report_successful_commit_as_failed(monkeypatch, tmp_path, caplog):
+    destination = tmp_path / "result.txt"
+    staging = tmp_path / ".result.staging.txt"
+    destination.write_text("old", encoding="utf-8")
+    staging.write_text("new", encoding="utf-8")
+    real_unlink = Path.unlink
+
+    def deny_backup_cleanup(path, *args, **kwargs):
+        if ".backup" in path.name:
+            raise PermissionError("synthetic backup lock")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", deny_backup_cleanup)
+    commit_staged_files(((staging, destination),), transaction_id="synthetic")
+
+    assert destination.read_text(encoding="utf-8") == "new"
+    assert list(tmp_path.glob(".*.backup.*"))[0].read_text(encoding="utf-8") == "old"
+    assert "cleanup" in caplog.text.lower()
+
+
 def test_commit_staged_files_rolls_back_first_replacement_when_second_fails(monkeypatch, tmp_path):
     first = tmp_path / "first.txt"
     second = tmp_path / "second.txt"

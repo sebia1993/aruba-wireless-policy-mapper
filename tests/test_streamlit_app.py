@@ -4,9 +4,70 @@ import runpy
 import pytest
 
 from streamlit.testing.v1 import AppTest
+from wlc_role_acl_collector.web_logic import WebArtifact, WebCollectionResult
 
 
 APP_PATH = Path(__file__).parents[1] / "app.py"
+
+
+def _successful_web_result(run_id):
+    return WebCollectionResult(
+        success=True, run_id=run_id, summary={}, preview_rows=[], acl_preview_rows=[],
+        artifacts={key: WebArtifact(f"{run_id}.{key}", f"{run_id}-{key}".encode(), "application/octet-stream")
+                   for key in ("xlsx", "csv", "html")},
+    )
+
+
+@pytest.mark.parametrize("failure_kind", ["invalid", "busy", "exception", "failed_result"])
+def test_streamlit_failed_retry_retains_previous_downloads(monkeypatch, failure_kind):
+    from wlc_role_acl_collector import web_logic
+
+    previous = _successful_web_result("previous-success")
+    failed = WebCollectionResult(False, "failed-attempt", {}, [], [], error="synthetic failure")
+    if failure_kind != "invalid":
+        def fail_collection(*_args, **_kwargs):
+            if failure_kind == "busy":
+                raise web_logic.WebCollectionBusyError("synthetic target busy")
+            if failure_kind == "exception":
+                raise OSError("synthetic collection failure")
+            return failed
+        monkeypatch.setattr(web_logic, "run_web_collection", fail_collection)
+
+    app = AppTest.from_file(str(APP_PATH))
+    app.session_state["last_result"] = previous
+    app.run(timeout=20)
+    next(item for item in app.text_input if item.label == "WLC IP").set_value("https://192.0.2.10" if failure_kind == "invalid" else "192.0.2.10")
+    next(item for item in app.text_input if item.label == "장비 ID").set_value("sample")
+    next(item for item in app.text_input if item.label == "장비 PW").set_value("synthetic")
+    app.button[0].click().run(timeout=20)
+
+    assert not app.exception
+    assert "last_result" in app.session_state
+    assert app.session_state["last_result"].artifacts == previous.artifacts
+    assert any("이전 성공 결과" in item.value for item in app.subheader)
+    assert any("previous-success" in item.value for item in app.caption)
+    assert len(app.get("download_button")) == 3
+    if failure_kind == "failed_result":
+        assert any("synthetic failure" in item.value for item in app.error)
+    app.run(timeout=20)
+    assert any("이전 성공 결과" in item.value for item in app.subheader)
+
+
+def test_streamlit_successful_retry_replaces_previous_results(monkeypatch):
+    from wlc_role_acl_collector import web_logic
+
+    current = _successful_web_result("new-success")
+    monkeypatch.setattr(web_logic, "run_web_collection", lambda *_args, **_kwargs: current)
+    app = AppTest.from_file(str(APP_PATH))
+    app.session_state["last_result"] = _successful_web_result("old-success")
+    app.session_state["last_attempt_failed"] = True
+    app.run(timeout=20)
+    app.button[0].click().run(timeout=20)
+
+    assert not app.exception
+    assert app.session_state["last_result"].run_id == "new-success"
+    assert not any("이전 성공 결과" in item.value for item in app.subheader)
+    assert not app.session_state["last_attempt_failed"]
 
 
 def test_streamlit_connection_labels_and_protocol_default_ports():

@@ -40,7 +40,7 @@ def _install_fake_netmiko(monkeypatch, connection):
     monkeypatch.setattr(
         collector,
         "_open_connection",
-        lambda _params, *, protocol: connection,
+        lambda _params, *, protocol, **_kwargs: connection,
     )
 
 
@@ -293,3 +293,43 @@ def test_credentials_repr_does_not_expose_secrets():
     rendered = repr(credentials)
     assert "secret-password" not in rendered
     assert "secret-enable" not in rendered
+
+
+def test_collect_passes_setup_cancellation_and_records_cancelled(monkeypatch):
+    import wlc_role_acl_collector.ssh_connection as ssh
+    cancel = threading.Event()
+    received = {}
+
+    def connect(**params):
+        received.update(params)
+        cancel.set()
+        raise ssh.SSHSetupCancelled("SSH setup cancelled by user.")
+
+    monkeypatch.setattr(ssh, "connect_with_pinned_host_key", connect)
+    result = collect_from_controller(
+        Controller(name="wlc", host="192.0.2.10"),
+        credentials=ControllerCredentials(username="synthetic", password="synthetic"),
+        cancel_event=cancel,
+    )
+    assert received["_cancel_event"] is cancel
+    assert received["_deadline"] > 0
+    assert [command.command_id for command in result.commands] == ["cancelled"]
+
+
+def test_collect_records_setup_collection_deadline_as_duration_limit(monkeypatch):
+    import wlc_role_acl_collector.ssh_connection as ssh
+    times = iter((0.0, 2.0))
+    monkeypatch.setattr(collector.time, "monotonic", lambda: next(times))
+
+    def connect(**params):
+        assert params["_deadline"] == 1
+        assert params["timeout"] == 1
+        raise ssh.SSHSetupDeadlineExceeded("SSH setup deadline exceeded.")
+
+    monkeypatch.setattr(ssh, "connect_with_pinned_host_key", connect)
+    result = collect_from_controller(
+        Controller(name="wlc", host="192.0.2.10"),
+        credentials=ControllerCredentials(username="synthetic", password="synthetic"),
+        max_duration_seconds=1,
+    )
+    assert [command.command_id for command in result.commands] == ["duration_limit"]
