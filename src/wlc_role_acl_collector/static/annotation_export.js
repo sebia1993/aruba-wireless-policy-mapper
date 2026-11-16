@@ -1,0 +1,131 @@
+/* Offline policy reporting. Receives AnnotationCore's explicit, DOM-independent export model. */
+(function (root, factory) {
+  'use strict';
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.AnnotationExport = factory();
+}(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  'use strict';
+  var LIMIT = 32767;
+  function str(value) { return value === null || value === undefined ? '' : String(value); }
+  function list(values) { return (values || []).map(str).join('\n'); }
+  function record(value) { return value || {}; }
+  function json(value) { return value === null || value === undefined ? '' : JSON.stringify(value); }
+  function annotationColumns(annotation) {
+    var a = record(annotation), s = record(a.source);
+    return [a.text, a.status, a.updatedAt, a.confirmedAt, list(a.reasons), s.projectId, s.snapshotId, s.recordId, s.confirmedAt];
+  }
+  var annotationHeaders = ['주석', '확인 상태', '주석 수정 시각', '확인 시각', '검토 사유', '원본 프로젝트 ID', '원본 스냅샷 ID', '원본 주석 ID', '원본 확인 시각'];
+  function datasets(m) {
+    var c = m.controllers || [], roles = m.roles || [], rules = m.rules || [], aliases = m.aliases || [];
+    var summary = [
+      ['보고서', '프로젝트 ID', m.projectId], ['보고서', '스냅샷 ID', m.snapshotId], ['보고서', '리비전', m.revision],
+      ['보고서', '수집본 생성 시각', m.collectedAt], ['보고서', '프로젝트 수정 시각', m.updatedAt], ['보고서', '내보내기 시각', m.exportedAt],
+      ['보고서', '내보내기 범위', m.scopeLabel], ['안내', '확인 상태', 'reviewed=확인됨; unreviewed=미확인; reused=이전 주석 재사용; needs_review=재검토 필요'],
+      ['안내', '수집 완전성', 'completed=완료; partial=일부 수집; failed=실패; unknown=알 수 없음. 불완전한 수집에서 항목 부재는 삭제 증거가 아닙니다.'],
+      ['안내', '연속 행', 'Excel 셀 한도(UTF-16 32767자)를 넘으면 같은 레코드 번호의 조각 순서대로 각 열을 이어 붙이세요. 빈 셀은 빈 문자열입니다.'],
+      ['안내', '보고서 수치', '수치는 선택한 보고 범위를 기준으로 합니다. 화면에서 숨긴 행도 보고 범위에 포함될 수 있습니다.'],
+      ['안내', 'Alias 범위', '보고 대상 Role이 속한 장비의 수집된 Alias 전체를 문맥 확인용으로 포함합니다.']
+    ];
+    var labels = {controllerCount:'컨트롤러 수',roleCount:'Role 수',ruleCount:'규칙 수',annotatedRuleCount:'주석 있는 규칙 수',needsReviewCount:'재검토 필요 주석 수 (미연결 포함)'};
+    Object.keys(labels).forEach(function (key) { summary.push(['범위 집계', labels[key], record(m.summary)[key]]); });
+    c.forEach(function (x) {
+      summary.push(['컨트롤러', x.id, '이름: ' + str(x.name) + '\n호스트: ' + str(x.host) + '\n포트: ' + str(x.port) + '\n구성 범위: ' + str(x.scope) + '\n식별 확인: ' + str(x.identityKnown) + '\n수집 상태: ' + str(x.coverage) + '\n실패 명령:\n' + list(x.failedCommands)]);
+    });
+    (m.issues || []).forEach(function (x) { summary.push(['수집 이슈', str(x.controllerId) + ' / ' + str(x.roleId), x.message]); });
+    (m.localNetworks || []).forEach(function (x) { summary.push(['포함된 로컬 네트워크', str(x.controllerId) + ' / ' + str(x.roleId), '네트워크: ' + str(x.network) + '\n서브넷 마스크: ' + str(x.subnetMask) + '\n상태: ' + str(x.status) + '\n메모: ' + str(x.notes)]); });
+    var changes = (m.changes || []).map(function (x) {
+      var controller=c.find(function(item){return item.id===x.controllerId;}), role=roles.find(function(item){return item.id===x.roleId;}), rule=rules.find(function(item){return item.id===x.ruleId;});
+      return ['변경', '', x.type, x.controllerId, controller?controller.name:'', x.roleId, role?role.name:'', x.ruleId, rule?rule.acl:'', rule?rule.raw:'', x.message, x.previousRaw, '', '', '', '', '', '', '', '', '', '', '', ''];
+    });
+    (m.unresolvedAnnotations || []).forEach(function (x) {
+      changes.push(['미연결 주석', x.id, x.kind, x.controllerId, x.controllerName, '', x.roleName, '', x.acl, x.raw, x.reason, '', list(x.candidateIds), x.sourceProjectId, x.sourceSnapshotId].concat(annotationColumns(x.annotation)));
+    });
+    // Review rows retain the exact occurrence IDs alongside changes and unmatched notes.
+    roles.concat(rules).forEach(function (x) {
+      var a = record(x.annotation);
+      if (a.status === 'needs_review' || a.status === 'reused' || (a.status === 'unreviewed' && str(a.text))) {
+        var isRule = Object.prototype.hasOwnProperty.call(x, 'roleId');
+        changes.push(['확인 필요', x.id, isRule ? 'rule' : 'role', x.controllerId, x.controllerName, isRule ? x.roleId : x.id, isRule ? x.roleName : x.name, isRule ? x.id : '', x.acl, x.raw, list(a.reasons), '', '', '', ''].concat(annotationColumns(a)));
+      }
+    });
+    return [
+      {name:'보고 요약', headers:['분류', '항목 / 식별자', '내용'], rows:summary},
+      {name:'Role 설명', headers:['Role ID','컨트롤러 ID','컨트롤러','Role','SSID','Role 유형','ACL 바인딩 순서','원문 바인딩','문맥 수집 완료','관측 사용자 수'].concat(annotationHeaders), rows:roles.map(function (x) { return [x.id,x.controllerId,x.controllerName,x.name,list(x.ssids),list(x.roleTypes),list(x.aclOrder),list(x.bindingRaw),x.contextComplete,x.observedUsers].concat(annotationColumns(x.annotation)); })},
+      {name:'ACL 상세', headers:['규칙 ID','컨트롤러 ID','컨트롤러','Role ID','Role','ACL','시퀀스','발생 순번','원문 규칙','출발지','목적지','서비스','동작','출발지 해석','목적지 해석'].concat(annotationHeaders), rows:rules.map(function (x) { return [x.id,x.controllerId,x.controllerName,x.roleId,x.roleName,x.acl,x.sequence,x.ordinal,x.raw,x.source,x.destination,x.service,x.action,json(x.sourceInterpretation),json(x.destinationInterpretation)].concat(annotationColumns(x.annotation)); })},
+      {name:'변경·확인 사항', headers:['구분','레코드 ID','유형','컨트롤러 ID','컨트롤러','Role ID','Role','규칙 ID','ACL','원문 규칙','사유 / 변경 내용','이전 규칙','후보 ID','가져온 프로젝트 ID','가져온 스냅샷 ID'].concat(annotationHeaders), rows:changes},
+      {name:'Alias 상세', headers:['Alias ID','컨트롤러 ID','컨트롤러','Alias','항목 순번','유형','값','원문'], rows:aliases.flatMap(function (x) {
+        var controller = c.find(function (item) { return item.id === x.controllerId; });
+        var entries = x.entries && x.entries.length ? x.entries : [{}];
+        return entries.map(function (entry, i) { return [x.id,x.controllerId,controller ? controller.name : '',x.name,x.entries && x.entries.length ? i + 1 : '',entry.type,entry.value,entry.raw]; });
+      })}
+    ];
+  }
+  function chunks(value) {
+    var text = str(value), result = [], start = 0;
+    do {
+      var end = Math.min(start + LIMIT, text.length);
+      if (end < text.length && /[\uD800-\uDBFF]/.test(text.charAt(end - 1)) && /[\uDC00-\uDFFF]/.test(text.charAt(end))) end--;
+      result.push(text.slice(start, end)); start = end;
+    } while (start < text.length);
+    return result;
+  }
+  function createWorkbook(model, ExcelJS) {
+    if (!ExcelJS || typeof ExcelJS.Workbook !== 'function') throw new Error('로컬 ExcelJS 번들이 필요합니다.');
+    var book = new ExcelJS.Workbook();
+    book.creator = 'Aruba Wireless Policy Mapper';
+    book.subject = 'Offline annotation report';
+    book.title = '무선 정책 주석 보고서';
+    datasets(model).forEach(function (data) {
+      var sheet = book.addWorksheet(data.name, {views:[{state:'frozen',ySplit:1}],pageSetup:{paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}});
+      sheet.columns = [{width:12},{width:12}].concat(data.headers.map(function (h) { return {width:/주석$|내용|원문|규칙$|사유/.test(h) ? 54 : /시각|ID/.test(h) ? 28 : 24}; }));
+      sheet.addRow(['레코드 번호','조각 / 전체'].concat(data.headers));
+      data.rows.forEach(function (values, index) {
+        var parts = values.map(chunks), count = Math.max.apply(null, parts.map(function (p) { return p.length; }));
+        for (var i = 0; i < count; i++) {
+          var row = sheet.addRow([str(index + 1), str(i + 1) + '/' + str(count)].concat(parts.map(function (p) { return p[i] || ''; })));
+          row.eachCell({includeEmpty:true}, function (cell) {
+            // Strings, including '=...', remain literal string cells (no formulas or hyperlinks).
+            cell.numFmt = '@'; cell.alignment = {vertical:'top',wrapText:true};
+            cell.font = {name:'맑은 고딕',size:10,color:{argb:'FF172B4D'}};
+            cell.fill = {type:'pattern',pattern:'solid',fgColor:{argb:index % 2 ? 'FFF0F5FA' : 'FFFFFFFF'}};
+            cell.border = {bottom:{style:'hair',color:{argb:'FFD7E0EA'}}};
+          });
+          row.height = Math.min(180, Math.max(32, 15 * Math.max.apply(null, values.map(function (v) { return Math.ceil(str(v).length / 45) + str(v).split('\n').length; }))));
+        }
+      });
+      var header = sheet.getRow(1);
+      header.height = 32; header.font = {name:'맑은 고딕',size:11,bold:true,color:{argb:'FFFFFFFF'}};
+      header.alignment = {vertical:'middle',wrapText:true};
+      header.eachCell(function (cell) { cell.fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FF173D64'}}; });
+      sheet.autoFilter = {from:{row:1,column:1},to:{row:Math.max(1,sheet.rowCount),column:data.headers.length + 2}};
+      sheet.pageSetup.printTitlesRow = '1:1';
+      sheet.headerFooter.oddFooter = '&L' + data.name + '&R&P / &N';
+    });
+    return book;
+  }
+  async function workbookBytes(model, ExcelJS) {
+    var bytes = await createWorkbook(model, ExcelJS).xlsx.writeBuffer();
+    return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  }
+  function escape(value) { return str(value).replace(/[&<>"']/g, function (char) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]; }); }
+  function printHtml(model) {
+    var tables = datasets(model);
+    function table(headers, rows) {
+      return '<table><thead><tr>' + headers.map(function (v) { return '<th scope="col">' + escape(v) + '</th>'; }).join('') + '</tr></thead><tbody>' + (rows.length ? rows.map(function (row) { return '<tr>' + row.map(function (v) { return '<td>' + escape(v) + '</td>'; }).join('') + '</tr>'; }).join('') : '<tr><td colspan="' + headers.length + '">이 범위에 해당 항목이 없습니다.</td></tr>') + '</tbody></table>';
+    }
+    function grouped(data, groups) {
+      return table(groups.map(function (g) { return g[0]; }),data.rows.map(function (row) {
+        return groups.map(function (g) { return g.slice(1).map(function (i) { return data.headers[i] + ': ' + str(row[i]); }).join('\n'); });
+      }));
+    }
+    var sections = '<section><h2>보고 요약</h2>' + table(tables[0].headers,tables[0].rows) + '</section>';
+    sections += '<section><h2>Role 설명</h2>' + grouped(tables[1],[['장비 / Role',2,3],['연결 / 수집 정보',4,5,6,7,8,9],['보고용 설명',10],['확인 / 이력',11,12,13,14,18]]) + '</section>';
+    sections += '<section><h2>ACL 상세</h2>' + grouped(tables[2],[['장비 / Role / ACL',2,4,5,6,7],['규칙',8,9,10,11,12,13,14],['주석',15],['확인 / 이력',16,17,18,19,23]]) + '</section>';
+    sections += '<section><h2>변경·확인 사항</h2>' + grouped(tables[3],[['구분 / 대상',0,1,2,4,6,8],['변경 / 미연결 정보',9,10,11,13,14],['주석',15],['확인 / 이력',16,17,18,19,23]]) + '</section>';
+    sections += '<section><h2>Alias 상세</h2>' + grouped(tables[4],[['장비 / Alias',2,3],['항목',4,5,6,7]]) + '</section>';
+    return '<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>무선 정책 주석 보고서</title><style>' +
+      '*{box-sizing:border-box}body{margin:24px;color:#172b4d;font:12px/1.55 "Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif}h1{font-size:25px;color:#173d64;margin-bottom:6px}h2{font-size:17px;margin:22px 0 8px}p{white-space:pre-wrap;overflow-wrap:anywhere}table{border-collapse:collapse;width:100%;table-layout:fixed;margin-bottom:18px}th,td{border:1px solid #bdcddd;padding:7px;text-align:left;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}th{background:#e4edf5;font-weight:700}thead{display:table-header-group}tr{break-inside:auto}section{break-before:page}section:first-of-type{break-before:auto}h2{break-after:avoid}tbody tr:nth-child(even){background:#f5f8fb}@page{size:A4 landscape;margin:12mm}@media print{body{margin:0;font-size:11px}h1{font-size:20px}th,td{padding:5px}thead{display:table-header-group}h1,h2{break-after:avoid}table{break-inside:auto}p{orphans:3;widows:3}}' +
+      '</style></head><body><h1>무선 정책 주석 보고서</h1><p>범위: ' + escape(model.scopeLabel) + '\n내보내기: ' + escape(model.exportedAt) + '\n프로젝트: ' + escape(model.projectId) + ' / 스냅샷: ' + escape(model.snapshotId) + ' / 리비전: ' + escape(model.revision) + '</p>' + sections + '</body></html>';
+  }
+  return {createWorkbook:createWorkbook,workbookBytes:workbookBytes,printHtml:printHtml};
+}));

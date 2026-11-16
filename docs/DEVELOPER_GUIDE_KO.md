@@ -52,9 +52,10 @@ GUI/CLI 입력
 - 사용자가 0명인 Role 기본 숨김
 - Role 이름과 맞지 않는 ACL 기본 숨김
 - Raw ACL 컬럼 기본 숨김
-- ACL 행별 Comment 입력
-- Comment 포함 HTML 저장
-- PDF 저장/인쇄
+- 주석·보고서 편집기에서 Role 설명과 ACL 행별 주석·확인 상태 관리
+- 버전 있는 JSON 작업 저장·열기, 이전 JSON/주석 HTML에서 보수적 설명 재사용
+- 전체/선택 Role/변경·확인 범위의 실제 XLSX와 별도 PDF 인쇄
+- 현재 작업을 포함한 독립 HTML 편집기 저장
 - HTML Access Check
 - 사내 Role 대역표 선택/검증
 - GUI 내부용 보고서에 Role 대역과 WLC 비교 상태 표시
@@ -77,7 +78,13 @@ wlc_role_acl_collector/
     collector.py        WLC 접속 및 show 명령어 실행
     aos8_parser.py      Aruba AOS8 설정/명령 출력 파싱
     acl_evaluator.py    Source/Destination/Service 기준 ACL 매칭 판단
-    report.py           Excel/HTML 보고서 생성
+    report.py           Excel/HTML 보고서 생성과 주석 편집기 통합
+    annotation_project.py 허용된 수집 정보로 오프라인 작업 DTO 생성
+    static/annotation_core.js 검증·이전 설명 대조·보고 범위 모델
+    static/annotation_editor.js 주석 편집·파일·복구·다운로드
+    static/annotation_import.js HTML을 실행하지 않는 기존 파일 가져오기
+    static/annotation_export.js 공통 모델에서 XLSX/인쇄 HTML 생성
+    static/exceljs.min.js 오프라인 XLSX 번들과 별도 라이선스
     role_networks.py    Role network Excel 로드 및 검증
     diagnostics.py      실패 메시지 분류와 사용자용 오류 설명
     diagnostic_codes.py 안정적인 오류 코드 정의
@@ -252,9 +259,10 @@ Excel과 HTML 보고서를 만드는 파일입니다. 이 프로젝트에서 가
 - Excel 시트 생성
 - HTML 문자열 생성
 - 관리자용 결론 요약에서 수집 상태, 신뢰도, 영향 범위, 조치 필요 항목과 참고 항목을 분리
-- Role 탭, ACL 표, Alias 상세, Comment UI 생성
+- 원본 Role 탭, ACL 표, Alias 상세와 읽기 전용 Comment 표시 생성
 - 좁은 화면에서 ACL 표만 가로 스크롤되도록 `.acl-table-scroll` 영역 생성
-- Role별 보고 설명 자동저장과 선택 Role PNG 생성
+- JSON 작업과 정적 주석 모듈을 HTML에 포함하고 원본 화면의 읽기 전용 설명 동기화
+- 원본 화면의 선택 Role PNG 생성
 - Access Check에 필요한 JSON 생성
 - Role 탭 선택과 Access Check Role 선택값 동기화
 - 보안모드에서 민감 데이터 export 차단
@@ -273,9 +281,30 @@ access_history_enabled=False
 
 CLI는 이 기본값을 유지하므로 Role network Excel을 선택해도 `--export-local-role-networks`를 명시하지 않으면 내부 대역이 저장되지 않습니다. GUI는 사내 Role 대역표를 선택한 실행을 내부용 보고서 생성으로 간주해 `export_local_role_networks=True`로 보고서를 만듭니다.
 
-#### Role 보고 설명과 PNG 내보내기
+#### 오프라인 작업 DTO와 브라우저 모듈
 
-Role 보고 설명은 `wlc-role-report-descriptions:<보고서 경로>` 키로 브라우저 `localStorage`에 저장합니다. `주석 포함 HTML 저장`을 실행할 때는 `role-descriptions-data`에 최신 값을 넣어 독립 HTML에도 포함합니다.
+`annotation_project.build_annotation_project()`는 허용된 수집 정보만 복사해 `format="aruba-policy-annotations"`, `schemaVersion=1`의 작업을 만듭니다. 상위 필드는 `projectId`, `revision`, `createdAt`, `updatedAt`, `snapshot`, `annotations`, `unresolvedAnnotations`, `changes`, `importHistory`입니다. `snapshot`은 자체 ID/수집본 생성 시각과 컨트롤러·Role·규칙·Alias·선택적 내부망·수집 이슈를 보관합니다. 주석 레코드에는 본문, 확인 상태, 수정·확인 시각, 검토 사유, 이전 프로젝트/수집본/레코드 출처가 들어갑니다. 정확한 필드 계약은 [명세](superpowers/specs/2026-11-16-annotation-project.md)를 참고합니다.
+
+| 모듈 | 책임과 주요 API |
+| --- | --- |
+| `annotation_core.js` | `parseProject`/`validateProject`가 엄격한 안전 복사본을 반환. `reconcileProjects`는 현재 수집본을 유지한 설명 재사용. `buildExportModel`은 DOM과 독립적인 전체/선택/검토 범위 계산 |
+| `annotation_import.js` | 분리된 `template.content`에서 지원되는 HTML을 데이터로만 읽고 스크립트·네트워크 리소스를 실행하지 않음. 내장된 최신 프로젝트 또는 기존 ACL/Role 메모를 해석 |
+| `annotation_editor.js` | Role/규칙 편집, 검토 상태, 장비·미연결 주석의 직접 연결, 파일 열기/다운로드, 명시적 임시작업 복구. 원본 화면의 설명은 읽기 전용으로 동기화 |
+| `annotation_export.js` | `createWorkbook`/`workbookBytes`/`printHtml`. 같은 export model에서 XLSX 다섯 시트와 이스케이프된 별도 인쇄 HTML 생성 |
+
+컨트롤러 식별에는 주소·포트·설정 범위를 사용하고, Role/규칙/Alias/DOM/Access Check도 컨트롤러별로 구분합니다. 표시 이름이나 규칙 인덱스만으로 수집본을 연결하지 않습니다. 원문 규칙은 action 옵션과 내부 공백까지 비교하며 동일 원문 중복은 자동 연결하지 않습니다. Alias, ACL 연결·평가 순서, 선행 규칙, 수집 실패나 서비스 정의 미수집은 재확인 사유입니다. JSON 검증은 미지원 버전, 알 수 없는 필드, 잘못된 참조·형식, 위험 키와 크기 초과를 거부하며 실패 시 현재 작업을 유지합니다.
+
+가져올 JSON/HTML의 원본 크기는 최대 50 MiB입니다. 스키마 검증은 개별 문자열 1,000,000자, 전체 필드 문자열 합계 20,000,000자와 배열별 100,000개 한도를 별도로 적용합니다. 저장은 공백 들여쓰기 없는 JSON과 UTF-8 바이트 한도로 검사해, 내려받을 수 없는 크기의 작업을 성공으로 알리지 않습니다.
+
+재사용된 주석의 현재 확인 시각은 비우고 이전 확인 이력은 출처에 남깁니다. 현재 메모, 빈 메모, 충돌과 미연결 설명을 보존합니다. 식별 정보가 없는 기존 HTML 컨트롤러는 직접 지정한 `controllerMap` 없이는 자동 대응하지 않습니다. 불완전한 수집의 항목 부재를 정책 삭제로 단정하지 않습니다.
+
+JSON 다운로드가 작업 보관의 기준이며 브라우저 저장소는 보조 복구입니다. 복구 키는 프로젝트/수집본/기준 버전/기준 수정 시각으로 분리하고 복구는 사용자가 선택해야 합니다. 저장소 접근·용량 실패가 다운로드를 막지 않으며, 파일 다운로드 요청을 디스크 원본의 자동 덮어쓰기나 실제 저장 완료로 취급하지 않습니다. `주석 포함 HTML 저장`은 신뢰된 정적 자산과 현재 DTO만으로 독립 편집기를 재구성합니다. 원본 Access Check는 현재 수집본과 같은 원본 보고서에서만 사용할 수 있습니다.
+
+XLSX는 로컬 ExcelJS 번들로 생성하고 수식처럼 보이는 값도 문자열로 저장합니다. 32,767 UTF-16 단위를 넘는 셀은 레코드 번호와 조각 순서를 갖는 연속 행으로 보존합니다. `보고 요약`, `Role 설명`, `ACL 상세`, `변경·확인 사항`, `Alias 상세` 다섯 시트를 유지합니다. Alias 상세는 보고 대상 Role이 속한 장비의 Alias 전체를 문맥 확인용으로 포함합니다. `collectedAt`은 이 도구의 수집본 생성 시각이며, 가져온 Raw가 장비에서 처음 수집된 시각을 추정하지 않습니다. PDF는 export model의 별도 인쇄 뷰이며 편집기 DOM을 출력 범위로 해석하거나 변경하지 않습니다. JSON 작업을 편집 원본으로 사용하고 XLSX/PDF 재가져오기는 지원하지 않습니다.
+
+`buildExportModel(project, {type:'review'}).roles`를 편집기의 확인 필요 목록에도 사용해 보고 범위와 일치시킵니다. 이 범위에는 미확인 주석 외에 수집 이슈와 불완전한 문맥이 들어갈 수 있습니다. `summary.needsReviewCount`는 확인이 필요한 주석과 미연결 주석의 수입니다.
+
+#### 원본 화면의 PNG 내보내기
 
 PNG 변환은 인터넷이 없는 사내망에서도 동작해야 하므로 `src/wlc_role_acl_collector/static/html2canvas.min.js`를 패키지에 포함합니다. `_html2canvas_source()`는 패키지 리소스를 읽어 HTML 안에 삽입하며, 누락된 경우 보고서 생성 자체는 유지하고 버튼에서 명확한 오류를 표시합니다. 라이선스 원문은 같은 폴더의 `LICENSE.html2canvas.txt`에 보관합니다.
 
@@ -292,7 +321,7 @@ PyInstaller 빌드는 `collect_data_files('wlc_role_acl_collector')`로 정적 J
 
 #### HTML 요소 ID와 대량 보고서
 
-Role 이름은 주석, Alias 상세, Access Check 행을 연결하는 HTML ID 일부로 사용됩니다. `report._safe_dom_id()`와 `acl_evaluator.access_rule_id()`는 일반적인 `guest-logon` 같은 이름은 그대로 유지하고, `/`, 공백 등 치환이 필요한 이름에는 SHA-256 기반 8자리 접미사를 붙입니다. 따라서 `branch/a`와 `branch a`처럼 화면용 문자열이 같아지는 Role도 서로 다른 ID를 가져야 합니다.
+컨트롤러와 Role의 복합 식별자는 원본의 주석, Alias 상세, Access Check 행을 연결하는 HTML ID에 사용됩니다. `report._safe_dom_id()`와 `acl_evaluator.access_rule_id()`의 안전한 문자 변환과 해시 접미사를 유지해 컨트롤러가 다른 동명 Role이나 `branch/a`와 `branch a` 같은 표시 문자열이 서로 충돌하지 않게 합니다. 순번 기반 발생 ID는 현재 수집본에서만 유효하며, 다음 수집본의 주석 연결 근거로 사용하지 않습니다.
 
 ACL 표는 `.acl-section`의 바깥 레이아웃을 넓히지 않고 `.acl-table-scroll` 내부에서만 좌우 스크롤됩니다. 모바일 CSS를 수정할 때 `overflow: hidden` 때문에 Service·Comment 열이 접근 불가능해지지 않는지 실제 브라우저에서 확인합니다.
 
@@ -404,7 +433,9 @@ mock 서버는 실행 중 중복 `start()`를 거부하고 `run_mock_server()`�
 | WLC 수집 명령 추가 | `collector.py` |
 | WLC 출력 파싱 방식 변경 | `aos8_parser.py`, `models.py` |
 | Excel 시트/컬럼 변경 | `report.py`, `tests/test_report.py` |
-| HTML 화면 디자인 변경 | `report.py`, `tests/test_report.py` |
+| HTML 화면 디자인 변경 | `report.py`, `static/annotation_editor.*`, `tests/test_report.py`, `tests/js/annotation_editor.test.js` |
+| 주석 DTO/재사용/파일 가져오기 | `annotation_project.py`, `static/annotation_core.js`, `static/annotation_import.js`, 해당 Python/Node 테스트 |
+| 주석 XLSX/PDF 범위·내용 | `static/annotation_export.js`, `static/annotation_core.js`, `tests/js/annotation_export.test.js` |
 | Access Check 판단 로직 변경 | `acl_evaluator.py`, `tests/test_acl_evaluator.py` |
 | Role network Excel 형식 변경 | `role_networks.py`, `tests/test_role_networks.py` |
 | 오류 메시지 개선 | `diagnostics.py`, `tests/test_diagnostics.py` |
@@ -436,31 +467,30 @@ mock 서버는 실행 중 중복 `start()`를 거부하고 `run_mock_server()`�
 
 ## 8. 테스트 실행 방법
 
-전체 검증:
+Python 3.11 이상과 Node.js 20 이상이 필요합니다. 저장소 루트에서 잠금 파일 기준으로 JavaScript 의존성을 먼저 설치해야 Python의 생성 HTML 통합 검증도 jsdom으로 실행됩니다. Python 회귀를 통과한 뒤 오프라인 주석 Node 테스트를 실행합니다.
 
 ```powershell
-.\tools\validate.ps1
+npm ci --ignore-scripts
+python -m pytest
+npm test
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\validate.ps1
 ```
 
-저장소에 `.venv\Scripts\python.exe`가 있으면 검증 스크립트가 자동으로 그 환경을 사용합니다. 없으면 PATH의 Python을 사용하며, 별도 환경은 `-PythonExe C:\path\to\python.exe`로 지정할 수 있습니다. 시스템 Python을 잘못 선택해 의존성 누락으로 오판하지 않도록 검증 출력 첫 줄의 Python 경로를 확인합니다.
+`tools/validate.ps1`는 `pytest`, `compileall`, 설치 의존성 검사, 고정 의존성 감사와 기존 Access Check/Role PNG JavaScript 문법 검사를 실행합니다. 주석 core/import/editor/export의 Node 테스트는 `npm test`로 별도 실행하므로 생략하지 않습니다. PR 검증은 Windows runner에서 Node 22와 위 설치·테스트 순서를 명시적으로 사용합니다.
 
-이 스크립트는 다음을 실행합니다.
+저장소에 `.venv\Scripts\python.exe`가 있으면 PowerShell 검증 스크립트는 해당 Python을 사용합니다. 별도 환경은 `-PythonExe C:\path\to\python.exe`로 지정하고 출력 첫 줄의 Python 경로를 확인합니다.
 
-1. `pytest`
-2. `compileall`
-3. HTML Access Check JavaScript 문법 검사
-4. Role PNG JavaScript 문법 검사
-
-부분 테스트:
+부분 테스트 예:
 
 ```powershell
-python -m pytest tests\test_report.py
-python -m pytest tests\test_acl_evaluator.py
-python -m pytest tests\test_role_networks.py
-python -m pytest tests\test_collection_health.py tests\test_validation.py tests\test_collector.py
+python -m pytest tests\test_annotation_project.py tests\test_report.py tests\test_acl_evaluator.py
+node --test tests/js/annotation_core.test.js
+node --test tests/js/annotation_editor.test.js tests/js/annotation_import.test.js tests/js/annotation_export.test.js
 ```
 
-기능을 바꾸면 최소한 관련 테스트는 실행해야 합니다. 보고서나 Access Check를 바꿨다면 가능하면 전체 검증을 실행합니다.
+주석 변경 시에는 컨트롤러 동명 격리, 전체 원문 suffix/인용부호 공백, 중복 규칙·이전 Role, Alias/순서 변경, 부분 수집, 잘못된 스키마, 현재 빈 메모와 미연결 출처 보존, 불활성 HTML 가져오기, 복구·저장소 실패, PDF/XLSX 범위 일치를 확인합니다. 생성된 XLSX는 `openpyxl`로 다섯 시트, 문자열 셀, 한국어/줄바꿈과 긴 주석 연속 행을 다시 읽어 검증합니다.
+
+자동 테스트와 합성 데이터 검증은 실제 회사 장비·사내 파일·Windows 사용자 브라우저·회사 인쇄 환경의 수동 검증 완료를 뜻하지 않습니다. 이 현장 검증은 별도 사용자 범위로 남깁니다.
 
 ## 9. 빌드와 배포
 

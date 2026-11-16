@@ -39,5 +39,6 @@ where = ["src"]
 [tool.setuptools.package-data]
 wlc_role_acl_collector = [
   "static/*.js",
+  "static/*.css",
   "static/*.txt",
 ]

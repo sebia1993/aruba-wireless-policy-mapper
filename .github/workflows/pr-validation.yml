@@ -34,6 +34,12 @@ jobs:
             requirements-lock.txt
             requirements-web-lock.txt
 
+      - name: Set up Node.js 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+
       - name: Install locked dependencies
         shell: pwsh
         run: |
@@ -42,9 +48,21 @@ jobs:
           python -m pip install --no-deps --no-build-isolation -e .
           if ($LASTEXITCODE -ne 0) { throw "Project installation failed." }
 
+      - name: Install locked JavaScript dependencies
+        shell: pwsh
+        run: |
+          npm ci --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw "Locked JavaScript dependency installation failed." }
+
       - name: Run validation
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\validate.ps1
+
+      - name: Test offline annotation projects
+        shell: pwsh
+        run: |
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw "Offline annotation tests failed." }
 
       - name: Build Windows GUI and CLI package
         shell: pwsh

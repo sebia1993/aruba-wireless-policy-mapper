@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from datetime import datetime
 from functools import lru_cache
@@ -21,6 +22,7 @@ from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from .acl_evaluator import access_rule_id, build_access_check_data
+from .annotation_project import build_annotation_project, controller_identity
 from .aos8_parser import parse_controller_config
 from .atomic_io import atomic_output_path, atomic_write_text, commit_staged_files
 from .collection_health import (
@@ -174,6 +176,9 @@ def write_reports(
             frames,
             local_role_networks_enabled=bool(local_role_networks) and export_local_role_networks,
             access_history_enabled=access_history_enabled,
+            annotation_project=build_annotation_project(
+                frames, parsed_controllers=parsed_controllers, collection_results=collection_results
+            ),
         )
         commit_staged_files(
             (
@@ -242,6 +247,8 @@ def _build_frames(
     unresolved_rows: list[dict[str, Any]] = []
 
     for parsed in parsed_controllers:
+        scoped_rows = [ssid_rows, role_network_rows, local_network_rows, acl_rows, alias_rows, unresolved_rows]
+        row_starts = [len(rows) for rows in scoped_rows]
         local_status_by_role = _local_network_status_by_role(parsed, local_lookup, local_mapping_enabled)
         local_network_rows.extend(
             _local_network_rows(parsed, local_lookup, local_status_by_role, local_mapping_enabled)
@@ -385,19 +392,29 @@ def _build_frames(
                         "raw": entry.raw,
                     }
                 )
-        unresolved_rows.extend(parsed.unresolved)
+        unresolved_rows.extend(dict(issue) for issue in parsed.unresolved)
+        for rows, start in zip(scoped_rows, row_starts):
+            for row in rows[start:]:
+                row["controller_id"] = controller_identity(parsed.controller)
+                row["controller_host"] = parsed.controller.host
 
     raw_rows: list[dict[str, Any]] = []
     for result in collection_results:
-        raw_rows.extend(result.command_status_rows())
+        raw_rows.extend(
+            {**row, "controller_id": controller_identity(result.controller), "controller_host": result.controller.host}
+            for row in result.command_status_rows()
+        )
 
     overview_rows = []
     for parsed in parsed_controllers:
         controller = parsed.controller.name
+        cid = controller_identity(parsed.controller)
         overview_rows.append(
             {
                 "controller": controller,
-                "ssid_count": len({row["ssid"] for row in ssid_rows if row["controller"] == controller}),
+                "controller_id": cid,
+                "controller_host": parsed.controller.host,
+                "ssid_count": len({row["ssid"] for row in ssid_rows if row["controller_id"] == cid}),
                 "role_count": len(parsed.role_policies),
                 "acl_rule_count": sum(
                     len(policy.rules) for policy in parsed.role_policies.values()
@@ -421,6 +438,8 @@ def _build_frames(
             local_network_rows,
             columns=[
                 "controller",
+                "controller_id",
+                "controller_host",
                 "role",
                 "local_role_network",
                 "subnet_mask",
@@ -600,6 +619,11 @@ def _write_excel(path: Path, frames: dict[str, pd.DataFrame]) -> None:
                 for column_cells in worksheet.columns:
                     max_length = 8
                     for cell in column_cells:
+                        # Policy names and user text must never become formulas.
+                        # pandas/openpyxl infer '=...' as a formula unless reset.
+                        if isinstance(cell.value, str):
+                            cell.data_type = "s"
+                            cell.number_format = "@"
                         value = "" if cell.value is None else str(cell.value)
                         max_length = max(max_length, min(len(value), 80))
                     worksheet.column_dimensions[get_column_letter(column_cells[0].column)].width = max_length + 2
@@ -611,13 +635,37 @@ def _write_html(
     *,
     local_role_networks_enabled: bool = False,
     access_history_enabled: bool = False,
+    annotation_project: dict[str, Any] | None = None,
 ) -> None:
+    annotation_project = annotation_project if annotation_project is not None else build_annotation_project(frames)
+    annotation_project_json = _json_for_html(annotation_project)
+    annotation_license = _annotation_asset_source("exceljs.LICENSE.txt")
+    annotation_snapshot_id = str(annotation_project["snapshot"]["id"])
+    annotation_editor_css = _annotation_asset_source("annotation_editor.css", tag="style")
+    annotation_scripts = "\n".join(
+        f'<script id="{element_id}">{_annotation_asset_source(filename)}</script>'
+        for element_id, filename in [
+            ("annotation-core-script", "annotation_core.js"),
+            ("annotation-export-script", "annotation_export.js"),
+            ("annotation-import-script", "annotation_import.js"),
+            ("annotation-exceljs-script", "exceljs.min.js"),
+            ("annotation-editor-script", "annotation_editor.js"),
+        ]
+    )
+    source_annotation_bridge_script = _source_annotation_bridge_script()
     overview = frames["Overview"].to_dict(orient="records")
     role_network_rows = frames["Role_Network_Context"].to_dict(orient="records")
     local_network_rows = frames.get("Local_Role_Networks", pd.DataFrame()).to_dict(orient="records")
     acl_rows = frames["Role_ACL_Detail"].to_dict(orient="records")
     alias_rows = frames["Alias_Detail"].to_dict(orient="records")
-    alias_lookup = _group_by_alias(alias_rows)
+    known_controller_keys = {_row_controller_key(row) for row in overview + acl_rows if _row_controller_key(row)}
+    if len(known_controller_keys) == 1:
+        # Legacy hand-built reports sometimes omitted controller from contextual
+        # rows. A single known controller is the only safe inference.
+        only_controller = next(iter(known_controller_keys))
+        for row in role_network_rows + local_network_rows + alias_rows:
+            if not _row_controller_key(row):
+                row["controller_id"] = only_controller
     local_network_lookup = _group_local_network_rows(local_network_rows)
     role_user_counts = _role_observed_user_counts(role_network_rows)
     raw_command_rows = frames["Raw_Commands"].to_dict(orient="records")
@@ -639,24 +687,31 @@ def _write_html(
         for row in overview
     )
 
-    acl_by_role: dict[str, list[dict[str, Any]]] = {}
+    acl_by_role: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in acl_rows:
-        acl_by_role.setdefault(str(row.get("role", "")), []).append(row)
+        acl_by_role.setdefault((_row_controller_key(row), str(row.get("role", ""))), []).append(row)
+    multiple_controllers = len({_row_controller_key(row) for row in overview + acl_rows}) > 1
 
     # HTML에서는 Role을 표 행으로 길게 나열하지 않고 탭 버튼으로 보여줍니다.
     # 운영자가 자주 볼 가능성이 높은 "관측 사용자 수가 많은 Role"을 앞에 배치합니다.
     role_items = [
         {
-            "role": role,
+            "role": key[1],
+            "controller_id": key[0],
+            "controller": str(rows[0].get("controller", "")),
+            "role_key": _scoped_role_key(*key) if multiple_controllers else key[1],
+            "display_name": _role_display_name(rows[0], key[1]) if multiple_controllers else key[1],
             "rows": rows,
-            "other_acl_count": _other_acl_row_count(role, rows),
-            "user_count": role_user_counts.get(role, 0),
+            "other_acl_count": _other_acl_row_count(key[1], rows),
+            "user_count": role_user_counts.get(key, 0),
             "panel_id": f"role-panel-{index}",
+            "local_networks": local_network_lookup.get(key, []),
+            "aliases": _group_by_alias([row for row in alias_rows if _row_controller_key(row) == key[0]]),
         }
-        for index, (role, rows) in enumerate(
+        for index, (key, rows) in enumerate(
             sorted(
                 acl_by_role.items(),
-                key=lambda item: (-role_user_counts.get(item[0], 0), item[0].lower()),
+                key=lambda item: (-role_user_counts.get(item[0], 0), item[0][1].lower(), item[0][0]),
             ),
             start=1,
         )
@@ -708,9 +763,9 @@ def _write_html(
     html2canvas_source = _html2canvas_source()
     role_buttons = "\n".join(
         f"""
-        <button class="role-tab{_zero_user_role_class(bool(item['zero_user_hidden']))}" type="button" role="tab" data-role="{escape(str(item['role']))}" data-panel-id="{escape(str(item['panel_id']))}"
+        <button class="role-tab{_zero_user_role_class(bool(item['zero_user_hidden']))}" type="button" role="tab" data-role="{escape(str(item['role']))}" data-panel-id="{escape(str(item['panel_id']))}" data-role-key="{escape(str(item['role_key']))}"
           aria-controls="{escape(str(item['panel_id']))}" aria-selected="{'true' if str(item['panel_id']) == selected_panel_id else 'false'}"{_zero_user_role_attrs(bool(item['zero_user_hidden']))}{_hidden_attr(bool(item['zero_user_hidden']))}>
-          <span class="role-tab-name">{escape(str(item['role']))}</span>
+          <span class="role-tab-name">{escape(str(item['display_name']))}</span>
           <span class="role-tab-meta">{len(item['rows'])} rules / {item['user_count']} users</span>
         </button>
         """
@@ -718,20 +773,20 @@ def _write_html(
     )
     acl_sections = "\n".join(
         f"""
-        <section class="acl-section role-panel{_zero_user_role_class(bool(item['zero_user_hidden']))}" id="{escape(str(item['panel_id']))}" data-role="{escape(str(item['role']))}"{_zero_user_role_attrs(bool(item['zero_user_hidden']))}{_hidden_attr(bool(item['zero_user_hidden']) or str(item['panel_id']) != selected_panel_id)}>
+        <section class="acl-section role-panel{_zero_user_role_class(bool(item['zero_user_hidden']))}" id="{escape(str(item['panel_id']))}" data-role="{escape(str(item['role']))}" data-controller-id="{escape(str(item['controller_id']))}" data-role-key="{escape(str(item['role_key']))}"{_zero_user_role_attrs(bool(item['zero_user_hidden']))}{_hidden_attr(bool(item['zero_user_hidden']) or str(item['panel_id']) != selected_panel_id)}>
           <div class="acl-section-header">
-            <h3>{escape(str(item['role']))}</h3>
+            <h3>{escape(str(item['display_name']))}</h3>
             <span>{len(item['rows'])} rules / {item['user_count']} observed users{_other_acl_meta_text(int(item['other_acl_count']))}</span>
           </div>
-          {_role_description_html(str(item['role']))}
-          {_local_role_network_html(local_network_lookup.get(str(item['role']), []), local_role_networks_enabled)}
+          {_role_description_html(str(item['role']), role_key=str(item['role_key']))}
+          {_local_role_network_html(item['local_networks'], local_role_networks_enabled)}
           {_other_acl_toggle_html(str(item['panel_id']), int(item['other_acl_count']))}
           <div class="acl-table-scroll" role="region" tabindex="0"
             aria-label="{escape(str(item['role']))} ACL table">
             <table>
               <thead><tr><th>ACL</th><th>#</th><th>Action</th><th>Source</th><th>Destination</th><th>Service</th><th class="raw-column">Raw</th><th>Comment</th></tr></thead>
               <tbody>
-                {_acl_rows_html(str(item['role']), item['rows'], alias_lookup)}
+                {_acl_rows_html(str(item['role']), item['rows'], item['aliases'], role_key=str(item['role_key']))}
               </tbody>
             </table>
           </div>
@@ -1409,8 +1464,11 @@ def _write_html(
       .role-description-status {{ display: none; }}
     }}
   </style>
+  <style id="annotation-editor-style">{annotation_editor_css}</style>
 </head>
 <body>
+  <div id="annotation-workspace"></div>
+  <div id="source-report" hidden data-source-snapshot-id="{escape(annotation_snapshot_id)}">
   <header>
     <div class="report-header-inner">
       <div>
@@ -1443,6 +1501,9 @@ def _write_html(
     {acl_sections}
     {access_check_controls}
   </main>
+  </div>
+  <script type="application/json" id="annotation-project-data">{annotation_project_json}</script>
+  <script type="text/plain" id="annotation-license-data">{annotation_license}</script>
   <script id="access-check-data" type="application/json">{access_check_json}</script>
   {_access_check_history_data_html(access_history_enabled)}
   <textarea id="acl-comments-data" hidden>{{}}</textarea>
@@ -1566,7 +1627,7 @@ def _write_html(
       }}
       const selectedPanel = rolePanels.find((panel) => panel.id === selectedRolePanelId);
       if (selectedPanel && typeof syncAccessRoleSelection === 'function') {{
-        syncAccessRoleSelection(selectedPanel.dataset.role || '');
+        syncAccessRoleSelection(selectedPanel.dataset.roleKey || selectedPanel.dataset.role || '');
       }}
     }}
 
@@ -1587,263 +1648,99 @@ def _write_html(
         button.setAttribute('aria-expanded', String(isHidden));
       }});
     }}
-    const commentsDataElement = document.querySelector('#acl-comments-data');
-    const commentInputs = Array.from(document.querySelectorAll('.comment-input'));
-    const roleDescriptionsDataElement = document.querySelector('#role-descriptions-data');
-    const roleDescriptionInputs = Array.from(document.querySelectorAll('.role-description-input'));
-    const commentStorageKey = `wlc-role-acl-comments:${{location.pathname || document.title}}`;
-    const roleDescriptionStorageKey = `wlc-role-report-descriptions:${{location.pathname || document.title}}`;
-    const commentStorageAvailable = (() => {{
-      try {{
-        localStorage.setItem('wlc-role-acl-storage-test', '1');
-        localStorage.removeItem('wlc-role-acl-storage-test');
-        return true;
-      }} catch (_error) {{
-        return false;
-      }}
-    }})();
-    let aclComments = {{}};
-    let roleDescriptions = {{}};
-
-    function readEmbeddedComments() {{
-      try {{
-        return JSON.parse(commentsDataElement.value || commentsDataElement.textContent || '{{}}');
-      }} catch (_error) {{
-        return {{}};
-      }}
-    }}
-
-    function syncCommentsData() {{
-      const text = JSON.stringify(aclComments, null, 2);
-      commentsDataElement.value = text;
-      commentsDataElement.textContent = text;
-    }}
-
-    function readStoredComments() {{
-      if (!commentStorageAvailable) {{
-        return {{}};
-      }}
-      try {{
-        return JSON.parse(localStorage.getItem(commentStorageKey) || '{{}}');
-      }} catch (_error) {{
-        return {{}};
-      }}
-    }}
-
-    function persistComments() {{
-      if (!commentStorageAvailable) {{
-        return;
-      }}
-      localStorage.setItem(commentStorageKey, JSON.stringify(aclComments));
-    }}
-
-    function readEmbeddedRoleDescriptions() {{
-      try {{
-        return JSON.parse(
-          roleDescriptionsDataElement.value
-          || roleDescriptionsDataElement.textContent
-          || '{{}}'
-        );
-      }} catch (_error) {{
-        return {{}};
-      }}
-    }}
-
-    function syncRoleDescriptionsData() {{
-      const text = JSON.stringify(roleDescriptions, null, 2);
-      roleDescriptionsDataElement.value = text;
-      roleDescriptionsDataElement.textContent = text;
-    }}
-
-    function readStoredRoleDescriptions() {{
-      if (!commentStorageAvailable) {{
-        return {{}};
-      }}
-      try {{
-        return JSON.parse(localStorage.getItem(roleDescriptionStorageKey) || '{{}}');
-      }} catch (_error) {{
-        return {{}};
-      }}
-    }}
-
-    function persistRoleDescriptions() {{
-      if (!commentStorageAvailable) {{
-        return;
-      }}
-      localStorage.setItem(roleDescriptionStorageKey, JSON.stringify(roleDescriptions));
-    }}
-
-    function setRoleDescriptionStatus(input, text, state) {{
-      const status = document.getElementById(`${{input.dataset.descriptionId}}-status`);
-      if (!status) {{
-        return;
-      }}
-      status.textContent = text;
-      status.dataset.state = state || '';
-    }}
-
-    function updateRoleDescriptionPrint(input) {{
-      const printValue = document.getElementById(`${{input.dataset.descriptionId}}-print`);
-      if (printValue) {{
-        printValue.textContent = input.value || '입력된 설명이 없습니다.';
-      }}
-    }}
-
-    function collectRoleDescriptions() {{
-      roleDescriptions = {{}};
-      for (const input of roleDescriptionInputs) {{
-        if (input.value) {{
-          roleDescriptions[input.dataset.role] = input.value;
-        }}
-        updateRoleDescriptionPrint(input);
-      }}
-      syncRoleDescriptionsData();
-      persistRoleDescriptions();
-    }}
-
-    function syncRoleDescriptionDomValues() {{
-      for (const input of roleDescriptionInputs) {{
-        input.textContent = input.value;
-      }}
-    }}
-
-    function setCommentStatus(input, text, state) {{
-      const status = document.getElementById(`${{input.dataset.commentId}}-status`);
-      if (!status) {{
-        return;
-      }}
-      status.textContent = text;
-      status.dataset.state = state || '';
-    }}
-
-    function updateCommentPrint(input) {{
-      const printValue = document.getElementById(`${{input.dataset.commentId}}-print`);
-      if (printValue) {{
-        printValue.textContent = input.value || '';
-      }}
-    }}
-
-    function collectComments() {{
-      aclComments = {{}};
-      for (const input of commentInputs) {{
-        if (input.value) {{
-          aclComments[input.dataset.commentId] = input.value;
-        }}
-        updateCommentPrint(input);
-      }}
-      syncCommentsData();
-      persistComments();
-    }}
-
-    function syncTextareaDomValues() {{
-      for (const input of commentInputs) {{
-        input.textContent = input.value;
-      }}
-    }}
-
-    function preparePrint() {{
-      collectComments();
-      collectRoleDescriptions();
-      for (const panel of rolePanels) {{
-        panel.hidden = false;
-      }}
-      for (const item of document.querySelectorAll('.zero-user-role')) {{
-        item.hidden = false;
-      }}
-      for (const row of document.querySelectorAll('.other-acl-rule')) {{
-        row.hidden = false;
-      }}
-      for (const detail of document.querySelectorAll('.alias-detail-row')) {{
-        detail.hidden = false;
-      }}
-      for (const button of document.querySelectorAll('.alias-link')) {{
-        button.setAttribute('aria-expanded', 'true');
-      }}
-    }}
-
-    function restoreScreenView() {{
-      syncZeroUserRoles();
-      for (const button of otherAclToggles) {{
-        syncOtherAclRows(button);
-      }}
-    }}
-
-    function saveCommentedHtml() {{
-      collectComments();
-      collectRoleDescriptions();
-      syncTextareaDomValues();
-      syncRoleDescriptionDomValues();
-      if (typeof syncAccessHistoryDomValues === 'function') {{
-        syncAccessHistoryDomValues();
-      }}
-      const html = '<!doctype html>\\n' + document.documentElement.outerHTML;
-      const blob = new Blob([html], {{ type: 'text/html;charset=utf-8' }});
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = `ssid_role_acl_report_commented_${{stamp}}.html`;
-      document.body.appendChild(link);
-      link.click();
-      URL.revokeObjectURL(link.href);
-      link.remove();
-    }}
-
-    const embeddedComments = readEmbeddedComments();
-    const storedComments = readStoredComments();
-    const hasStoredComments = Object.keys(storedComments).length > 0;
-    aclComments = Object.assign({{}}, embeddedComments, storedComments);
-    for (const input of commentInputs) {{
-      input.value = aclComments[input.dataset.commentId] || '';
-      updateCommentPrint(input);
-      if (!commentStorageAvailable) {{
-        setCommentStatus(input, '브라우저 자동 저장 불가', 'unavailable');
-      }} else if (hasStoredComments && input.value) {{
-        setCommentStatus(input, '임시저장 복원됨', 'restored');
-      }} else {{
-        setCommentStatus(input, '입력 시 자동 저장', '');
-      }}
-      input.addEventListener('input', () => {{
-        collectComments();
-        setCommentStatus(input, '저장됨', 'saved');
-      }});
-    }}
-    syncCommentsData();
-    persistComments();
-
-    const embeddedRoleDescriptions = readEmbeddedRoleDescriptions();
-    const storedRoleDescriptions = readStoredRoleDescriptions();
-    const hasStoredRoleDescriptions = Object.keys(storedRoleDescriptions).length > 0;
-    roleDescriptions = Object.assign({{}}, embeddedRoleDescriptions, storedRoleDescriptions);
-    for (const input of roleDescriptionInputs) {{
-      input.value = roleDescriptions[input.dataset.role] || '';
-      updateRoleDescriptionPrint(input);
-      if (!commentStorageAvailable) {{
-        setRoleDescriptionStatus(input, '브라우저 자동 저장 불가', 'unavailable');
-      }} else if (hasStoredRoleDescriptions && input.value) {{
-        setRoleDescriptionStatus(input, '임시저장 복원됨', 'restored');
-      }} else {{
-        setRoleDescriptionStatus(input, '입력 시 자동 저장', '');
-      }}
-      input.addEventListener('input', () => {{
-        collectRoleDescriptions();
-        setRoleDescriptionStatus(input, '저장됨', 'saved');
-      }});
-    }}
-    syncRoleDescriptionsData();
-    persistRoleDescriptions();
-
-    document.querySelector('#save-commented-html').addEventListener('click', saveCommentedHtml);
-    document.querySelector('#print-pdf').addEventListener('click', () => {{
-      preparePrint();
-      window.print();
-    }});
-    window.addEventListener('beforeprint', preparePrint);
-    window.addEventListener('afterprint', restoreScreenView);
+    {source_annotation_bridge_script}
   </script>
+  {annotation_scripts}
+  <script>window.AnnotationEditorApp = AnnotationEditor.init();</script>
 </body>
 </html>
 """
     atomic_write_text(path, html)
+
+
+def _annotation_asset_source(filename: str, *, tag: str = "script") -> str:
+    source = resource_files("wlc_role_acl_collector").joinpath("static", filename).read_text(encoding="utf-8")
+    return re.sub(rf"</{tag}", lambda match: "<\\/" + match.group(0)[2:], source, flags=re.IGNORECASE)
+
+
+def _source_annotation_bridge_script() -> str:
+    """Keep the optional original policy viewer in sync with the active project.
+
+    This viewer is read-only. Only the current source snapshot can receive
+    notes; opening another project must never apply its positional rule notes
+    to the stale collected policy view. No browser storage is consulted.
+    """
+    return r"""
+    const commentsDataElement = document.querySelector('#acl-comments-data');
+    const commentInputs = Array.from(document.querySelectorAll('.comment-input'));
+    const roleDescriptionsDataElement = document.querySelector('#role-descriptions-data');
+    const roleDescriptionInputs = Array.from(document.querySelectorAll('.role-description-input'));
+
+    function collectComments() {
+      const comments = {};
+      for (const input of commentInputs) {
+        comments[input.dataset.commentId] = input.value;
+        const output = document.getElementById(`${input.dataset.commentId}-print`);
+        if (output) output.textContent = input.value;
+      }
+      if (commentsDataElement) {
+        commentsDataElement.value = JSON.stringify(comments);
+        commentsDataElement.textContent = commentsDataElement.value;
+      }
+      return comments;
+    }
+
+    function collectRoleDescriptions() {
+      const descriptions = {};
+      for (const input of roleDescriptionInputs) {
+        descriptions[input.dataset.role] = input.value;
+        const output = document.getElementById(`${input.dataset.descriptionId}-print`);
+        if (output) output.textContent = input.value;
+      }
+      if (roleDescriptionsDataElement) {
+        roleDescriptionsDataElement.value = JSON.stringify(descriptions);
+        roleDescriptionsDataElement.textContent = roleDescriptionsDataElement.value;
+      }
+      return descriptions;
+    }
+
+    function syncTextareaDomValues() {
+      for (const input of commentInputs) input.textContent = input.value;
+    }
+
+    function syncRoleDescriptionDomValues() {
+      for (const input of roleDescriptionInputs) input.textContent = input.value;
+    }
+
+    window.syncSourceAnnotations = function(project) {
+      const source = document.querySelector('#source-report');
+      if (!source || source.dataset.sourceSnapshotId !== project?.snapshot?.id) return;
+      const snapshot = project.snapshot;
+      for (const panel of document.querySelectorAll('.role-panel')) {
+        const scope = panel.dataset.controllerId || '';
+        let controllers = snapshot.controllers.filter((controller) => controller.id === scope);
+        if (!controllers.length) controllers = snapshot.controllers.filter((controller) => controller.name === scope);
+        if (controllers.length !== 1) continue;
+        const role = snapshot.roles.find((candidate) => candidate.controllerId === controllers[0].id && candidate.name === panel.dataset.role);
+        if (!role) continue;
+        const description = panel.querySelector('.role-description-input');
+        if (description) description.value = project.annotations.roles[role.id]?.text ?? '';
+        const rules = snapshot.rules.filter((rule) => rule.roleId === role.id);
+        for (const row of panel.querySelectorAll('.acl-rule-row')) {
+          const input = row.querySelector('.comment-input');
+          const ordinal = Number(row.dataset.annotationOrdinal || 0);
+          const rule = rules.find((candidate) => candidate.ordinal === ordinal);
+          if (input) input.value = rule ? (project.annotations.rules[rule.id]?.text ?? '') : '';
+        }
+      }
+      collectComments();
+      collectRoleDescriptions();
+      syncTextareaDomValues();
+      syncRoleDescriptionDomValues();
+    };
+    document.querySelector('#save-commented-html')?.addEventListener('click', () => window.AnnotationEditorApp?.saveHtml());
+    document.querySelector('#print-pdf')?.addEventListener('click', () => window.AnnotationEditorApp?.printPdf());
+    """
 
 
 @lru_cache(maxsize=1)
@@ -2402,8 +2299,8 @@ def _access_check_controls_html(
     roles = access_check_data.get("roles", [])
     role_options = "".join(
         f"""
-        <option value="{escape(str(role.get('role', '')))}">
-          {escape(str(role.get('role', '')))} ({escape(str(role.get('userCount', 0)))} users)
+        <option value="{escape(str(role.get('key', role.get('role', ''))))}">
+          {escape(str(role.get('displayName', role.get('role', ''))))} ({escape(str(role.get('userCount', 0)))} users)
         </option>
         """
         for role in roles
@@ -3036,7 +2933,9 @@ def _access_check_script(*, history_enabled: bool = False) -> str:
         accessRenderResult({ status: 'error', verdict: String(error.message || '').replace('Invalid IPv4 address', 'IPv4 주소 형식 오류'), warnings: [] });
         return;
       }
-      const roleData = (accessCheckData.roles || []).find((role) => String(role.role || '').toLowerCase() === roleName.toLowerCase());
+      const exactRoles = (accessCheckData.roles || []).filter((role) => String(role.key || role.role || '').toLowerCase() === roleName.toLowerCase());
+      const namedRoles = (accessCheckData.roles || []).filter((role) => String(role.role || '').toLowerCase() === roleName.toLowerCase());
+      const roleData = namedRoles.length > 1 ? null : (exactRoles.length === 1 ? exactRoles[0] : (namedRoles.length === 1 ? namedRoles[0] : null));
       if (!roleData) {
         accessRenderResult({ status: 'error', verdict: `Role을 찾을 수 없음: ${roleName}`, warnings: [] });
         return;
@@ -3141,15 +3040,22 @@ def _acl_rows_html(
     role: str,
     rows: list[dict[str, Any]],
     alias_lookup: dict[str, list[dict[str, Any]]],
+    *,
+    role_key: str | None = None,
 ) -> str:
+    role_key = role_key or role
     rendered = []
+    ordinal = 0
     for index, row in enumerate(rows, start=1):
+        if str(row.get("raw_rule") or "").strip():
+            ordinal += 1
+        annotation_ordinal = ordinal if str(row.get("raw_rule") or "").strip() else 0
         is_other_acl = not _is_role_related_acl(role, str(row.get("acl", "")))
         row_class = "acl-rule-row other-acl-rule" if is_other_acl else "acl-rule-row"
         other_acl_attr = ' data-other-acl="true" hidden' if is_other_acl else ""
-        rule_id = access_rule_id(role, index)
-        comment_id = f"acl-comment-{_safe_dom_id(role)}-{index}"
-        detail_id = f"alias-detail-{_safe_dom_id(role)}-{index}"
+        rule_id = access_rule_id(role_key, index)
+        comment_id = f"acl-comment-{_safe_dom_id(role_key)}-{index}"
+        detail_id = f"alias-detail-{_safe_dom_id(role_key)}-{index}"
         source_alias = _alias_name_from_field(str(row.get("source", "")))
         destination_alias = _alias_name_from_field(str(row.get("destination", "")))
         detail_html = _inline_alias_detail_html(
@@ -3160,7 +3066,7 @@ def _acl_rows_html(
         )
         rendered.append(
             f"""
-            <tr class="{row_class}"{other_acl_attr} data-rule-id="{escape(rule_id)}">
+            <tr class="{row_class}"{other_acl_attr} data-rule-id="{escape(rule_id)}" data-annotation-ordinal="{annotation_ordinal}">
               <td>{escape(str(row.get('acl', '')))}</td>
               <td>{escape(str(row.get('sequence', '')))}</td>
               <td>{_action_badge_html(str(row.get('action', '')))}</td>
@@ -3169,8 +3075,8 @@ def _acl_rows_html(
               <td>{_service_badge_html(str(row.get('service', '')))}</td>
               <td class="raw raw-column">{escape(str(row.get('raw_rule', '')))}</td>
               <td class="comment-cell">
-                <textarea class="comment-input" data-comment-id="{escape(comment_id)}" aria-label="ACL comment"></textarea>
-                <div id="{escape(comment_id)}-status" class="comment-status">입력 시 자동 저장</div>
+                <textarea class="comment-input" data-comment-id="{escape(comment_id)}" aria-label="ACL comment" readonly></textarea>
+                <div id="{escape(comment_id)}-status" class="comment-status">프로젝트 편집기에서 수정</div>
                 <div id="{escape(comment_id)}-print" class="comment-print"></div>
               </td>
             </tr>
@@ -3332,17 +3238,18 @@ def _hidden_attr(hidden: bool) -> str:
     return " hidden" if hidden else ""
 
 
-def _role_description_html(role: str) -> str:
-    description_id = f"role-description-{_safe_dom_id(role)}"
+def _role_description_html(role: str, *, role_key: str | None = None) -> str:
+    role_key = role_key or role
+    description_id = f"role-description-{_safe_dom_id(role_key)}"
     return f"""
     <div class="role-report-description">
       <div class="role-description-header">
         <label for="{escape(description_id)}">보고용 설명</label>
-        <span id="{escape(description_id)}-status" class="role-description-status">입력 시 자동 저장</span>
+        <span id="{escape(description_id)}-status" class="role-description-status">프로젝트 편집기에서 수정</span>
       </div>
       <textarea id="{escape(description_id)}" class="role-description-input"
-        data-role="{escape(role)}" data-description-id="{escape(description_id)}"
-        aria-label="{escape(role)} Role 보고용 설명"
+        data-role="{escape(role_key)}" data-description-id="{escape(description_id)}"
+        aria-label="{escape(role)} Role 보고용 설명" readonly
         placeholder="상급자 보고용 Role 목적, 대상 사용자, 주요 접근 범위와 확인 사항을 입력하세요."></textarea>
       <div id="{escape(description_id)}-print" class="role-description-print">입력된 설명이 없습니다.</div>
     </div>
@@ -3419,23 +3326,39 @@ def _group_by_alias(alias_rows: list[dict[str, Any]]) -> dict[str, list[dict[str
     return dict(sorted(grouped.items()))
 
 
-def _group_local_network_rows(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    grouped: dict[str, list[dict[str, Any]]] = {}
+def _group_local_network_rows(rows: list[dict[str, Any]]) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in rows:
         role = str(row.get("role", "")).strip()
         if role:
-            grouped.setdefault(role, []).append(row)
+            grouped.setdefault((_row_controller_key(row), role), []).append(row)
     return dict(sorted(grouped.items()))
 
 
-def _role_observed_user_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
-    counts: dict[str, int] = {}
+def _role_observed_user_counts(rows: list[dict[str, Any]]) -> dict[tuple[str, str], int]:
+    counts: dict[tuple[str, str], int] = {}
     for row in rows:
         role = str(row.get("role", ""))
         if not role:
             continue
-        counts[role] = max(counts.get(role, 0), _int_value(row.get("observed_user_count", 0)))
+        key = (_row_controller_key(row), role)
+        counts[key] = max(counts.get(key, 0), _int_value(row.get("observed_user_count", 0)))
     return counts
+
+
+def _row_controller_key(row: dict[str, Any]) -> str:
+    return str(row.get("controller_id") or row.get("controller") or "")
+
+
+def _scoped_role_key(controller: str, role: str) -> str:
+    value = json.dumps([controller, role], ensure_ascii=False).encode("utf-8")
+    return f"role-{hashlib.sha256(value).hexdigest()[:32]}"
+
+
+def _role_display_name(row: dict[str, Any], role: str) -> str:
+    name = str(row.get("controller") or "Unknown controller")
+    host = str(row.get("controller_host") or "")
+    return f"{name} ({host}) · {role}" if host else f"{name} · {role}"
 
 
 def _user_table_counts_reliable(rows: list[dict[str, Any]]) -> bool:

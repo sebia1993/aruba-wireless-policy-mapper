@@ -114,6 +114,7 @@ Write-Host "Building Windows GUI executable..."
     --workpath $buildDir `
     --specpath $specDir `
     --collect-data customtkinter `
+    --collect-data wlc_role_acl_collector `
     --paths ".\src" `
     ".\gui_launcher.py"
 
@@ -131,6 +132,7 @@ Write-Host "Building Windows CLI executable..."
     --distpath $distDir `
     --workpath $buildDir `
     --specpath $specDir `
+    --collect-data wlc_role_acl_collector `
     --paths ".\src" `
     ".\cli_launcher.py"
 

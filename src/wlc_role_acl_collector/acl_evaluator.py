@@ -40,13 +40,21 @@ def build_access_check_data(
     *,
     include_local_networks: bool = True,
 ) -> dict[str, Any]:
-    alias_lookup = _group_alias_rows(alias_rows)
-    local_network_lookup = _group_local_network_rows(local_network_rows) if include_local_networks else {}
     services: set[str] = set()
     roles: list[dict[str, Any]] = []
 
     for item in role_items:
         role = _clean(item.get("role"))
+        scope = _controller_key(item)
+        duplicate_name = sum(_clean(candidate.get("role")).casefold() == role.casefold() for candidate in role_items) > 1
+        role_key = _clean(item.get("role_key")) or (
+            "role-" + hashlib.sha256(f"{scope}\0{role}".encode("utf-8")).hexdigest()[:32]
+            if duplicate_name else role
+        )
+        alias_lookup = _group_alias_rows([row for row in alias_rows if _controller_key(row) == scope])
+        local_network_lookup = _group_local_network_rows(
+            [row for row in local_network_rows if _controller_key(row) == scope]
+        ) if include_local_networks else {}
         rules: list[dict[str, Any]] = []
         for index, row in enumerate(item.get("rows", []), start=1):
             # Access Check는 "선택한 Role과 같은 이름의 ACL"만 평가합니다.
@@ -63,7 +71,7 @@ def build_access_check_data(
             )
             rules.append(
                 {
-                    "id": access_rule_id(role, index),
+                    "id": access_rule_id(role_key, index),
                     "acl": _clean(row.get("acl")),
                     "sequence": _clean(row.get("sequence")),
                     "action": _clean(row.get("action")).lower(),
@@ -78,7 +86,12 @@ def build_access_check_data(
             )
 
         role_data = {
+            "id": role_key,
+            "key": role_key,
             "role": role,
+            "controllerId": scope,
+            "controllerName": _clean(item.get("controller")),
+            "displayName": _clean(item.get("display_name")) or role,
             "userCount": _int_value(item.get("user_count")),
             "zeroUser": bool(item.get("zero_user_hidden")),
             "panelId": _clean(item.get("panel_id")),
@@ -447,10 +460,18 @@ def _group_local_network_rows(rows: list[dict[str, Any]]) -> dict[str, list[dict
 
 def _find_role(access_data: dict[str, Any], role: str) -> dict[str, Any] | None:
     role_key = role.casefold()
-    for item in access_data.get("roles", []):
-        if _clean(item.get("role")).casefold() == role_key:
-            return item
-    return None
+    items = access_data.get("roles", [])
+    named = [item for item in items if _clean(item.get("role")).casefold() == role_key]
+    if len(named) > 1:
+        return None
+    exact = [item for item in items if _clean(item.get("key")).casefold() == role_key]
+    if len(exact) == 1:
+        return exact[0]
+    return named[0] if len(named) == 1 else None
+
+
+def _controller_key(row: dict[str, Any]) -> str:
+    return _clean(row.get("controller_id")) or _clean(row.get("controller"))
 
 
 def _ip_to_int(value: str) -> int:

@@ -31,7 +31,7 @@
 
 ## 로컬 개발
 
-Python 3.11 이상을 사용합니다.
+Python 3.11 이상을 사용하고, 주석 편집기 테스트에는 Node.js 20 이상을 사용합니다.
 
 ```powershell
 python -m venv .venv
@@ -63,7 +63,9 @@ streamlit run app.py --server.address 127.0.0.1 --server.port 8763
 기본 검증:
 
 ```powershell
+npm ci --ignore-scripts
 python -m pytest
+npm test
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\validate.ps1
 ```
 
@@ -80,7 +82,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_combined_rel
 python .\tools\verify_combined_release_package.py --dist .\dist --smoke
 ```
 
-Pull Request에서는 GitHub Actions의 Windows runner가 동일한 배포 경로를 검증합니다.
+Pull Request에서는 GitHub Actions의 Windows runner가 Node 22에서 `npm ci --ignore-scripts`로 의존성을 먼저 설치하고 Python 검증 이후 `npm test`를 한 번 실행한 뒤 동일한 배포 경로를 검증합니다. `tools/validate.ps1`의 기존 JavaScript 문법 검사만으로 주석 기능의 Node 회귀를 대신하지 않습니다. 실제 회사 장비·사내 파일·Windows 사용자 브라우저·인쇄 환경의 수동 검증은 사용자 범위이며 자동 테스트 통과와 구분합니다.
 
 ## 네트워크 데이터 취급 원칙
 
@@ -118,6 +120,14 @@ sample-role
 - Alias 정의가 불완전하면 실제 목적지 범위를 임의 추정하지 않습니다.
 - Access Check는 필요한 선행 정보가 부족하면 `판정 불가`로 반환합니다.
 - 역할/ACL 관계 변경 시 대량 데이터 회귀 테스트를 함께 확인합니다.
+
+### 오프라인 주석과 보고서
+
+- `annotation_project.py`는 허용된 수집 데이터로 `aruba-policy-annotations` schemaVersion 1 DTO를 만듭니다. 계정·비밀번호와 user-table 원문과 내보내기에 동의하지 않은 내부 대역은 포함하지 않습니다.
+- `static/annotation_core.js`는 엄격한 검증·안전 복사, 컨트롤러별 보수적 설명 재사용, DOM과 독립적인 보고 범위를 담당합니다. 정확한 계약은 [명세](docs/superpowers/specs/2026-11-16-annotation-project.md)를 참고합니다.
+- `annotation_editor.js`는 파일·편집·복구, `annotation_import.js`는 실행 없는 HTML 읽기, `annotation_export.js`는 공통 모델의 실제 XLSX/인쇄 HTML 변환을 담당합니다. 브라우저에서 필요한 ExcelJS와 라이선스를 로컬 정적 자산으로 묶습니다.
+- JSON 작업이 수집본과 메모·확인 상태·출처를 보관하는 기준입니다. 브라우저 저장소는 사용자가 선택하는 복구용이며 기존 파일을 자동 덮어쓰지 않습니다. Excel/PDF는 보고용이며 재가져오기 편집 원본이 아닙니다.
+- 원문 suffix·내부 공백, 중복 규칙, 동명 컨트롤러, Alias/순서 변경, 부분 수집, 현재 빈 메모·미연결 출처 보존, 손상된 파일, 임시저장 실패와 보고 범위 일치를 회귀에 포함합니다.
 
 ### 안전
 

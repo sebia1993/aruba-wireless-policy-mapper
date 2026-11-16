@@ -1,0 +1,7 @@
+{
+  "name": "aruba-policy-annotation-tests",
+  "private": true,
+  "scripts": {"test": "node tools/run_annotation_tests.cjs"},
+  "devDependencies": {"jsdom": "26.1.0"},
+  "engines": {"node": ">=20"}
+}
