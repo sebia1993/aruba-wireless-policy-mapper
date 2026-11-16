@@ -162,7 +162,7 @@ SSID → Role → ACL 상세와 Access Check의 이전 HTML 예시는 [2026-06-3
 - Role별 ACL 상세
 - 기본 `주석·보고서` 화면에서 Role 설명·ACL 주석·확인 상태 편집
 - JSON 작업 저장·열기, 이전 주석 재사용과 미연결 설명 보존
-- 전체/선택 Role/변경·확인 범위의 실제 XLSX와 별도 PDF 인쇄
+- 전체/선택 Role/변경·확인 범위의 실제 XLSX와 브라우저 인쇄를 통한 PDF 저장
 - 현재 작업을 담은 독립 HTML 편집기 저장
 - 원본 `수집 결과·통신 확인`의 선택 Role PNG 저장
 - Access Check
@@ -208,7 +208,7 @@ SSID → Role → ACL 상세와 Access Check의 이전 HTML 예시는 [2026-06-3
 일반 사용자는 GitHub **Releases**의 Windows 통합 ZIP을 사용합니다.
 
 ```text
-wlc-role-acl-collector_v0.2.0_windows.zip
+wlc-role-acl-collector_v0.3.0_windows.zip
 ```
 
 압축을 완전히 푼 뒤 목적에 맞는 실행 경로를 선택합니다.

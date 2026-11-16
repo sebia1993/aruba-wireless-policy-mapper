@@ -43,3 +43,24 @@ Python 검사는 해당 작업 소스 경로와 기존 격리 환경을 사용�
 사용자 설명서의 Markdown·HTML, 변경 기록, 검증 보고서를 갱신했다. 개발 결과는 기존 PR #23에 후속 커밋으로 관리한다. 독립 리뷰에서 확인된 추가 필수 구현 항목이나 보류한 경미한 수정 항목은 없다.
 
 이번 개발 범위의 완료 기준은 기능 구현·자동 회귀·문서·개발 브랜치 반영이다. `main` 병합과 정식 릴리스 발행은 별도 배포 단계다.
+
+## 2026-11-16 — v0.3.0 정식 릴리스 준비
+
+### 추가 승인과 배포 범위
+
+개발 마무리 이후 사용자가 `main` 병합과 정식 릴리스 발행을 명시적으로 승인하여 배포 준비를 시작했다. 앞선 기록의 개발 범위는 당시 이력으로 유지하고, 이번 배포 단계에서 주석 작업·재사용·보고서 기능과 기존 미발행 변경을 `v0.3.0`으로 묶는다.
+
+실제 회사 장비·회사 파일·Windows 사용자 환경·인쇄 결과의 수동 확인은 계속 사용자의 별도 검증 범위다. Windows CI의 자동 빌드·smoke 결과는 이 현장 검증과 구분한다.
+
+### 릴리스 준비 내용
+
+- 프로젝트 메타데이터와 실행 코드의 버전을 `0.3.0`으로 맞추고, 현재 배포 파일 안내와 변경 기록을 갱신한다. `0.2.0`의 변경 이력과 당시 화면 캡처 정보는 보존한다.
+- Release workflow에 PR 검증과 같은 Node.js 22, `npm ci --ignore-scripts`, `npm test`를 적용한다. Python 통합 검사에서 JSDOM을 사용하므로 JavaScript 의존성 설치도 Python 검사 전에 수행한다.
+- 자동 Release notes에 주석 편집, JSON 작업 보관, 이전 설명 재사용, 장비별 구분, 실제 XLSX와 브라우저 인쇄를 통한 PDF 저장을 반영한다.
+- Windows 통합 ZIP, SHA-256 sidecar, `requirements-web-lock.txt` 기준 Python 의존성 CycloneDX SBOM과 GitHub build provenance를 배포 산출물로 유지한다.
+
+### 검증 근거와 후속 확인
+
+릴리스 준비 시작 시점의 기능 브랜치 커밋은 `5ee95afa917166bbfe44447ad1bffc1ca89b35cf`다. 해당 PR의 [Windows 검증 실행 43837938414](https://github.com/sebia1993/aruba-wireless-policy-mapper/actions/runs/43837938414)에서 Python 215개, JavaScript 64개 검사와 GUI/CLI·Streamlit portable·통합 ZIP 빌드 및 smoke 검증이 통과했다.
+
+릴리스 준비 변경의 PR 검사를 확인한 뒤 병합한 `main` 커밋에 Release workflow를 실행한다. Release workflow에서 해당 커밋의 자동 검사와 Windows 패키지 검증을 다시 수행하며, `main` push 검증도 별도로 실행된다. 태그가 병합한 `main` 커밋을 가리키는지, 공개 자산 세 개와 최종 ZIP의 SHA-256이 일치하는지 확인하는 것을 발행 완료 기준으로 삼는다. 이 항목은 배포 준비 기록이며 병합·발행 완료 결과는 해당 실행과 공개 Release에서 확인한다.
