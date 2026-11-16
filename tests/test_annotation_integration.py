@@ -40,7 +40,7 @@ def test_frames_and_access_checks_isolate_same_names_by_endpoint(tmp_path):
         assert set(frames[key]["controller_id"]) == ids
     path = tmp_path / "scoped.html"
     _write_html(path, frames)
-    html = path.read_text()
+    html = path.read_text(encoding="utf-8")
     data = embedded_json(html, "access-check-data")
     assert len(data["roles"]) == 2
     assert len({role["key"] for role in data["roles"]}) == 2
@@ -83,7 +83,7 @@ def test_access_data_assigns_scoped_keys_for_duplicate_roles_without_explicit_ke
 def test_report_embeds_complete_scoped_project_and_offline_editor(tmp_path):
     parsed_items, results = controllers()
     paths = write_reports(parsed_controllers=parsed_items, collection_results=results, output_dir=tmp_path)
-    html = paths["html"].read_text()
+    html = paths["html"].read_text(encoding="utf-8")
     project = embedded_json(html, "annotation-project-data")
     assert {c["host"] for c in project["snapshot"]["controllers"]} == {"192.0.2.1", "192.0.2.2"}
     assert all(c["identityKnown"] for c in project["snapshot"]["controllers"])
@@ -126,7 +126,7 @@ window.syncSourceAnnotations(project);
 assert.equal(input.value,'');
 assert.equal(JSON.parse(elements['#acl-comments-data'].value)['comment-1'],'');
 """
-    completed = subprocess.run(["node", "-e", harness + _source_annotation_bridge_script() + assertions], capture_output=True, text=True)
+    completed = subprocess.run(["node", "-e", harness + _source_annotation_bridge_script() + assertions], capture_output=True, text=True, encoding="utf-8")
     assert completed.returncode == 0, completed.stderr
 
 
@@ -170,8 +170,10 @@ assert.equal(reopened.window.PWNED,undefined);
 reopened.window.close();
 win.close();
 """
-    completed = subprocess.run(["node", "-e", script], input=path.read_text(), capture_output=True, text=True)
+    completed = subprocess.run(["node", "-e", script], input=path.read_text(encoding="utf-8"), capture_output=True, text=True, encoding="utf-8")
     assert completed.returncode == 0, completed.stderr
+
+
 def test_initial_excel_preserves_formula_like_literals(tmp_path):
     import pandas as pd
     from openpyxl import load_workbook

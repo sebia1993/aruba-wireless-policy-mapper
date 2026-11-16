@@ -47,7 +47,7 @@ const ExcelJS = require(process.argv[1] + '/exceljs.min.js');
 const model = JSON.parse(fs.readFileSync(0, 'utf8'));
 exporter.workbookBytes(model, ExcelJS).then(bytes => fs.writeFileSync(process.argv[2], bytes)).catch(error => { console.error(error); process.exitCode = 1; });
 """
-    subprocess.run(["node", "-e", script, str(STATIC), str(output)], input=json.dumps(model), text=True, capture_output=True, check=True)
+    subprocess.run(["node", "-e", script, str(STATIC), str(output)], input=json.dumps(model), text=True, encoding="utf-8", capture_output=True, check=True)
     workbook = openpyxl.load_workbook(output, data_only=False)
     assert workbook.sheetnames == ["보고 요약", "Role 설명", "ACL 상세", "변경·확인 사항", "Alias 상세"]
     for sheet in workbook:
