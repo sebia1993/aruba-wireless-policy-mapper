@@ -11,7 +11,7 @@ from typing import Any
 
 from . import __version__
 from .atomic_io import atomic_write_text, commit_staged_files
-from .diagnostic_codes import DiagnosticCode, get_diagnostic_code
+from .diagnostic_codes import DIAGNOSTIC_CODES, DiagnosticCode, get_diagnostic_code
 from .diagnostic_events import DiagnosticEvent
 from .redaction import redact_payload, redact_sensitive_text
 
@@ -208,15 +208,10 @@ def _diagnostic_log(payload: dict[str, Any]) -> str:
     for event in payload.get("events", []):
         lines.append(
             " | ".join(
-                redact_sensitive_text(str(value))
-                for value in (
-                    event.get("timestamp", ""),
-                    event.get("stage", ""),
-                    event.get("status", ""),
-                    event.get("code", ""),
-                    event.get("command_id", ""),
-                    event.get("message", ""),
-                )
+                str(event.get(field, ""))
+                if field == "code" and event.get(field) in DIAGNOSTIC_CODES
+                else redact_sensitive_text(str(event.get(field, "")))
+                for field in ("timestamp", "stage", "status", "code", "command_id", "message")
             )
         )
     return "\n".join(lines)

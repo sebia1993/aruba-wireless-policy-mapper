@@ -7,12 +7,14 @@ CollectionResult objects instead of calling SSH/Telnet commands directly.
 from __future__ import annotations
 
 import math
+import re
 import threading
 import time
 from pathlib import Path
 from typing import Callable
 
 from .aos8_parser import discover_aliases_from_config, discover_roles_from_config
+from .command_response import cli_rejection
 from .config import resolve_credentials
 from .hostkeys import default_known_hosts_path, hardened_disabled_algorithms
 from .models import CollectionResult, CommandOutput, Controller, ControllerCredentials
@@ -110,7 +112,10 @@ def collect_from_controller(
                 output = _run_command(connection, command, timeout=command_timeout)
             except Exception as exc:
                 result.commands.append(
-                    CommandOutput(command_id=command_id, command=command, success=False, error=str(exc))
+                    CommandOutput(
+                        command_id=command_id, command=command, success=False,
+                        output=getattr(exc, "output", ""), error=str(exc),
+                    )
                 )
                 _emit(
                     progress_callback,
@@ -119,10 +124,10 @@ def collect_from_controller(
                     command=command,
                     error=str(exc),
                 )
-                if command_id == "configuration_effective":
-                    return result
                 if _cancel_requested(cancel_event):
                     return _mark_cancelled(result, progress_callback)
+                if command_id == "configuration_effective" or isinstance(exc, _UnframedResponse):
+                    return result
                 continue
 
             result.commands.append(CommandOutput(command_id=command_id, command=command, output=output))
@@ -206,6 +211,7 @@ def collect_from_controller(
                         command_id=f"netdestination::{alias}",
                         command=command,
                         success=False,
+                        output=getattr(exc, "output", ""),
                         error=str(exc),
                     )
                 )
@@ -219,6 +225,10 @@ def collect_from_controller(
                     total=len(aliases),
                     error=str(exc),
                 )
+                if _cancel_requested(cancel_event):
+                    return _mark_cancelled(result, progress_callback)
+                if isinstance(exc, _UnframedResponse):
+                    return result
             if _cancel_requested(cancel_event):
                 return _mark_cancelled(result, progress_callback)
 
@@ -281,6 +291,7 @@ def collect_from_controller(
                         command_id=f"rights::{role}",
                         command=command,
                         success=False,
+                        output=getattr(exc, "output", ""),
                         error=str(exc),
                     )
                 )
@@ -294,6 +305,10 @@ def collect_from_controller(
                     total=len(roles),
                     error=str(exc),
                 )
+                if _cancel_requested(cancel_event):
+                    return _mark_cancelled(result, progress_callback)
+                if isinstance(exc, _UnframedResponse):
+                    return result
             if _cancel_requested(cancel_event):
                 return _mark_cancelled(result, progress_callback)
         _emit(progress_callback, "complete", command_count=len(result.commands))
@@ -385,6 +400,18 @@ def _mark_duration_limit(
     return result
 
 
+def _read_offline_command(path: Path, *, command_id: str, command: str) -> CommandOutput:
+    output = path.read_text(encoding="utf-8-sig")
+    rejection = cli_rejection(output)
+    return CommandOutput(
+        command_id=command_id,
+        command=command,
+        output=output,
+        success=rejection is None,
+        error=rejection or "",
+    )
+
+
 def collect_from_offline_raw(controller: Controller, raw_root: Path) -> CollectionResult:
     # 실제 장비 없이 테스트할 때 쓰는 경로입니다.
     # tests/fixtures처럼 저장된 명령 결과 파일을 CollectionResult로 바꿔 파서/리포트를 검증합니다.
@@ -403,16 +430,14 @@ def collect_from_offline_raw(controller: Controller, raw_root: Path) -> Collecti
         )
         return result
 
-    config_output = config_path.read_text(encoding="utf-8-sig")
-    result.commands.extend(
-        [
-            CommandOutput(
-                command_id="configuration_effective",
-                command="show configuration effective",
-                output=config_output,
-            )
-        ]
+    result.commands.append(
+        _read_offline_command(
+            config_path,
+            command_id="configuration_effective",
+            command="show configuration effective",
+        )
     )
+    config_output = result.command_output("configuration_effective")
 
     for command_id, command, filename in (
         ("ip_interface_brief", "show ip interface brief", "show_ip_interface_brief.txt"),
@@ -421,10 +446,10 @@ def collect_from_offline_raw(controller: Controller, raw_root: Path) -> Collecti
         path = controller_dir / filename
         if path.exists():
             result.commands.append(
-                CommandOutput(
+                _read_offline_command(
+                    path,
                     command_id=command_id,
                     command=command,
-                    output=path.read_text(encoding="utf-8-sig"),
                 )
             )
 
@@ -432,33 +457,78 @@ def collect_from_offline_raw(controller: Controller, raw_root: Path) -> Collecti
         rights_path = controller_dir / f"show_rights__{_safe_role_file_name(role)}.txt"
         if rights_path.exists():
             result.commands.append(
-                CommandOutput(
+                _read_offline_command(
+                    rights_path,
                     command_id=f"rights::{role}",
                     command=f"show rights {role}",
-                    output=rights_path.read_text(encoding="utf-8-sig"),
                 )
             )
     for alias in discover_aliases_from_config(config_output):
         alias_path = controller_dir / f"show_netdestination__{_safe_role_file_name(alias)}.txt"
         if alias_path.exists():
             result.commands.append(
-                CommandOutput(
+                _read_offline_command(
+                    alias_path,
                     command_id=f"netdestination::{alias}",
                     command=f"show netdestination {alias}",
-                    output=alias_path.read_text(encoding="utf-8-sig"),
                 )
             )
     return result
 
 
+class _CommandRejected(RuntimeError):
+    def __init__(self, error: str, output: str):
+        super().__init__(error)
+        self.output = output
+
+
+class _UnframedResponse(_CommandRejected):
+    """The channel cannot safely be reused after an incomplete response."""
+
+
+def _read_framed(connection, pattern: re.Pattern, deadline: float, *, echo: re.Pattern | None = None) -> str:
+    output = ""
+    while time.monotonic() < deadline:
+        try:
+            output += connection.read_channel()
+        except Exception as exc:
+            raise _UnframedResponse(str(exc), output) from exc
+        match = pattern.search(output)
+        if match and (echo is None or echo.search(output[:match.start()])):
+            return output
+        time.sleep(min(0.025, max(0, deadline - time.monotonic())))
+    raise _UnframedResponse("Command response timed out before verified completion prompt or required command echo.", output)
+
+
 def _run_command(connection, command: str, *, timeout: int) -> str:
-    return connection.send_command_timing(
-        command_string=command,
-        strip_prompt=False,
-        strip_command=False,
-        cmd_verify=False,
-        read_timeout=timeout,
-    )
+    # Netmiko's initialized base_prompt comes from the device. Probe its current
+    # full prompt (including privilege terminator) within the same command budget.
+    # A quiet channel is never sufficient evidence of a complete response.
+    deadline = time.monotonic() + timeout
+    base_prompt = getattr(connection, "base_prompt", "").strip()
+    if not base_prompt or base_prompt in {"#", ">"}:
+        raise _UnframedResponse("Device prompt is unavailable; command was not sent.", "")
+    probe_pattern = re.compile(r"(?m)^" + re.escape(base_prompt) + r"[ \t]*[>#][ \t]*\Z")
+    try:
+        connection.write_channel(connection.RETURN)
+        probe = _read_framed(connection, probe_pattern, deadline)
+        prompt = probe_pattern.search(probe).group().strip()
+        prompt_pattern = re.compile(r"(?m)^" + re.escape(prompt) + r"[ \t]*\Z")
+        echo_pattern = re.compile(r"(?m)^(?:" + re.escape(prompt) + r"[ \t]*)?" + re.escape(command) + r"[ \t]*$")
+        connection.write_channel(connection.normalize_cmd(command))
+        # Aruba's Netmiko driver disables exact echo verification because space
+        # autocomplete can repaint it. Honor that device capability; the full
+        # actual prompt is still mandatory for every successful response.
+        echo = None if getattr(connection, "global_cmd_verify", None) is False else echo_pattern
+        output = _read_framed(connection, prompt_pattern, deadline, echo=echo)
+    except _UnframedResponse:
+        raise
+    except Exception as exc:
+        raise _UnframedResponse(str(exc), "") from exc
+    rejection = cli_rejection(output)
+    if rejection:
+        raise _CommandRejected(rejection, output)
+    return output
 
 
 def _build_connect_params(

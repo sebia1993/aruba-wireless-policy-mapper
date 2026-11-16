@@ -5,8 +5,12 @@ from wlc_role_acl_collector.collection_health import (
     assess_collection_results,
     assess_command_status_rows,
     infer_collection_impact_scope,
+    infer_collection_impact_scope_for_parsed,
 )
-from wlc_role_acl_collector.models import CollectionResult, CommandOutput, Controller
+from wlc_role_acl_collector.models import (
+    AclRule, CollectionResult, CommandOutput, Controller, ParsedController,
+    RolePolicy, SsidRoleMapping,
+)
 
 
 def _result(*commands: CommandOutput) -> CollectionResult:
@@ -239,3 +243,109 @@ def test_unknown_failure_scope_does_not_mark_other_controllers_as_affected():
     assert scope.affected_roles == ("employee",)
     assert scope.affected_ssids == ("CORP",)
     assert scope.identification_incomplete is True
+
+
+def test_impact_scope_uses_identity_even_when_display_names_collide_or_change():
+    scope = infer_collection_impact_scope(
+        [{"controller": "old name", "controller_id": "device-a", "command_id": "user_table", "success": False}],
+        [
+            {"controller": "WLC", "controller_id": "device-a", "role": "employee"},
+            {"controller": "WLC", "controller_id": "device-b", "role": "guest"},
+        ],
+        [
+            {"controller": "WLC", "controller_id": "device-a", "role": "employee", "ssid": "CORP"},
+            {"controller": "WLC", "controller_id": "device-b", "role": "guest", "ssid": "GUEST"},
+        ],
+    )
+    assert scope.affected_roles == ("employee",)
+    assert scope.affected_ssids == ("CORP",)
+    assert scope.identification_incomplete is False
+
+
+def test_dynamic_failure_does_not_mix_same_role_or_alias_on_another_controller():
+    rows = [
+        {"controller": "WLC", "controller_id": "device-a", "role": "staff", "destination": "alias servers"},
+        {"controller": "WLC", "controller_id": "device-b", "role": "staff", "destination": "alias servers"},
+    ]
+    ssids = [
+        {"controller": "WLC", "controller_id": "device-a", "role": "staff", "ssid": "CORP-A"},
+        {"controller": "WLC", "controller_id": "device-b", "role": "staff", "ssid": "CORP-B"},
+    ]
+    for command_id in ("rights::staff", "netdestination::servers"):
+        scope = infer_collection_impact_scope(
+            [{"controller": "WLC", "controller_id": "device-a", "command_id": command_id, "success": False}],
+            rows, ssids,
+        )
+        assert scope.affected_roles == ("staff",)
+        assert scope.affected_ssids == ("CORP-A",)
+        assert scope.identification_incomplete is False
+
+
+def test_ambiguous_legacy_command_does_not_guess_a_controller():
+    scope = infer_collection_impact_scope(
+        [{"controller": "WLC", "command_id": "user_table", "success": False}],
+        [
+            {"controller": "WLC", "controller_id": "device-a", "role": "employee"},
+            {"controller": "WLC", "controller_id": "device-b", "role": "guest"},
+        ],
+        [{"controller": "WLC", "role": "employee", "ssid": "LEGACY"}],
+    )
+    assert scope.affected_roles == ()
+    assert scope.affected_ssids == ()
+    assert scope.identification_incomplete is True
+
+
+def test_ambiguous_legacy_rows_are_excluded_but_known_identity_rows_are_kept():
+    scope = infer_collection_impact_scope(
+        [
+            {"controller": "WLC", "controller_id": "device-a", "command_id": "user_table", "success": False},
+            {"controller": "WLC", "controller_id": "device-b", "command_id": "user_table", "success": True},
+        ],
+        [{"controller": "WLC", "controller_id": "device-a", "role": "employee"}],
+        [
+            {"controller": "WLC", "controller_id": "device-a", "role": "employee", "ssid": "CORP"},
+            {"controller": "WLC", "role": "guest", "ssid": "UNKNOWN"},
+        ],
+    )
+    assert scope.affected_roles == ("employee",)
+    assert scope.affected_ssids == ("CORP",)
+    assert scope.identification_incomplete is True
+
+
+def test_unambiguous_legacy_rows_still_join_an_identified_command():
+    scope = infer_collection_impact_scope(
+        [{"controller": "WLC", "controller_id": "device-a", "command_id": "user_table", "success": False}],
+        [{"controller": "WLC", "role": "employee"}],
+        [{"controller": "WLC", "role": "employee", "ssid": "CORP"}],
+    )
+    assert scope.affected_roles == ("employee",)
+    assert scope.affected_ssids == ("CORP",)
+    assert scope.identification_incomplete is False
+
+
+def test_impact_counts_distinct_devices_even_with_identical_role_and_ssid_names():
+    scope = infer_collection_impact_scope(
+        [
+            {"controller": "WLC", "controller_id": cid, "command_id": "rights::staff", "success": False}
+            for cid in ("device-a", "device-b")
+        ],
+        [],
+        [
+            {"controller": "WLC", "controller_id": cid, "role": "staff", "ssid": "CORP"}
+            for cid in ("device-a", "device-b")
+        ],
+    )
+    assert scope.role_count == 2
+    assert scope.ssid_count == 2
+
+
+def test_parsed_impact_scope_retains_endpoint_identity_for_duplicate_names():
+    first = ParsedController(Controller(name="WLC", host="192.0.2.1"))
+    second = ParsedController(Controller(name="WLC", host="192.0.2.2"))
+    for parsed, role, ssid in ((first, "employee", "CORP"), (second, "guest", "GUEST")):
+        parsed.role_policies[role] = RolePolicy("WLC", role, rules=[AclRule("WLC", "acl", 1, "any any any permit")])
+        parsed.ssid_role_mappings = [SsidRoleMapping("WLC", "ap", "vap", "profile", ssid, "aaa", "default", role, "", "", "")]
+    failed = CollectionResult(first.controller, [CommandOutput("user_table", "show user-table", success=False, error="timeout")])
+    scope = infer_collection_impact_scope_for_parsed([failed], [first, second])
+    assert scope.affected_roles == ("employee",)
+    assert scope.affected_ssids == ("CORP",)

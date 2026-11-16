@@ -7,7 +7,6 @@ devices. Legacy frames therefore carry explicitly unknown endpoint identity.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import re
@@ -16,22 +15,8 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
 from .collection_health import assess_collection_results
-from .models import CollectionResult, Controller, ParsedController
-
-
-def _id(kind: str, *parts: object) -> str:
-    payload = json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
-    return f"{kind}-{hashlib.sha256(payload.encode('utf-8')).hexdigest()[:32]}"
-
-
-def _scope(controller: Controller) -> str:
-    return _text(getattr(controller, "scope", getattr(controller, "configuration_scope", "effective"))) or "effective"
-
-
-def controller_identity(controller: Controller) -> str:
-    """Return an opaque endpoint/port/configuration-scope identity, ignoring name."""
-    host = controller.host.strip().casefold().rstrip(".")
-    return _id("controller", host, int(controller.port), _scope(controller))
+from .controller_identity import controller_identity, controller_scope as _scope, stable_id as _id
+from .models import CollectionResult, ParsedController
 
 
 def build_annotation_project(

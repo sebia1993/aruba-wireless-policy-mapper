@@ -22,5 +22,5 @@ set "WLC_PORT=%~2"
 if "%~1"=="" set /p "WLC_PORT=SSH Port [22]: "
 if "%WLC_PORT%"=="" set "WLC_PORT=22"
 
-"%PYTHON_EXE%" -m wlc_role_acl_collector.cli trust-host-key --host "%WLC_HOST%" --port "%WLC_PORT%"
+"%PYTHON_EXE%" -m wlc_role_acl_collector trust-host-key --host "%WLC_HOST%" --port "%WLC_PORT%"
 exit /b %ERRORLEVEL%

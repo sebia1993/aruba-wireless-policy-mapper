@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import platform
 import subprocess
 import tempfile
@@ -31,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--zip", dest="zip_path", type=Path, help="release ZIP path")
     parser.add_argument("--dist", type=Path, default=Path("dist"), help="directory containing a web release ZIP")
     parser.add_argument("--sha256", type=Path, help="SHA256 sidecar file to verify")
-    parser.add_argument("--smoke", action="store_true", help="run start_webapp.cmd --smoke on Windows")
+    parser.add_argument("--smoke", action="store_true", help="run web startup and offline host-key launcher checks on Windows")
     parser.add_argument(
         "--require-smoke",
         action="store_true",
@@ -161,6 +162,26 @@ def _smoke_webapp(zip_path: Path, *, require: bool) -> None:
             raise SystemExit(
                 "Streamlit portable smoke wrote unexpected stderr output:\n"
                 + completed.stderr.strip()
+            )
+
+        # A malformed URL fails validation before any device connection. The
+        # former cli-module launcher silently exited zero without doing work.
+        host_key = subprocess.run(
+            ["cmd.exe", "/c", "trust_host_key.cmd", "invalid://host", "22"],
+            cwd=extract_dir,
+            env=dict(os.environ, PYTHONIOENCODING="utf-8"),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+        if host_key.returncode != 2 or not all(marker in host_key.stderr for marker in ("WLC IP", "URL")):
+            output = f"{host_key.stdout}\n{host_key.stderr}".strip()
+            raise SystemExit(
+                f"Host-key launcher did not reject the offline invalid address (exit {host_key.returncode}):\n"
+                + (output or "<no output>")
             )
 
 

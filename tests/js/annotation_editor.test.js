@@ -12,14 +12,16 @@ function mount(project = fixture(), storage) {
   const {window} = dom;
   window.document.getElementById('annotation-project-data').textContent = JSON.stringify(project);
   window.confirm = () => true;
-  let downloads = 0;
-  window.URL.createObjectURL = () => 'blob:test';
+  let downloads = 0, downloadedBlob;
+  window.URL.createObjectURL = blob => {downloadedBlob=blob;return 'blob:test';};
   window.URL.revokeObjectURL = () => {};
   window.HTMLAnchorElement.prototype.click = () => { downloads++; };
   if (storage) Object.defineProperty(window, 'localStorage', {value:storage});
   window.addEventListener('error', event=>{throw event.error;});
   const app = Editor.init({document:window.document,window,core:Core,importer:Importer});
-  return {window,app,downloads:()=>downloads,close:()=>window.close()};
+  return {window,app,downloads:()=>downloads,close:()=>window.close(),downloadedText:()=>new Promise((resolve,reject)=>{
+    const reader=new window.FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error);reader.readAsText(downloadedBlob);
+  })};
 }
 
 test('recovery keys isolate project, snapshot, revision and base timestamp', () => {
@@ -310,5 +312,146 @@ test('successful edits update only the matching kind status when IDs coincide', 
     assert.equal(env.window.document.querySelector('[data-status-kind="rules"][data-status-id="shared"]').value,'unreviewed');
     assert.equal(env.app.getProject().annotations.roles.shared.text,'role note');
     assert.equal(env.app.getProject().annotations.rules.shared.text,'updated rule');
+  } finally {env.close();}
+});
+
+
+function sharedStorage() {
+  const data=new Map();
+  return {getItem:key=>data.get(key)||null,setItem:(key,value)=>data.set(key,value),removeItem:key=>data.delete(key)};
+}
+function editRule(env,text) {
+  const input=env.window.document.querySelector('[data-note-id="rule-a"]');
+  input.value=text;input.dispatchEvent(new env.window.Event('input',{bubbles:true}));
+}
+async function downloadedProject(env,method) {
+  assert.equal(env.app[method](),true);
+  return Importer.parse(await env.downloadedText(),env.window.document,Core);
+}
+
+for(const method of ['saveProject','saveHtml']) {
+  test(method+' download anchors recover later edits from every saved and original revision',async()=>{
+    const original=fixture(),storage=sharedStorage(),env=mount(original,storage),anchors=[original];
+    try {
+      editRule(env,'first saved note');anchors.push(await downloadedProject(env,method));
+      editRule(env,'second saved note');anchors.push(await downloadedProject(env,method));
+      editRule(env,'latest unsaved note');
+      for(const anchor of anchors) {
+        const reopened=mount(anchor,storage);
+        try {
+          assert.deepEqual(reopened.app.getProject(),anchor,'file remains authoritative before explicit restore');
+          assert.equal(reopened.window.document.getElementById('ann-recovery').hidden,false);
+          assert.equal(reopened.app.restoreDraft(),true);
+          assert.equal(reopened.app.getProject().annotations.rules['rule-a'].text,'latest unsaved note');
+        } finally {reopened.close();}
+      }
+    } finally {env.close();}
+  });
+}
+
+test('download recovery rejects different snapshot content and divergent same-revision files',async()=>{
+  const storage=sharedStorage(),env=mount(fixture(),storage);
+  try {
+    editRule(env,'saved branch');const saved=await downloadedProject(env,'saveProject');
+    editRule(env,'later in saved branch');
+    for(const mutate of [p=>p.snapshot.rules[0].raw='any any any deny',p=>p.annotations.rules['rule-a'].text='different branch',p=>p.projectId='other-project',p=>p.revision++,p=>p.updatedAt='2026-11-16T05:00:00Z']) {
+      const other=structuredClone(saved);mutate(other);
+      const reopened=mount(other,storage);
+      try {assert.equal(reopened.app.restoreDraft(),false);assert.deepEqual(reopened.app.getProject(),other);}finally{reopened.close();}
+    }
+  }finally{env.close();}
+});
+
+test('pending recovery survives downloads and restoring it never writes to an abandoned download branch',async()=>{
+  const original=fixture(),storage=sharedStorage(),draft=fixture();
+  draft.revision=1;draft.annotations.rules['rule-a'].text='pending recovery';
+  Editor.saveRecovery(storage,original,draft);
+  const env=mount(original,storage);
+  try {
+    editRule(env,'separate branch');const abandoned=await downloadedProject(env,'saveHtml');
+    editRule(env,'still separate');
+    assert.equal(Editor.readRecovery(storage,original,Core).annotations.rules['rule-a'].text,'pending recovery');
+    assert.equal(env.app.restoreDraft(),true);editRule(env,'continued recovered branch');
+    assert.equal(Editor.readRecovery(storage,original,Core).annotations.rules['rule-a'].text,'continued recovered branch');
+    const reopened=mount(abandoned,storage);
+    try{assert.equal(reopened.app.restoreDraft(),false);}finally{reopened.close();}
+  }finally{env.close();}
+});
+
+test('partial recovery quota failure remains visible after a successful download request',async()=>{
+  const storage=sharedStorage(),env=mount(fixture(),storage);
+  try {
+    editRule(env,'saved note');const saved=await downloadedProject(env,'saveProject');
+    const set=storage.setItem;storage.setItem=(key,value)=>{if(key===Editor.recoveryKey(saved))throw Error('quota');set(key,value);};
+    editRule(env,'unsaved note');
+    assert.match(env.window.document.getElementById('ann-status').textContent,/임시저장.*불가/);
+    assert.equal(env.app.saveHtml(),true);
+    assert.match(env.window.document.getElementById('ann-status').textContent,/다운로드.*요청/);
+    assert.match(env.window.document.getElementById('ann-status').textContent,/임시저장.*불가/);
+    assert.equal(Editor.readRecovery(storage,fixture(),Core).annotations.rules['rule-a'].text,'unsaved note');
+  }finally{env.close();}
+});
+
+test('competing workspaces cannot overwrite recovery from a different branch',()=>{
+  const original=fixture(),storage=sharedStorage(),first=mount(original,storage),second=mount(original,storage);
+  try {
+    editRule(first,'first branch');editRule(second,'second branch');
+    assert.equal(Editor.readRecovery(storage,original,Core).annotations.rules['rule-a'].text,'first branch');
+    assert.match(second.window.document.getElementById('ann-status').textContent,/임시저장.*불가/);
+  }finally{first.close();second.close();}
+});
+
+test('same revision and timestamp cannot recover annotations belonging to another base branch',()=>{
+  const storage=sharedStorage(),base=fixture(),draft=fixture();
+  draft.revision=1;draft.annotations.rules['rule-a'].text='draft from original branch';
+  Editor.saveRecovery(storage,base,draft);
+  const different=fixture();different.annotations.rules['rule-a'].text='other base branch';
+  assert.equal(Editor.readRecovery(storage,different,Core),null);
+});
+
+test('large valid recovery reports failure instead of claiming to save an unreadable draft',()=>{
+  const storage=sharedStorage(),base=fixture();
+  base.annotations.rules['rule-a'].reasons=Array.from({length:13},()=> 'r'.repeat(1000000));
+  const draft=structuredClone(base);draft.revision=1;draft.annotations.rules['rule-a'].text='large draft';
+  Core.validateProject(base);Core.validateProject(draft);
+  const result=Editor.saveRecovery(storage,base,draft);
+  if(result.ok) assert.equal(Editor.readRecovery(storage,base,Core)?.annotations.rules['rule-a'].text,'large draft');
+  else assert.equal(storage.getItem(Editor.recoveryKey(base)),null);
+});
+
+test('different snapshot or base branch edits cannot replace existing recovery with reused IDs',()=>{
+  for(const mutate of [p=>p.snapshot.rules[0].raw='any any any deny',p=>p.annotations.rules['rule-a'].text='another base']) {
+    const original=fixture(),storage=sharedStorage(),first=mount(original,storage);
+    try {
+      editRule(first,'original branch recovery');
+      const different=fixture();mutate(different);const second=mount(different,storage);
+      try {
+        editRule(second,'different branch edit');
+        assert.equal(Editor.readRecovery(storage,original,Core).annotations.rules['rule-a'].text,'original branch recovery');
+        assert.match(second.window.document.getElementById('ann-status').textContent,/임시저장.*불가/);
+      } finally {second.close();}
+    } finally {first.close();}
+  }
+});
+
+test('discarding a pending draft cannot delete a newer draft written by another workspace',()=>{
+  const original=fixture(),draft=fixture(),storage=sharedStorage();
+  draft.revision=1;draft.annotations.rules['rule-a'].text='pending';Editor.saveRecovery(storage,original,draft);
+  const first=mount(original,storage),second=mount(original,storage);
+  try {
+    assert.equal(first.app.restoreDraft(),true);editRule(first,'newer recovery');
+    second.window.document.getElementById('ann-discard-draft').click();
+    assert.equal(Editor.readRecovery(storage,original,Core)?.annotations.rules['rule-a'].text,'newer recovery');
+  } finally {first.close();second.close();}
+});
+
+test('discarding the pending draft permits current branch recovery after a download',async()=>{
+  const original=fixture(),draft=fixture(),storage=sharedStorage();
+  draft.revision=1;draft.annotations.rules['rule-a'].text='pending';Editor.saveRecovery(storage,original,draft);
+  const env=mount(original,storage);
+  try {
+    editRule(env,'chosen branch');const saved=await downloadedProject(env,'saveProject');
+    env.window.document.getElementById('ann-discard-draft').click();editRule(env,'continued chosen branch');
+    for(const anchor of [original,saved]) assert.equal(Editor.readRecovery(storage,anchor,Core)?.annotations.rules['rule-a'].text,'continued chosen branch');
   } finally {env.close();}
 });

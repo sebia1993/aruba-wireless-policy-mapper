@@ -71,3 +71,45 @@ def test_diagnostic_report_failure_keeps_previous_files_and_marks_failed(monkeyp
     assert log_path.read_text(encoding="utf-8") == "old-log"
     assert not list(tmp_path.glob(".*.staging.*"))
     assert not list(tmp_path.glob(".*.backup.*"))
+
+
+@pytest.mark.parametrize("code", ["WLC-CMD-004", "WLC-NET-001", "WLC-UNK-001"])
+def test_registered_event_codes_survive_all_report_formats_without_exempting_details(tmp_path, code):
+    # Keeping only primary.code loses the event codes operators need in exported logs.
+    paths = write_diagnostic_report(
+        tmp_path,
+        events=[DiagnosticEvent(
+            stage="DGN-CMD", status="error", code=code,
+            command_id="rights::finance-employee",
+            message=f"{code} wlc-prod-01 192.0.2.10 password Secret123 show netdestination payroll-servers",
+            detail="rights::finance-employee | netdestination::payroll-servers",
+        )],
+        primary_code=code,
+    )
+    payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+    assert payload["events"][0]["code"] == code
+    assert code not in payload["events"][0]["message"]
+    assert code in paths["html"].read_text(encoding="utf-8").split("<tbody>", 1)[1]
+    event_log = paths["log"].read_text(encoding="utf-8").split("events:", 1)[1]
+    assert f" | {code} | " in event_log
+    assert event_log.count(code) == 1
+    for kind in ("json", "html", "log"):
+        text = paths[kind].read_text(encoding="utf-8")
+        for sensitive in ("wlc-prod-01", "192.0.2.10", "Secret123", "finance-employee", "payroll-servers"):
+            assert sensitive not in text
+
+
+@pytest.mark.parametrize("unregistered", ["WLC-PROD-01", "WLC-CMD-004.corp", "WLC-CMD-004 password Secret123"])
+def test_unregistered_code_fields_remain_redacted(tmp_path, unregistered):
+    paths = write_diagnostic_report(
+        tmp_path,
+        events=[DiagnosticEvent(stage="DGN-CMD", status="error", code=unregistered, message="failed")],
+        primary_code="WLC-UNK-001",
+        metadata={"code": "wlc-prod-01"},
+    )
+    payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+    assert "WLC" not in payload["events"][0]["code"]
+    assert "wlc-prod-01" not in payload["metadata"]["code"]
+    for kind in ("json", "html", "log"):
+        assert unregistered not in paths[kind].read_text(encoding="utf-8")
+        assert "Secret123" not in paths[kind].read_text(encoding="utf-8")
