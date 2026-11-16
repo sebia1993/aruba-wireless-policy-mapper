@@ -10,6 +10,7 @@
   const COVERAGE = {completed:'수집 완료', partial:'일부 수집', failed:'수집 실패', unknown:'수집 범위 미확인'};
   const SCRIPT_IDS = ['annotation-core-script','annotation-export-script','annotation-exceljs-script','annotation-import-script','annotation-editor-script'];
   const MAX_FILE_BYTES = 50 * 1024 * 1024;
+  const MAX_RECOVERY_LENGTH = 25000000;
   const clone = value => JSON.parse(JSON.stringify(value));
   const escapeHtml = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const encodedJson = value => JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4,'0'));
@@ -18,10 +19,19 @@
     return 'aruba-annotation-recovery:v1:' + [base.projectId,base.snapshot.id,base.revision,base.updatedAt].map(x=>encodeURIComponent(String(x))).join(':');
   }
 
+  // Snapshot identity is checked separately. Keep exact editable base content
+  // in storage only, so equal revision/timestamp values cannot alias branches.
+  const recoveryBaseState = base => JSON.stringify({...base,snapshot:undefined});
+  function recoveryEnvelope(base,project) {
+    const text=JSON.stringify({baseUpdatedAt:base.updatedAt,baseState:recoveryBaseState(base),project});
+    if (text.length>MAX_RECOVERY_LENGTH) throw new Error('recovery too large');
+    return text;
+  }
+
   function saveRecovery(storage, base, project) {
     try {
       if (!storage) throw new Error('storage unavailable');
-      storage.setItem(recoveryKey(base), JSON.stringify({baseUpdatedAt:base.updatedAt, project}));
+      storage.setItem(recoveryKey(base), recoveryEnvelope(base,project));
       return {ok:true};
     } catch (error) { return {ok:false,error:String(error.message || error)}; }
   }
@@ -30,9 +40,10 @@
     try {
       if (!storage) return null;
       const text = storage.getItem(recoveryKey(base));
-      if (!text || text.length > 25000000) return null;
+      if (!text || text.length > MAX_RECOVERY_LENGTH) return null;
       const envelope = JSON.parse(text);
       if (envelope.baseUpdatedAt !== base.updatedAt) return null;
+      if (envelope.baseState !== undefined && envelope.baseState !== recoveryBaseState(base)) return null;
       const p = core.validateProject(envelope.project);
       if (JSON.stringify(p.snapshot)!==JSON.stringify(base.snapshot)) return null;
       return p.projectId === base.projectId && p.snapshot.id === base.snapshot.id && p.revision > base.revision ? p : null;
@@ -81,6 +92,47 @@
     let storage;
     try { storage = win.localStorage; } catch (_error) { storage = null; }
     let pendingDraft = readRecovery(storage, base, core);
+    let recoveryAnchors = [recoveryAnchor(base)];
+
+    function recoveryAnchor(anchorBase) {
+      const anchor={base:anchorBase,text:null,blocked:false};
+      try {
+        if (!storage) throw new Error('storage unavailable');
+        anchor.text=storage.getItem(recoveryKey(anchorBase)) || null;
+        if (anchor.text) {
+          const envelope=JSON.parse(anchor.text);
+          // Do not replace storage belonging to a different file with reused IDs.
+          anchor.blocked=(envelope.baseState !== undefined && envelope.baseState !== recoveryBaseState(anchorBase)) ||
+            JSON.stringify(envelope.project.snapshot)!==JSON.stringify(anchorBase.snapshot);
+        }
+      } catch (_error) {anchor.blocked=true;}
+      return anchor;
+    }
+
+    function persistRecovery() {
+      if (pendingDraft) return {ok:false};
+      let ok=true;
+      for (const anchor of recoveryAnchors) {
+        if (project.revision<=anchor.base.revision) continue;
+        try {
+          if (!storage || anchor.blocked || (storage.getItem(recoveryKey(anchor.base)) || null)!==anchor.text) throw new Error('recovery conflict');
+          const text=recoveryEnvelope(anchor.base,project);
+          storage.setItem(recoveryKey(anchor.base),text);
+          anchor.text=text;
+        } catch (_error) {ok=false;}
+      }
+      return {ok};
+    }
+
+    function registerDownload() {
+      // Requesting a download does not prove it reached disk: keep the original
+      // anchor as well as every downloaded revision of this editing branch.
+      if (!recoveryAnchors.some(anchor=>recoveryKey(anchor.base)===recoveryKey(project) && recoveryBaseState(anchor.base)===recoveryBaseState(project))) {
+        recoveryAnchors.push(recoveryAnchor(project));
+      }
+      const result=persistRecovery();
+      return pendingDraft?' · 이전 임시작업 복구 대기 중.':result.ok?'':' · 브라우저 임시저장 불가 · 현재 내용은 화면에 유지됩니다.';
+    }
     let fileMode = 'open', reviewRevision = -1, reviewRoleIds = new Set();
     const $ = id => doc.getElementById(id);
     const controller = id => project.snapshot.controllers.find(c=>c.id===id);
@@ -129,7 +181,7 @@
       if (pendingDraft) {
         status('내용을 수정했습니다. 이전 임시작업을 복구하거나 버린 뒤 브라우저 임시저장을 사용할 수 있습니다. 작업 파일 저장은 가능합니다.','pending');
       } else {
-        const result=saveRecovery(storage,base,project);
+        const result=persistRecovery();
         status(result.ok ? '브라우저 임시저장됨 · 파일로 보관하려면 작업 저장을 눌러 주세요.' : '브라우저 임시저장 불가 · 내용은 화면에 유지됩니다. 작업 저장으로 파일을 내려받으세요.',result.ok?'draft':'warning');
       }
     }
@@ -257,7 +309,7 @@
       sourceMatches=JSON.stringify(next.snapshot)===originalSnapshotText;
       reviewRevision=-1;
       activeRole=next.snapshot.roles[0]?.id||'';selectedRoles=new Set(activeRole?[activeRole]:[]);
-      pendingDraft=readRecovery(storage,base,core);pendingImport=null;view='editor';search='';reviewOnly=false;
+      pendingDraft=readRecovery(storage,base,core);recoveryAnchors=[recoveryAnchor(base)];pendingImport=null;view='editor';search='';reviewOnly=false;
       shell();
     }
 
@@ -275,7 +327,7 @@
       project=result.project;workspaceVersion++;reviewRevision=-1;pendingImport=null;
       $('ann-import-map').hidden=true;
       syncSource();metadata();updateCounts();renderRoleList();renderRole();renderChanges();
-      const recovery=pendingDraft?{ok:false}:saveRecovery(storage,base,project);
+      const recovery=persistRecovery();
       status('이전 주석을 가져왔습니다: 재사용 '+result.summary.reused+'개, 재확인 '+result.summary.needsReview+'개, 미연결 '+result.summary.unresolved+'개. '+(recovery.ok?'브라우저 임시저장됨.':'브라우저 임시저장 불가 또는 복구 대기 중. ')+'작업 저장으로 보관하세요.','ready');
       return true;
     }
@@ -297,6 +349,9 @@
     function restoreDraft() {
       if (!pendingDraft) return false;
       invalidateFileRequest();
+      // Downloads made before accepting the pending draft belong to another
+      // branch; only the original loaded base is a proven ancestor of the draft.
+      recoveryAnchors=recoveryAnchors.slice(0,1);
       project=pendingDraft;pendingDraft=null;workspaceVersion++;reviewRevision=-1;metadata();updateCounts();renderRoleList();renderRole();renderChanges();syncSource();
       $('ann-recovery').hidden=true;status('임시작업을 복구했습니다. 빈 주석과 확인 상태까지 복원했습니다. 작업 저장으로 파일을 보관하세요.','draft');return true;
     }
@@ -318,7 +373,7 @@
         core.parseProject(text);
         download(blob,filename('.aruba-project.json'));
         downloadedVersion=workspaceVersion;
-        status('작업 파일 다운로드를 요청했습니다. 내려받은 파일이 다음 작업의 기준입니다.','download');return true;
+        status('작업 파일 다운로드를 요청했습니다. 내려받은 파일이 다음 작업의 기준입니다.'+registerDownload(),'download');return true;
       } catch (error) {status('작업 저장 실패: '+error.message+' · 현재 내용은 화면에 유지됩니다.','error');return false;}
     }
 
@@ -328,7 +383,7 @@
         if(blob.size>MAX_FILE_BYTES) throw new Error('다시 열 수 있는 HTML 크기(50 MiB)를 초과합니다. 작업 JSON으로 저장하거나 주석 크기를 줄여 주세요.');
         download(blob,filename('_commented.html'));
         downloadedVersion=workspaceVersion;
-        status('주석 포함 HTML 다운로드를 요청했습니다. 현재 작업의 수집본과 주석을 포함합니다.','download');return true;
+        status('주석 포함 HTML 다운로드를 요청했습니다. 현재 작업의 수집본과 주석을 포함합니다.'+registerDownload(),'download');return true;
       } catch (error) {status('HTML 저장 실패: '+error.message,'error');return false;}
     }
 
@@ -469,7 +524,14 @@
         case 'ann-review-button':reviewOnly=!reviewOnly;updateCounts();renderRoleList();renderChanges();break;
         case 'ann-restore':restoreDraft();break;
         case 'ann-discard-draft':
-          pendingDraft=null;try {storage?.removeItem(recoveryKey(base));}catch(_error){}
+          pendingDraft=null;
+          try {
+            const anchor=recoveryAnchors[0];
+            // Discard only the draft the user was offered, never a newer tab's work.
+            if ((storage?.getItem(recoveryKey(base)) || null)===anchor.text) {
+              storage?.removeItem(recoveryKey(base));anchor.text=null;
+            }
+          } catch (_error) {}
           $('ann-recovery').hidden=true;status('이전 임시작업을 버렸습니다. 현재 화면의 내용은 유지됩니다.','ready');break;
         case 'ann-confirm-import':
           try {const map={};for(const select of root.querySelectorAll('[data-map-controller]'))if(select.value)map[select.dataset.mapController]=select.value;if(pendingImport)applyReuse(pendingImport,map);}catch(error){status('주석 가져오기 실패: '+error.message,'error');}break;

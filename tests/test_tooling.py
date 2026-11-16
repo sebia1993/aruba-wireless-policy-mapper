@@ -6,12 +6,52 @@ import tomllib
 import zipfile
 from pathlib import Path
 
+import pytest
+
 
 def _write_fixture_zip(path: Path, entries: list[str]) -> str:
     with zipfile.ZipFile(path, "w") as archive:
         for entry in entries:
             archive.writestr(entry, "fixture")
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("exit_code,stderr", [(0, ""), (1, "missing Python runtime"), (2, "unrelated argument error")])
+def test_web_package_smoke_rejects_host_key_launcher_without_address_validation(tmp_path, monkeypatch, exit_code, stderr):
+    script = Path(__file__).parents[1] / "tools" / "verify_streamlit_portable_package.py"
+    namespace = runpy.run_path(str(script))
+    zip_path = tmp_path / "web.zip"
+    _write_fixture_zip(zip_path, ["start_webapp.cmd", "trust_host_key.cmd"])
+
+    def run(command, **kwargs):
+        if command[2] == "start_webapp.cmd":
+            return subprocess.CompletedProcess(command, 0, "STREAMLIT_PORTABLE_OK\n", "")
+        return subprocess.CompletedProcess(command, exit_code, "", stderr)
+
+    monkeypatch.setattr(namespace["platform"], "system", lambda: "Windows")
+    monkeypatch.setattr(namespace["subprocess"], "run", run)
+    with pytest.raises(SystemExit, match="Host-key"):
+        namespace["_smoke_webapp"](zip_path, require=True)
+
+
+def test_web_package_smoke_exercises_host_key_validation_without_network(tmp_path, monkeypatch):
+    script = Path(__file__).parents[1] / "tools" / "verify_streamlit_portable_package.py"
+    namespace = runpy.run_path(str(script))
+    zip_path = tmp_path / "web.zip"
+    _write_fixture_zip(zip_path, ["start_webapp.cmd", "trust_host_key.cmd"])
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        if command[2] == "start_webapp.cmd":
+            return subprocess.CompletedProcess(command, 0, "STREAMLIT_PORTABLE_OK\n", "")
+        assert command == ["cmd.exe", "/c", "trust_host_key.cmd", "invalid://host", "22"]
+        return subprocess.CompletedProcess(command, 2, "", "SSH 서버 키 승인 실패: WLC IP 또는 Host만 입력하세요. URL이나 경로는 사용할 수 없습니다.\n")
+
+    monkeypatch.setattr(namespace["platform"], "system", lambda: "Windows")
+    monkeypatch.setattr(namespace["subprocess"], "run", run)
+    namespace["_smoke_webapp"](zip_path, require=True)
+    assert len(commands) == 2
 
 
 def test_validate_script_runs_local_checks():

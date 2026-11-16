@@ -11,10 +11,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .collector import collection_was_cancelled, collect_from_controller, collect_from_offline_raw
+from .command_response import cli_rejection
 from .diagnostic_codes import DiagnosticCode, classify_message_to_code, get_diagnostic_code
 from .diagnostic_events import DiagnosticEvent, event_from_code, safe_info_event
 from .diagnostic_report import write_diagnostic_report
-from .models import ControllerTarget
+from .models import CollectionResult, CommandOutput, ControllerTarget
 from .redaction import redaction_self_test
 from .report import build_parsed_controllers, create_run_dir
 
@@ -92,12 +93,6 @@ def run_diagnostic(
             events.append(safe_info_event("DGN-CMD", "Command started.", command_id=command_id))
         elif event == "command_done":
             events.append(safe_info_event("DGN-CMD", "Command completed.", command_id=command_id))
-        elif event == "command_error":
-            code = classify_message_to_code(str(payload.get("error", "")), command_id=command_id)
-            detail = str(payload.get("error", ""))
-            if command_id.startswith(("rights::", "netdestination::")):
-                detail = "Dynamic Role/Alias command failed; raw device detail was omitted."
-            events.append(event_from_code(code, command_id=command_id, detail=detail))
         elif event in {"roles_discovered", "aliases_discovered"}:
             events.append(safe_info_event("DGN-PARSE", f"{event.replace('_', ' ').title()}."))
 
@@ -115,17 +110,36 @@ def run_diagnostic(
         )
     if collection_was_cancelled(result):
         raise DiagnosticCancelledError(run_dir)
+
+    # Final records also include failures without callbacks (notably disconnect).
+    # Derive errors once from that evidence so duplicate callbacks cannot inflate them.
+    failed_commands = [command for command in result.commands if not command.success or command.error]
+    seen_failures: set[tuple[str, str]] = set()
+
+    def add_failure(code: str | DiagnosticCode, *, command_id: str, detail: str = "") -> None:
+        diagnostic_code = code if isinstance(code, DiagnosticCode) else get_diagnostic_code(code)
+        key = (command_id, diagnostic_code.code)
+        if key not in seen_failures:
+            seen_failures.add(key)
+            events.append(event_from_code(diagnostic_code, command_id=command_id, detail=detail))
+
+    for command in failed_commands:
+        code = _command_failure_code(command)
+        detail = command.error
+        if command.command_id.startswith(("rights::", "netdestination::")):
+            detail = "Dynamic Role/Alias command failed; raw device detail was omitted."
+        add_failure(code, command_id=command.command_id, detail=detail)
+
     if any(command.command_id == "duration_limit" for command in result.commands):
-        events.append(event_from_code("WLC-CMD-002", command_id="duration_limit"))
         return finish("WLC-CMD-002")
 
     config_output = result.command_output("configuration_effective")
-    if _configuration_output_rejected(config_output):
-        events.append(event_from_code("WLC-CMD-003", command_id="configuration_effective"))
+    if cli_rejection(config_output):
+        add_failure("WLC-CMD-003", command_id="configuration_effective")
         return finish("WLC-CMD-003")
     if not config_output:
         code = _code_for_collection_result(result)
-        events.append(event_from_code(code, command_id="configuration_effective"))
+        add_failure(code, command_id="configuration_effective")
         return finish(code)
 
     try:
@@ -147,6 +161,10 @@ def run_diagnostic(
         events.append(safe_info_event("DGN-PARSE", "Configuration parsed successfully."))
 
     events.append(safe_info_event("DGN-REPORT", "Safe diagnostic report generated."))
+    if any(command.command_id in {"connect", "enable", "configuration_effective"} for command in failed_commands):
+        return finish(_code_for_collection_result(result))
+    if failed_commands:
+        return finish(_command_failure_code(failed_commands[0]))
     return finish("OK")
 
 
@@ -162,15 +180,28 @@ def _validate_input(target: ControllerTarget, timeout: int) -> str:
     return ""
 
 
-def _code_for_collection_result(result) -> DiagnosticCode:
-    failed_commands = [command for command in result.commands if command.error]
+def _code_for_collection_result(result: CollectionResult) -> DiagnosticCode:
+    # Optional failures must not hide a missing/rejected required configuration.
+    failed_commands = [
+        command for command in result.commands
+        if (not command.success or command.error)
+        and command.command_id in {"connect", "enable", "configuration_effective"}
+    ]
     for command in failed_commands:
-        code = classify_message_to_code(command.error, command_id=command.command_id)
+        code = _command_failure_code(command)
         if code.code != "WLC-UNK-001":
             return code
     return get_diagnostic_code("WLC-CMD-001")
 
 
-def _configuration_output_rejected(output: str) -> bool:
-    normalized = (output or "").casefold()
-    return any(token in normalized for token in ("permission denied", "invalid input", "not authorized"))
+def _command_failure_code(command: CommandOutput) -> DiagnosticCode:
+    if command.command_id == "duration_limit":
+        return get_diagnostic_code("WLC-CMD-002")
+    # Raw CLI rejection evidence takes precedence over generic exception text.
+    # Connection/enable failures retain their authentication classification.
+    if command.command_id not in {"connect", "enable"} and cli_rejection(command.output):
+        return get_diagnostic_code("WLC-CMD-003")
+    code = classify_message_to_code(command.error, command_id=command.command_id)
+    if command.command_id == "configuration_effective" and code.code == "WLC-UNK-001":
+        return get_diagnostic_code("WLC-CMD-001")
+    return code

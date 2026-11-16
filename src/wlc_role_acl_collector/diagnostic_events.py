@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from .diagnostic_codes import DiagnosticCode, get_diagnostic_code
+from .diagnostic_codes import DIAGNOSTIC_CODES, DiagnosticCode, get_diagnostic_code
 from .redaction import redact_payload, redact_sensitive_text
 
 
@@ -25,7 +25,7 @@ class DiagnosticEvent:
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
-        return redact_payload(
+        payload = redact_payload(
             {
                 "timestamp": self.timestamp,
                 "stage": self.stage,
@@ -36,6 +36,11 @@ class DiagnosticEvent:
                 "detail": self.detail,
             }
         )
+        # Only this structured field may retain an exact registered code. The
+        # same token in arbitrary message/detail text remains hostname-redacted.
+        if self.code in DIAGNOSTIC_CODES:
+            payload["code"] = self.code
+        return payload
 
 
 def event_from_code(

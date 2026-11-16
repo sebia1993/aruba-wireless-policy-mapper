@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
+from .controller_identity import controller_identity
 from .models import CollectionResult, ParsedController
 
 
@@ -128,16 +129,30 @@ def infer_collection_impact_scope(
     command_row_list = list(command_rows)
     acl_row_list = list(acl_rows)
     ssid_row_list = list(ssid_rows)
-    affected_roles: set[str] = set()
-    affected_ssids: set[str] = set()
+    identities_by_name: dict[str, set[str]] = {}
+    for row in (*command_row_list, *acl_row_list, *ssid_row_list):
+        name = str(row.get("controller") or "").strip().casefold()
+        identity = str(row.get("controller_id") or "").strip()
+        if name and identity:
+            identities_by_name.setdefault(name, set()).add(identity)
+    roles_by_controller: dict[tuple[str, str], set[str]] = {}
+    ssids_by_controller: dict[tuple[str, str], set[str]] = {}
     identification_incomplete = False
     for command_row in command_row_list:
         if _bool_value(command_row.get("success"), default=True):
             continue
         command_id = str(command_row.get("command_id") or "").strip()
-        controller = str(command_row.get("controller") or "").strip().casefold()
-        controller_acl_rows = _rows_for_controller(acl_row_list, controller)
-        controller_ssid_rows = _rows_for_controller(ssid_row_list, controller)
+        if command_id in {"clock", "version", "disconnect"}:
+            continue
+        controller_key = _controller_key(command_row, identities_by_name)
+        if controller_key is None:
+            identification_incomplete = True
+            continue
+        controller_acl_rows, acl_incomplete = _rows_for_controller(acl_row_list, controller_key, identities_by_name)
+        controller_ssid_rows, ssid_incomplete = _rows_for_controller(ssid_row_list, controller_key, identities_by_name)
+        identification_incomplete |= acl_incomplete or ssid_incomplete
+        affected_roles = roles_by_controller.setdefault(controller_key, set())
+        affected_ssids = ssids_by_controller.setdefault(controller_key, set())
 
         if command_id.startswith("rights::"):
             role = command_id.split("::", 1)[1].strip()
@@ -204,8 +219,8 @@ def infer_collection_impact_scope(
             identification_incomplete = True
 
     return CollectionImpactScope(
-        affected_roles=tuple(sorted(affected_roles, key=str.casefold)),
-        affected_ssids=tuple(sorted(affected_ssids, key=str.casefold)),
+        affected_roles=tuple(sorted((role for roles in roles_by_controller.values() for role in roles), key=str.casefold)),
+        affected_ssids=tuple(sorted((ssid for ssids in ssids_by_controller.values() for ssid in ssids), key=str.casefold)),
         identification_incomplete=identification_incomplete,
     )
 
@@ -218,13 +233,18 @@ def infer_collection_impact_scope_for_parsed(
     acl_rows: list[dict[str, object]] = []
     ssid_rows: list[dict[str, object]] = []
     for result in results:
-        command_rows.extend(result.command_status_rows())
+        command_rows.extend(
+            {**row, "controller_id": controller_identity(result.controller)}
+            for row in result.command_status_rows()
+        )
     for parsed in parsed_controllers:
+        identity = controller_identity(parsed.controller)
         for policy in parsed.role_policies.values():
             for rule in policy.rules:
                 acl_rows.append(
                     {
                         "controller": policy.controller,
+                        "controller_id": identity,
                         "role": policy.role,
                         "source": rule.source,
                         "destination": rule.destination,
@@ -234,6 +254,7 @@ def infer_collection_impact_scope_for_parsed(
             ssid_rows.append(
                 {
                     "controller": mapping.controller,
+                    "controller_id": identity,
                     "role": mapping.role,
                     "ssid": mapping.ssid,
                 }
@@ -306,17 +327,36 @@ def _append_unique(items: list[str], value: str) -> None:
         items.append(value)
 
 
+def _controller_key(
+    row: Mapping[str, object],
+    identities_by_name: Mapping[str, set[str]],
+) -> tuple[str, str] | None:
+    identity = str(row.get("controller_id") or "").strip()
+    if identity:
+        return ("id", identity)
+    name = str(row.get("controller") or "").strip().casefold()
+    identities = identities_by_name.get(name, set())
+    if not name or len(identities) > 1:
+        return None
+    return ("id", next(iter(identities))) if identities else ("name", name)
+
+
 def _rows_for_controller(
     rows: list[Mapping[str, object]],
-    controller: str,
-) -> list[Mapping[str, object]]:
-    if not controller:
-        return rows
-    return [
-        row
-        for row in rows
-        if str(row.get("controller") or "").strip().casefold() == controller
-    ]
+    controller_key: tuple[str, str],
+    identities_by_name: Mapping[str, set[str]],
+) -> tuple[list[Mapping[str, object]], bool]:
+    selected: list[Mapping[str, object]] = []
+    incomplete = False
+    for row in rows:
+        row_key = _controller_key(row, identities_by_name)
+        if row_key == controller_key:
+            selected.append(row)
+        elif row_key is None:
+            name = str(row.get("controller") or "").strip().casefold()
+            if not name or controller_key[1] in identities_by_name.get(name, set()):
+                incomplete = True
+    return selected, incomplete
 
 
 def _ssids_for_roles(

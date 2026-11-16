@@ -18,17 +18,33 @@ class FakeConnection:
         self.enable_called = False
         self.commands = []
         self.disconnected = False
+        self.base_prompt = "(synthetic-wlc) "
+        self.RETURN = "\n"
+        self.pending = ""
 
     def enable(self):
         self.enable_called = True
         if self.enable_failure:
             raise self.enable_failure
 
-    def send_command_timing(self, *, command_string, **_kwargs):
-        self.commands.append(command_string)
-        if command_string in self.failures:
-            raise self.failures[command_string]
-        return self.responses.get(command_string, "")
+    def normalize_cmd(self, command):
+        return command + self.RETURN
+
+    def write_channel(self, data):
+        command = data.strip()
+        prompt = self.base_prompt + "#"
+        if not command:
+            self.pending = prompt
+            return
+        self.commands.append(command)
+        output = self.responses.get(command, "")
+        if command in self.failures:
+            output = "% Invalid command: " + str(self.failures[command])
+        self.pending = command + "\n" + output + "\n" + prompt
+
+    def read_channel(self):
+        output, self.pending = self.pending, ""
+        return output
 
     def disconnect(self):
         self.disconnected = True
@@ -67,7 +83,7 @@ def test_collect_continues_when_disable_paging_fails(monkeypatch):
         progress_callback=lambda event, payload: events.append((event, payload)),
     )
 
-    assert result.command_output("configuration_effective") == config
+    assert config in result.command_output("configuration_effective")
     assert any(command.command_id == "disable_paging" and not command.success for command in result.commands)
     assert not any(command.command_id == "connect" for command in result.commands)
     assert any(event == "roles_discovered" and payload["total"] == 3 for event, payload in events)
@@ -133,7 +149,7 @@ def test_collect_records_enable_password_failure_and_continues(monkeypatch):
     assert connection.enable_called is True
     assert enable.success is False
     assert "enable denied" in enable.error
-    assert result.command_output("configuration_effective") == config
+    assert config in result.command_output("configuration_effective")
     assert any(
         event == "command_error" and payload["command_id"] == "enable" and "enable denied" in payload["error"]
         for event, payload in events
@@ -145,11 +161,10 @@ def test_collect_cancellation_stops_before_next_command_and_disconnects(monkeypa
     cancel_event = threading.Event()
 
     class CancellingConnection(FakeConnection):
-        def send_command_timing(self, *, command_string, **kwargs):
-            output = super().send_command_timing(command_string=command_string, **kwargs)
-            if command_string == "show clock":
+        def write_channel(self, data):
+            super().write_channel(data)
+            if data.strip() == "show clock":
                 cancel_event.set()
-            return output
 
     connection = CancellingConnection(
         responses={
@@ -211,7 +226,7 @@ def test_collect_records_disconnect_failure_without_losing_collected_data(monkey
     )
 
     disconnect = next(command for command in result.commands if command.command_id == "disconnect")
-    assert result.command_output("configuration_effective") == config
+    assert config in result.command_output("configuration_effective")
     assert disconnect.success is False
     assert disconnect.error == "socket cleanup failed"
     assert connection.disconnected is True
