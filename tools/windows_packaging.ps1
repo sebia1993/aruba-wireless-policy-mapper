@@ -51,9 +51,25 @@ function Compress-ArchiveWithRetry {
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
         try {
             if (Test-Path -LiteralPath $DestinationPath) { Remove-Item -LiteralPath $DestinationPath -Force }
-            [System.IO.Compression.ZipFile]::CreateFromDirectory(
-                $DirectoryPath, $DestinationPath, [System.IO.Compression.CompressionLevel]::Optimal, $false
-            )
+            $root = [System.IO.Path]::GetFullPath($DirectoryPath).TrimEnd([char[]]"\/") + [System.IO.Path]::DirectorySeparatorChar
+            $archive = [System.IO.Compression.ZipFile]::Open($DestinationPath, [System.IO.Compression.ZipArchiveMode]::Create)
+            try {
+                # CreateFromDirectory can emit backslashes under PowerShell 5.1's
+                # legacy Framework target. Explicit names keep the ZIP portable.
+                foreach ($file in [System.IO.Directory]::EnumerateFiles($root, "*", [System.IO.SearchOption]::AllDirectories)) {
+                    $name = $file.Substring($root.Length).Replace('\', '/')
+                    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                        $archive, $file, $name, [System.IO.Compression.CompressionLevel]::Optimal
+                    ) | Out-Null
+                }
+                foreach ($directory in [System.IO.Directory]::EnumerateDirectories($root, "*", [System.IO.SearchOption]::AllDirectories)) {
+                    if (@([System.IO.Directory]::EnumerateFileSystemEntries($directory)).Count -eq 0) {
+                        $name = $directory.Substring($root.Length).Replace('\', '/') + '/'
+                        $entry = $archive.CreateEntry($name)
+                        $entry.LastWriteTime = [System.IO.Directory]::GetLastWriteTime($directory)
+                    }
+                }
+            } finally { $archive.Dispose() }
             return
         } catch {
             if ($attempt -eq $Attempts) { throw }

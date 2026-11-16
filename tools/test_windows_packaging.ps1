@@ -36,7 +36,10 @@ function Read-ZipEntry([string]$Path, [string]$Name) {
     $zip = [System.IO.Compression.ZipFile]::OpenRead($Path)
     try {
         $entry = $zip.GetEntry($Name)
-        Assert-True ($null -ne $entry) "ZIP entry exists: $Name"
+        if ($null -eq $entry) {
+            $available = @($zip.Entries | Select-Object -First 30 | ForEach-Object { $_.FullName }) -join ', '
+            throw "ZIP entry missing: $Name. Available entries (up to 30): $available"
+        }
         $reader = New-Object System.IO.StreamReader($entry.Open())
         try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
     } finally { $zip.Dispose() }
@@ -70,9 +73,12 @@ try {
     $archiveSource = Join-Path $testRoot "source [tree]"
     $nested = Join-Path $archiveSource "nested [entry]"
     [System.IO.Directory]::CreateDirectory($nested) | Out-Null
+    [System.IO.Directory]::CreateDirectory((Join-Path $archiveSource "empty [entry]")) | Out-Null
     [System.IO.File]::WriteAllText((Join-Path $nested "payload.txt"), "round trip bytes")
     $roundTripZip = Join-Path $testRoot "round trip [archive].zip"
     Compress-ArchiveWithRetry -DirectoryPath $archiveSource -DestinationPath $roundTripZip
+    Assert-True ((Read-ZipEntry $roundTripZip "nested [entry]/payload.txt") -eq "round trip bytes") "nested ZIP entry uses forward slashes"
+    Assert-True ((Read-ZipEntry $roundTripZip "empty [entry]/") -eq "") "empty directory ZIP entry preserved with forward slash"
     $archiveDestination = Join-Path $testRoot "expanded [tree]"
     Expand-LiteralArchive -LiteralPath $roundTripZip -DestinationPath $archiveDestination
     $expandedFile = Join-Path $archiveDestination "nested [entry]\payload.txt"
