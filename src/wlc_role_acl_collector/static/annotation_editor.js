@@ -64,7 +64,15 @@
       const source=doc.getElementById('source-report');if(source)source.hidden=false;
       return null;
     }
-    let base = clone(project), lastDownloadRevision = project.revision;
+    let base = clone(project);
+    // File revision numbers can coincide across independent recovered drafts.
+    let workspaceVersion = 0, downloadedVersion = 0, fileRequest = 0;
+    const isDirty = () => workspaceVersion !== downloadedVersion;
+    function invalidateFileRequest() {
+      fileRequest++;
+      pendingImport=null;
+      if (doc.getElementById('ann-import-map')) doc.getElementById('ann-import-map').hidden=true;
+    }
     const originalSnapshotText=JSON.stringify(project.snapshot);
     let sourceMatches=true;
     let activeRole = project.snapshot.roles[0]?.id || '';
@@ -100,9 +108,20 @@
       if (!sourceAvailable() && $('source-report')) $('source-report').hidden=true;
     }
 
+    function commitEdit(edit) {
+      // Copy only mutable containers; validate the entire candidate, including
+      // metadata growth, before replacing the authoritative workspace.
+      const next={...project,revision:project.revision+1,updatedAt:new Date().toISOString(),
+        annotations:{roles:{...project.annotations.roles},rules:{...project.annotations.rules}},
+        unresolvedAnnotations:[...project.unresolvedAnnotations],changes:[...project.changes]};
+      try {edit(next);project=core.validateProject(next);}
+      catch(error) {status('수정 실패: '+error.message+' · 이전 내용을 유지했습니다.','error');return false;}
+      workspaceVersion++;
+      changed();
+      return true;
+    }
+
     function changed() {
-      project.revision++;
-      project.updatedAt=new Date().toISOString();
       metadata();
       syncSource();
       updateCounts();
@@ -208,9 +227,12 @@
 
     function editNote(kind,id,text) {
       const old=record(kind,id);
-      project.annotations[kind][id]={...old,text,status:'unreviewed',updatedAt:new Date().toISOString(),confirmedAt:''};
-      changed();
-      const select=Array.from(root.querySelectorAll('[data-status-id]')).find(el=>el.dataset.statusId===id);
+      if (!commitEdit(next=>{next.annotations[kind][id]={...old,text,status:'unreviewed',updatedAt:new Date().toISOString(),confirmedAt:''};})) {
+        const input=Array.from(root.querySelectorAll('[data-note-id]')).find(el=>el.dataset.noteKind===kind && el.dataset.noteId===id);
+        if(input) input.value=old.text;
+        return false;
+      }
+      const select=Array.from(root.querySelectorAll('[data-status-id]')).find(el=>el.dataset.statusKind===kind && el.dataset.statusId===id);
       if (select) select.value='unreviewed';
     }
 
@@ -231,7 +253,7 @@
     }
 
     function replaceProject(next) {
-      project=next;base=clone(next);lastDownloadRevision=next.revision;
+      project=next;base=clone(next);workspaceVersion++;downloadedVersion=workspaceVersion;
       sourceMatches=JSON.stringify(next.snapshot)===originalSnapshotText;
       reviewRevision=-1;
       activeRole=next.snapshot.roles[0]?.id||'';selectedRoles=new Set(activeRole?[activeRole]:[]);
@@ -240,16 +262,17 @@
     }
 
     function openText(text) {
+      invalidateFileRequest();
       try {
         const next=parseImport(text); // Validate completely before confirmation or mutation.
-        if (project.revision!==lastDownloadRevision && !win.confirm('현재 수정한 내용은 작업 저장으로 보관할 수 있습니다. 이 작업 파일로 바꾸시겠습니까?')) return false;
+        if (isDirty() && !win.confirm('현재 수정한 내용은 작업 저장으로 보관할 수 있습니다. 이 작업 파일로 바꾸시겠습니까?')) return false;
         replaceProject(next);status('작업 파일을 열었습니다. 수집 데이터와 주석을 함께 복원했습니다.','ready');return true;
       } catch (error) {status('작업 열기 실패: '+error.message,'error');return false;}
     }
 
     function applyReuse(previous, controllerMap) {
       const result=core.reconcileProjects(project,previous,{controllerMap:controllerMap||{}});
-      project=result.project;pendingImport=null;
+      project=result.project;workspaceVersion++;reviewRevision=-1;pendingImport=null;
       $('ann-import-map').hidden=true;
       syncSource();metadata();updateCounts();renderRoleList();renderRole();renderChanges();
       const recovery=pendingDraft?{ok:false}:saveRecovery(storage,base,project);
@@ -258,6 +281,7 @@
     }
 
     function reuseText(text) {
+      invalidateFileRequest();
       try {
         const previous=parseImport(text);
         if (previous.snapshot.controllers.some(c=>!c.identityKnown)) {
@@ -272,7 +296,8 @@
 
     function restoreDraft() {
       if (!pendingDraft) return false;
-      project=pendingDraft;pendingDraft=null;reviewRevision=-1;metadata();updateCounts();renderRoleList();renderRole();renderChanges();syncSource();
+      invalidateFileRequest();
+      project=pendingDraft;pendingDraft=null;workspaceVersion++;reviewRevision=-1;metadata();updateCounts();renderRoleList();renderRole();renderChanges();syncSource();
       $('ann-recovery').hidden=true;status('임시작업을 복구했습니다. 빈 주석과 확인 상태까지 복원했습니다. 작업 저장으로 파일을 보관하세요.','draft');return true;
     }
 
@@ -292,7 +317,7 @@
         if(blob.size>MAX_FILE_BYTES) throw new Error('다시 열 수 있는 작업 파일 크기(50 MiB)를 초과합니다. 주석 크기를 줄여 주세요.');
         core.parseProject(text);
         download(blob,filename('.aruba-project.json'));
-        lastDownloadRevision=project.revision;
+        downloadedVersion=workspaceVersion;
         status('작업 파일 다운로드를 요청했습니다. 내려받은 파일이 다음 작업의 기준입니다.','download');return true;
       } catch (error) {status('작업 저장 실패: '+error.message+' · 현재 내용은 화면에 유지됩니다.','error');return false;}
     }
@@ -302,7 +327,7 @@
         const blob=new win.Blob([standaloneHtml(core.validateProject(project),doc)],{type:'text/html;charset=utf-8'});
         if(blob.size>MAX_FILE_BYTES) throw new Error('다시 열 수 있는 HTML 크기(50 MiB)를 초과합니다. 작업 JSON으로 저장하거나 주석 크기를 줄여 주세요.');
         download(blob,filename('_commented.html'));
-        lastDownloadRevision=project.revision;
+        downloadedVersion=workspaceVersion;
         status('주석 포함 HTML 다운로드를 요청했습니다. 현재 작업의 수집본과 주석을 포함합니다.','download');return true;
       } catch (error) {status('HTML 저장 실패: '+error.message,'error');return false;}
     }
@@ -350,14 +375,16 @@
       const target=(kind==='roles'?project.snapshot.roles:project.snapshot.rules).find(x=>x.id===select.value);
       if (!target) return;
       const old=project.annotations[kind][target.id];
-      if (old) {
-        const r=kind==='roles'?target:role(target.roleId);
-        project.unresolvedAnnotations.push({id:'manual-conflict:'+project.revision+':'+target.id,kind:u.kind,controllerId:target.controllerId,controllerName:controller(target.controllerId)?.name||'',roleName:r.name,acl:target.acl||'',raw:target.raw||'',annotation:clone(old),reason:'다른 주석을 연결하면서 기존 설명을 보관했습니다.',candidateIds:[target.id],sourceProjectId:project.projectId,sourceSnapshotId:project.snapshot.id});
-      }
-      project.annotations[kind][target.id]={...clone(u.annotation),status:'needs_review',updatedAt:new Date().toISOString(),confirmedAt:'',reasons:[...u.annotation.reasons,'사용자가 연결한 설명입니다. 현재 정책의 적용 여부를 확인해 주세요.'],source:u.annotation.source||{projectId:u.sourceProjectId,snapshotId:u.sourceSnapshotId,recordId:u.id,confirmedAt:u.annotation.confirmedAt}};
-      project.unresolvedAnnotations=project.unresolvedAnnotations.filter(x=>x.id!==id);
-      project.changes.push({type:'manual_link',controllerId:target.controllerId,roleId:kind==='roles'?target.id:target.roleId,ruleId:kind==='rules'?target.id:'',message:'이전 설명을 사용자가 직접 연결했습니다. 현재 정책과 비교가 필요합니다.',previousRaw:u.raw});
-      changed();renderRoleList();renderRole();renderChanges();
+      if (!commitEdit(next=>{
+        if (old) {
+          const r=kind==='roles'?target:role(target.roleId);
+          next.unresolvedAnnotations.push({id:'manual-conflict:'+project.revision+':'+target.id,kind:u.kind,controllerId:target.controllerId,controllerName:controller(target.controllerId)?.name||'',roleName:r.name,acl:target.acl||'',raw:target.raw||'',annotation:clone(old),reason:'다른 주석을 연결하면서 기존 설명을 보관했습니다.',candidateIds:[target.id],sourceProjectId:project.projectId,sourceSnapshotId:project.snapshot.id});
+        }
+        next.annotations[kind][target.id]={...clone(u.annotation),status:'needs_review',updatedAt:new Date().toISOString(),confirmedAt:'',reasons:[...u.annotation.reasons,'사용자가 연결한 설명입니다. 현재 정책의 적용 여부를 확인해 주세요.'],source:u.annotation.source||{projectId:u.sourceProjectId,snapshotId:u.sourceSnapshotId,recordId:u.id,confirmedAt:u.annotation.confirmedAt}};
+        next.unresolvedAnnotations=next.unresolvedAnnotations.filter(x=>x.id!==id);
+        next.changes.push({type:'manual_link',controllerId:target.controllerId,roleId:kind==='roles'?target.id:target.roleId,ruleId:kind==='rules'?target.id:'',message:'이전 설명을 사용자가 직접 연결했습니다. 현재 정책과 비교가 필요합니다.',previousRaw:u.raw});
+      })) return;
+      renderRoleList();renderRole();renderChanges();
     }
 
     function insertTemplate(kind,id) {
@@ -400,15 +427,25 @@
       if (el.dataset.selectRole) {if(el.checked)selectedRoles.add(el.dataset.selectRole);else selectedRoles.delete(el.dataset.selectRole);return;}
       if (el.dataset.statusId) {
         const kind=el.dataset.statusKind,id=el.dataset.statusId,old=record(kind,id),now=new Date().toISOString();
-        project.annotations[kind][id]={...old,status:el.value,updatedAt:now,confirmedAt:el.value==='reviewed'?now:''};
-        changed();renderRoleList();return;
+        if (!commitEdit(next=>{next.annotations[kind][id]={...old,status:el.value,updatedAt:now,confirmedAt:el.value==='reviewed'?now:''};})) el.value=old.status;
+        return;
       }
       if (el.id==='ann-file') {
         const file=el.files?.[0];
         if (!file) return;
+        invalidateFileRequest();
+        const request=fileRequest;
         if (file.size>MAX_FILE_BYTES) {status('파일을 열 수 없습니다. 최대 50 MB까지 가져올 수 있습니다.','error');el.value='';return;}
         const mode=fileMode;
-        file.text().then(text=>mode==='open'?openText(text):reuseText(text)).catch(error=>status('파일 읽기 실패: '+error.message,'error')).finally(()=>{el.value='';});
+        // A later selection or synchronous project/recovery action owns the UI.
+        Promise.resolve().then(()=>file.text()).then(text=>{
+          if(request!==fileRequest) return;
+          el.value='';
+          return mode==='open'?openText(text):reuseText(text);
+        }).catch(error=>{
+          if(request!==fileRequest) return;
+          el.value='';status('파일 읽기 실패: '+error.message,'error');
+        });
       }
     }
 
@@ -442,7 +479,7 @@
 
     shell();
     win.addEventListener('beforeunload',event=>{
-      if(project.revision!==lastDownloadRevision){event.preventDefault();event.returnValue='';}
+      if(isDirty()){event.preventDefault();event.returnValue='';}
     });
     const api={getProject:()=>clone(project),openText,reuseText,restoreDraft,saveProject,saveHtml,printPdf,exportXlsx,exportModel};
     win.AnnotationEditorApp=api;

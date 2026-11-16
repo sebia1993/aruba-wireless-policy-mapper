@@ -3,56 +3,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-Set-Location $PSScriptRoot
-
-function Wait-ForReadableFile {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path,
-        [int]$Attempts = 20,
-        [int]$DelayMilliseconds = 500
-    )
-
-    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
-        try {
-            $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
-            $stream.Close()
-            return
-        }
-        catch {
-            if ($attempt -eq $Attempts) {
-                throw "File is not ready for reading: $Path`n$($_.Exception.Message)"
-            }
-            Start-Sleep -Milliseconds $DelayMilliseconds
-        }
-    }
-}
-
-function Compress-ArchiveWithRetry {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path,
-        [Parameter(Mandatory = $true)]
-        [string]$DestinationPath,
-        [int]$Attempts = 5
-    )
-
-    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
-        try {
-            if (Test-Path $DestinationPath) {
-                Remove-Item -LiteralPath $DestinationPath -Force
-            }
-            Compress-Archive -Path $Path -DestinationPath $DestinationPath -Force -ErrorAction Stop
-            return
-        }
-        catch {
-            if ($attempt -eq $Attempts) {
-                throw
-            }
-            Start-Sleep -Seconds 1
-        }
-    }
-}
+Set-Location -LiteralPath $PSScriptRoot
+. (Join-Path $PSScriptRoot "tools\windows_packaging.ps1")
 
 Write-Host "Installing runtime and build dependencies..."
 & $PythonExe -m pip install --require-hashes -r requirements-lock.txt
@@ -89,17 +41,17 @@ $dependencyAuditGuide = Join-Path $PSScriptRoot "docs\DEPENDENCY_AUDIT_EXCEPTION
 $dependencyAuditGuideHtml = Join-Path $PSScriptRoot "docs\DEPENDENCY_AUDIT_EXCEPTIONS_KO.html"
 $mockScenarioDir = Join-Path $PSScriptRoot "config\mock_scenarios"
 
-New-Item -ItemType Directory -Force -Path $distDir | Out-Null
-New-Item -ItemType Directory -Force -Path $specDir | Out-Null
-New-Item -ItemType Directory -Force -Path $releaseRoot | Out-Null
+[System.IO.Directory]::CreateDirectory($distDir) | Out-Null
+[System.IO.Directory]::CreateDirectory($specDir) | Out-Null
+[System.IO.Directory]::CreateDirectory($releaseRoot) | Out-Null
 
-if (Test-Path $distGuiExe) {
+if (Test-Path -LiteralPath $distGuiExe) {
     Remove-Item -LiteralPath $distGuiExe -Force
 }
-if (Test-Path $distCliExe) {
+if (Test-Path -LiteralPath $distCliExe) {
     Remove-Item -LiteralPath $distCliExe -Force
 }
-if (Test-Path $releaseZip) {
+if (Test-Path -LiteralPath $releaseZip) {
     Remove-Item -LiteralPath $releaseZip -Force
 }
 
@@ -141,8 +93,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Creating release zip..."
-Copy-Item -LiteralPath $distGuiExe -Destination $releaseRoot -Force
-Copy-Item -LiteralPath $distCliExe -Destination $releaseRoot -Force
+Copy-ReadableFileWithRetry -LiteralPath $distGuiExe -Destination $releaseRoot
+Copy-ReadableFileWithRetry -LiteralPath $distCliExe -Destination $releaseRoot
 Copy-Item -LiteralPath $userGuide -Destination (Join-Path $releaseRoot "USER_GUIDE_KO.md") -Force
 Copy-Item -LiteralPath $userGuideHtml -Destination (Join-Path $releaseRoot "USER_GUIDE_KO.html") -Force
 Copy-Item -LiteralPath $developerGuide -Destination (Join-Path $releaseRoot "DEVELOPER_GUIDE_KO.md") -Force
@@ -155,13 +107,13 @@ Copy-Item -LiteralPath $securityModelGuide -Destination (Join-Path $releaseRoot 
 Copy-Item -LiteralPath $securityModelGuideHtml -Destination (Join-Path $releaseRoot "SECURITY_MODEL_KO.html") -Force
 Copy-Item -LiteralPath $dependencyAuditGuide -Destination (Join-Path $releaseRoot "DEPENDENCY_AUDIT_EXCEPTIONS_KO.md") -Force
 Copy-Item -LiteralPath $dependencyAuditGuideHtml -Destination (Join-Path $releaseRoot "DEPENDENCY_AUDIT_EXCEPTIONS_KO.html") -Force
-New-Item -ItemType Directory -Force -Path (Join-Path $releaseRoot "config") | Out-Null
+[System.IO.Directory]::CreateDirectory((Join-Path $releaseRoot "config")) | Out-Null
 Copy-Item -LiteralPath $roleNetworkTemplate -Destination (Join-Path $releaseRoot "config") -Force
 Copy-Item -LiteralPath $mockScenarioDir -Destination (Join-Path $releaseRoot "config") -Recurse -Force
-Get-ChildItem -Path $releaseRoot -Recurse -File | ForEach-Object {
+Get-ChildItem -LiteralPath $releaseRoot -Recurse -File | ForEach-Object {
     Wait-ForReadableFile -Path $_.FullName
 }
-Compress-ArchiveWithRetry -Path (Join-Path $releaseRoot "*") -DestinationPath $releaseZip
+Compress-ArchiveWithRetry -DirectoryPath $releaseRoot -DestinationPath $releaseZip
 
 Write-Host ""
 Write-Host "Build completed."

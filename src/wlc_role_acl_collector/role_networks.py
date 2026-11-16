@@ -98,22 +98,25 @@ def load_role_network_definitions_with_summary(path: Path | str | None) -> RoleN
 
     try:
         worksheet, fallback_used = _select_role_network_worksheet(workbook)
-        sheet_name = worksheet.title
-        rows = list(worksheet.iter_rows(values_only=True))
+        return _load_role_network_worksheet(worksheet, source=source, fallback_used=fallback_used)
     finally:
         workbook.close()
 
-    header_index = _find_header_row(rows)
-    if header_index is None:
-        raise RoleNetworkDefinitionError("Role network Excel file does not contain a header row.")
 
-    columns = _resolve_columns(rows[header_index])
+def _load_role_network_worksheet(worksheet, *, source: Path, fallback_used: bool) -> RoleNetworkLoadSummary:
+    sheet_name = worksheet.title
+    rows = enumerate(worksheet.iter_rows(values_only=True), start=1)
+    header = next(((number, row) for number, row in rows if not _row_is_blank(row)), None)
+    if header is None:
+        raise RoleNetworkDefinitionError("Role network Excel file does not contain a header row.")
+    _header_number, header_row = header
+    columns = _resolve_columns(header_row)
     errors: list[str] = []
     definitions: list[RoleNetworkDefinition] = []
     seen: set[tuple[str, str]] = set()
     duplicate_count = 0
 
-    for row_number, row in enumerate(rows[header_index + 1 :], start=header_index + 2):
+    for row_number, row in rows:
         if _row_is_blank(row):
             continue
 
@@ -201,13 +204,6 @@ def _not_real_xlsx_message(source: Path) -> str:
         f"The selected file is not a valid Excel xlsx/xlsm workbook: {source}. "
         f"{_EXCEL_FORMAT_HINT}"
     )
-
-
-def _find_header_row(rows: list[tuple[Any, ...]]) -> int | None:
-    for index, row in enumerate(rows):
-        if not _row_is_blank(row):
-            return index
-    return None
 
 
 def _resolve_columns(header_row: tuple[Any, ...]) -> dict[str, int]:

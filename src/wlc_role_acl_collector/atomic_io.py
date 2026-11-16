@@ -3,11 +3,25 @@
 from __future__ import annotations
 
 import os
+import logging
 import shutil
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable, Iterator
+
+
+def cleanup_temporary_files(paths: Iterable[Path], *, primary_error: BaseException | None = None) -> None:
+    """Keep a cleanup lock from hiding the write/commit result or its real error."""
+    for path in paths:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            message = f"Temporary file cleanup failed for {path.name}: {exc}"
+            if primary_error is not None:
+                primary_error.add_note(message)
+            else:
+                logging.getLogger(__name__).warning(message)
 
 
 @contextmanager
@@ -16,13 +30,17 @@ def atomic_output_path(path: Path) -> Iterator[Path]:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.stem}.{uuid.uuid4().hex}.tmp{path.suffix}")
+    failure: BaseException | None = None
     try:
         yield temporary
         with temporary.open("rb+") as handle:
             os.fsync(handle.fileno())
         os.replace(temporary, path)
+    except BaseException as exc:
+        failure = exc
+        raise
     finally:
-        temporary.unlink(missing_ok=True)
+        cleanup_temporary_files((temporary,), primary_error=failure)
 
 
 def atomic_write_text(path: Path, value: str, *, encoding: str = "utf-8") -> None:
@@ -55,6 +73,7 @@ def commit_staged_files(
     backups: dict[Path, Path] = {}
     committed: list[Path] = []
     preserved_backups: set[Path] = set()
+    failure: BaseException | None = None
     try:
         for _staging, destination in artifact_pairs:
             if destination.exists():
@@ -67,7 +86,8 @@ def commit_staged_files(
         for staging, destination in artifact_pairs:
             staging.replace(destination)
             committed.append(destination)
-    except Exception as exc:
+    except BaseException as exc:
+        failure = exc
         restore_errors: list[str] = []
         for destination in reversed(committed):
             backup = backups.get(destination)
@@ -84,8 +104,10 @@ def commit_staged_files(
             exc.add_note("Unable to restore previous files: " + "; ".join(restore_errors))
         raise
     finally:
-        for staging, _destination in artifact_pairs:
-            staging.unlink(missing_ok=True)
-        for backup in backups.values():
-            if backup not in preserved_backups:
-                backup.unlink(missing_ok=True)
+        cleanup_temporary_files(
+            (staging for staging, _destination in artifact_pairs), primary_error=failure
+        )
+        cleanup_temporary_files(
+            (backup for backup in backups.values() if backup not in preserved_backups),
+            primary_error=failure,
+        )

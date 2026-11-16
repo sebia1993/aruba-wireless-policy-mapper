@@ -11,6 +11,57 @@ from wlc_role_acl_collector.role_networks import (
 )
 
 
+def test_role_network_header_is_validated_before_consuming_data(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from wlc_role_acl_collector import role_networks
+
+    source = tmp_path / "header.xlsx"
+    _write_workbook(source, [["wrong column"]])
+    closed = []
+
+    def rows(**kwargs):
+        yield ("wrong column",)
+        raise AssertionError("read data before rejecting the invalid header")
+
+    worksheet = SimpleNamespace(title="Sheet", iter_rows=rows)
+    workbook = SimpleNamespace(sheetnames=["Sheet"], worksheets=[worksheet], close=lambda: closed.append(True))
+    monkeypatch.setattr(role_networks, "load_workbook", lambda *_args, **_kwargs: workbook)
+
+    with pytest.raises(RoleNetworkDefinitionError, match="missing required column"):
+        load_role_network_definitions(source)
+    assert closed == [True]
+
+
+def test_role_network_rows_are_processed_before_reading_the_next_row(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from wlc_role_acl_collector import role_networks
+
+    source = tmp_path / "stream.xlsx"
+    _write_workbook(source, [["Role", "Network"], ["sample", "192.0.2.0/24"]])
+    parsed = []
+    real_normalize = role_networks._normalize_network
+
+    def normalize(network, mask):
+        parsed.append(network)
+        return real_normalize(network, mask)
+
+    def rows(**kwargs):
+        yield ("Role", "Network")
+        yield ("first", "192.0.2.0/24")
+        assert parsed == ["192.0.2.0/24"], "mapping rows were buffered instead of processed"
+        yield ("second", "198.51.100.0/24")
+
+    worksheet = SimpleNamespace(title="Sheet", iter_rows=rows)
+    workbook = SimpleNamespace(sheetnames=["Sheet"], worksheets=[worksheet], close=lambda: None)
+    monkeypatch.setattr(role_networks, "load_workbook", lambda *_args, **_kwargs: workbook)
+    monkeypatch.setattr(role_networks, "_normalize_network", normalize)
+
+    result = load_role_network_definitions_with_summary(source)
+    assert [(item.role, item.network, item.source_row) for item in result.definitions] == [
+        ("first", "192.0.2.0/24", 2), ("second", "198.51.100.0/24", 3)
+    ]
+
+
 def test_load_role_network_definitions_normalizes_korean_template(tmp_path):
     path = tmp_path / "role_networks.xlsx"
     _write_workbook(

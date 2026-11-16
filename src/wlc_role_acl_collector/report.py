@@ -24,7 +24,7 @@ from openpyxl.utils import get_column_letter
 from .acl_evaluator import access_rule_id, build_access_check_data
 from .annotation_project import build_annotation_project, controller_identity
 from .aos8_parser import parse_controller_config
-from .atomic_io import atomic_output_path, atomic_write_text, commit_staged_files
+from .atomic_io import atomic_output_path, atomic_write_text, cleanup_temporary_files, commit_staged_files
 from .collection_health import (
     COLLECTION_COMPLETED,
     COLLECTION_FAILED,
@@ -57,9 +57,14 @@ def create_run_dir(output_root: Path, *, label: str = "") -> Path:
 
 def write_raw_result(result: CollectionResult, raw_dir: Path) -> Path:
     raw_dir.mkdir(parents=True, exist_ok=True)
-    path = raw_dir / f"{_safe_file_name(result.controller.name)}.txt"
+    identity = hashlib.sha256(json.dumps(
+        [result.controller.name, result.controller.protocol.lower(), controller_identity(result.controller)],
+        ensure_ascii=True,
+    ).encode("utf-8")).hexdigest()
+    path = _raw_result_path(raw_dir, result.controller.name, identity)
     lines = [
         "=== Controller ===",
+        f"identity: {identity}",
         f"name: {result.controller.name}",
         f"host: {result.controller.host}",
         "",
@@ -78,6 +83,29 @@ def write_raw_result(result: CollectionResult, raw_dir: Path) -> Path:
     atomic_write_text(path, "\n".join(lines))
     result.raw_file = path
     return path
+
+
+def _raw_result_path(raw_dir: Path, name: str, identity: str) -> Path:
+    """Preserve the familiar name unless another controller already owns it.
+
+    Case-fold on every platform so a Linux-produced folder remains unambiguous
+    when copied to Windows. Unknown/legacy files are evidence, never overwrite targets.
+    """
+    stem = _safe_file_name(name) or "controller"
+    existing = {path.name.casefold(): path for path in raw_dir.iterdir()}
+    for counter in range(1000):
+        suffix = "" if counter == 0 else f"_{identity[:12]}" + (f"_{counter}" if counter > 1 else "")
+        candidate = raw_dir / f"{stem}{suffix}.txt"
+        found = existing.get(candidate.name.casefold())
+        if found is None:
+            return candidate
+        try:
+            with found.open(encoding="utf-8") as handle:
+                if handle.readline().rstrip("\r\n") == "=== Controller ===" and handle.readline().rstrip("\r\n") == f"identity: {identity}":
+                    return found
+        except (OSError, UnicodeError):
+            pass
+    raise OSError(f"Unable to reserve a distinct raw output filename under {raw_dir}")
 
 
 def _raw_output_for_storage(command) -> str:
@@ -138,6 +166,7 @@ def write_reports(
     transaction_id = uuid.uuid4().hex
     staging_workbook_path = output_dir / f".{workbook_path.stem}.{transaction_id}.staging.xlsx"
     staging_html_path = output_dir / f".{html_path.stem}.{transaction_id}.staging.html"
+    staging_status_path = output_dir / f".{status_path.stem}.{transaction_id}.staging.json"
     started_at = datetime.now().astimezone().isoformat(timespec="seconds")
     collection_health = assess_collection_results(collection_results)
     status_context = {
@@ -180,16 +209,32 @@ def write_reports(
                 frames, parsed_controllers=parsed_controllers, collection_results=collection_results
             ),
         )
+        atomic_write_text(
+            staging_status_path,
+            json.dumps(
+                {
+                    "status": "completed",
+                    "started_at": started_at,
+                    "completed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                    "files": [workbook_path.name, html_path.name],
+                    **status_context,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ) + "\n",
+        )
         commit_staged_files(
             (
                 (staging_workbook_path, workbook_path),
                 (staging_html_path, html_path),
+                (staging_status_path, status_path),
             ),
             transaction_id=transaction_id,
         )
     except Exception as exc:
-        staging_workbook_path.unlink(missing_ok=True)
-        staging_html_path.unlink(missing_ok=True)
+        cleanup_temporary_files(
+            (staging_workbook_path, staging_html_path, staging_status_path), primary_error=exc
+        )
         try:
             atomic_write_text(
                 status_path,
@@ -211,21 +256,6 @@ def write_reports(
             exc.add_note(f"Unable to update {status_path.name}: {status_exc}")
         raise
 
-    atomic_write_text(
-        status_path,
-        json.dumps(
-            {
-                "status": "completed",
-                "started_at": started_at,
-                "completed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-                "files": [workbook_path.name, html_path.name],
-                **status_context,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
-    )
     return {"xlsx": workbook_path, "html": html_path, "status": status_path}
 
 

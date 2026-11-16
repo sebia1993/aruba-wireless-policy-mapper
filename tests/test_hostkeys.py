@@ -105,3 +105,70 @@ def test_probe_disables_rsa_sha1_before_key_exchange(monkeypatch):
     }
     assert captured["transport_closed"] is True
     assert captured["socket_closed"] is True
+
+
+def _approve_in_process(path, key_text, host, loaded, release, done, results, ready):
+    """Spawn-safe worker; pause one writer immediately before publishing its snapshot."""
+    import base64
+    import paramiko
+    from pathlib import Path
+    original = paramiko.HostKeys.save
+
+    def save(keys, filename):
+        if loaded is not None:
+            loaded.set()
+            if not release.wait(5):
+                raise RuntimeError("test writer release timed out")
+        return original(keys, filename)
+
+    paramiko.HostKeys.save = save
+    ready.set()
+    try:
+        key = paramiko.RSAKey(data=base64.b64decode(key_text))
+        hostkeys.approve_unknown_host_key(_observation(key, host=host), known_hosts_path=Path(path))
+        results.put("approved")
+    except Exception as exc:
+        results.put(str(exc))
+    finally:
+        done.set()
+
+
+@pytest.mark.parametrize("same_endpoint", [False, True])
+def test_concurrent_process_approvals_serialize_and_recheck_current_key(tmp_path, same_endpoint):
+    import multiprocessing
+    import paramiko
+    context = multiprocessing.get_context("spawn")
+    path = tmp_path / "known_hosts"
+    first = _observation(paramiko.RSAKey.generate(1024))
+    second = _observation(paramiko.RSAKey.generate(1024), host=first.host if same_endpoint else "192.0.2.11")
+    loaded, release, first_done, second_done = [context.Event() for _ in range(4)]
+    first_result, second_result = context.Queue(), context.Queue()
+    first_ready, second_ready = context.Event(), context.Event()
+    writer1 = context.Process(target=_approve_in_process, args=(str(path), first.key.get_base64(), first.host, loaded, release, first_done, first_result, first_ready))
+    writer2 = context.Process(target=_approve_in_process, args=(str(path), second.key.get_base64(), second.host, None, release, second_done, second_result, second_ready))
+    writer1.start()
+    try:
+        assert loaded.wait(5)
+        writer2.start()
+        assert second_ready.wait(5)
+        overlapped = second_done.wait(0.4)
+    finally:
+        release.set()
+        writer1.join(5)
+        if writer2.pid is not None:
+            writer2.join(5)
+        for writer in (writer1, writer2):
+            if writer.is_alive():
+                writer.terminate()
+                writer.join()
+    assert writer1.exitcode == writer2.exitcode == 0
+    assert not overlapped, "Second process must wait for the first complete update"
+    assert first_result.get(timeout=1) == "approved"
+    outcome = second_result.get(timeout=1)
+    assert hostkeys.check_host_key(first, known_hosts_path=path) == "trusted"
+    if same_endpoint:
+        assert "달라" in outcome
+        assert hostkeys.check_host_key(second, known_hosts_path=path) == "changed"
+    else:
+        assert outcome == "approved"
+        assert hostkeys.check_host_key(second, known_hosts_path=path) == "trusted"

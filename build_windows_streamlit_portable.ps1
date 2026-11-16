@@ -4,7 +4,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-Set-Location $PSScriptRoot
+Set-Location -LiteralPath $PSScriptRoot
+. (Join-Path $PSScriptRoot "tools\windows_packaging.ps1")
 
 function Invoke-External {
     param(
@@ -24,54 +25,6 @@ function Invoke-External {
     }
 }
 
-function Wait-ForReadableFile {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path,
-        [int]$Attempts = 20,
-        [int]$DelayMilliseconds = 500
-    )
-
-    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
-        try {
-            $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
-            $stream.Close()
-            return
-        }
-        catch {
-            if ($attempt -eq $Attempts) {
-                throw "File is not ready for reading: $Path`n$($_.Exception.Message)"
-            }
-            Start-Sleep -Milliseconds $DelayMilliseconds
-        }
-    }
-}
-
-function Compress-ArchiveWithRetry {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path,
-        [Parameter(Mandatory = $true)]
-        [string]$DestinationPath,
-        [int]$Attempts = 5
-    )
-
-    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
-        try {
-            if (Test-Path $DestinationPath) {
-                Remove-Item -LiteralPath $DestinationPath -Force
-            }
-            Compress-Archive -Path $Path -DestinationPath $DestinationPath -Force -ErrorAction Stop
-            return
-        }
-        catch {
-            if ($attempt -eq $Attempts) {
-                throw
-            }
-            Start-Sleep -Seconds 1
-        }
-    }
-}
 
 Write-Host "Installing host build dependencies..."
 Invoke-External -FilePath $PythonExe -Arguments @("-m", "pip", "install", "--require-hashes", "-r", "requirements-lock.txt") -ErrorMessage "Locked host dependency install failed."
@@ -107,22 +60,19 @@ $releaseZip = Join-Path $distDir "WlcRoleAclCollectorWeb_v${version}.zip"
 $embeddedZip = Join-Path $cacheDir "python-$EmbeddedPythonVersion-embed-amd64.zip"
 $embeddedUrl = "https://www.python.org/ftp/python/$EmbeddedPythonVersion/python-$EmbeddedPythonVersion-embed-amd64.zip"
 
-New-Item -ItemType Directory -Force -Path $distDir | Out-Null
-New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
-New-Item -ItemType Directory -Force -Path $releaseRoot | Out-Null
+[System.IO.Directory]::CreateDirectory($distDir) | Out-Null
+[System.IO.Directory]::CreateDirectory($cacheDir) | Out-Null
+[System.IO.Directory]::CreateDirectory($releaseRoot) | Out-Null
 
-if (Test-Path $releaseZip) {
+if (Test-Path -LiteralPath $releaseZip) {
     Remove-Item -LiteralPath $releaseZip -Force
 }
 
-if (-not (Test-Path $embeddedZip)) {
-    Write-Host "Downloading Python embeddable runtime: $embeddedUrl"
-    Invoke-WebRequest -Uri $embeddedUrl -OutFile $embeddedZip
-}
+Get-EmbeddedPythonArchive -Path $embeddedZip -Uri $embeddedUrl -PythonTag $pythonTag
 
 Write-Host "Extracting Python embeddable runtime..."
-Expand-Archive -LiteralPath $embeddedZip -DestinationPath $pythonDir -Force
-New-Item -ItemType Directory -Force -Path $sitePackages | Out-Null
+Expand-LiteralArchive -LiteralPath $embeddedZip -DestinationPath $pythonDir
+[System.IO.Directory]::CreateDirectory($sitePackages) | Out-Null
 
 $pthPath = Join-Path $pythonDir "python${pythonTag}._pth"
 $pthLines = @(
@@ -143,8 +93,8 @@ Invoke-External `
     -Arguments @("-m", "pip", "install", "--no-deps", "--no-build-isolation", "--no-warn-script-location", "--target", $sitePackages, ".") `
     -ErrorMessage "Portable project install failed."
 
-New-Item -ItemType Directory -Force -Path (Join-Path $releaseRoot "app") | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $releaseRoot "config") | Out-Null
+[System.IO.Directory]::CreateDirectory((Join-Path $releaseRoot "app")) | Out-Null
+[System.IO.Directory]::CreateDirectory((Join-Path $releaseRoot "config")) | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "app.py") -Destination (Join-Path $releaseRoot "app\app.py") -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "config\role_networks.example.xlsx") -Destination (Join-Path $releaseRoot "config\role_networks.example.xlsx") -Force
 Copy-Item -LiteralPath (Join-Path $templateDir "start_webapp.cmd") -Destination (Join-Path $releaseRoot "start_webapp.cmd") -Force
@@ -162,9 +112,9 @@ $precompileTargets = @(
     (Join-Path $sitePackages "openpyxl"),
     (Join-Path $sitePackages "netmiko"),
     (Join-Path $sitePackages "paramiko")
-) | Where-Object { Test-Path $_ }
+) | Where-Object { Test-Path -LiteralPath $_ }
 
-if ($precompileTargets.Count -gt 0) {
+if (@($precompileTargets).Count -gt 0) {
     $compileArgs = @("-m", "compileall", "-q") + @($precompileTargets)
     Invoke-External `
         -FilePath $portablePython `
@@ -173,7 +123,7 @@ if ($precompileTargets.Count -gt 0) {
 }
 
 Write-Host "Running portable web app smoke test..."
-Push-Location $releaseRoot
+Push-Location -LiteralPath $releaseRoot
 try {
     $smokeOutput = @(& cmd.exe /d /c ".\start_webapp.cmd --smoke" 2>&1)
     $smokeExitCode = $LASTEXITCODE
@@ -199,10 +149,10 @@ finally {
 }
 
 Write-Host "Creating Streamlit portable release zip..."
-Get-ChildItem -Path $releaseRoot -Recurse -File | ForEach-Object {
+Get-ChildItem -LiteralPath $releaseRoot -Recurse -File | ForEach-Object {
     Wait-ForReadableFile -Path $_.FullName
 }
-Compress-ArchiveWithRetry -Path (Join-Path $releaseRoot "*") -DestinationPath $releaseZip
+Compress-ArchiveWithRetry -DirectoryPath $releaseRoot -DestinationPath $releaseZip
 
 Write-Host ""
 Write-Host "Streamlit portable build completed."
