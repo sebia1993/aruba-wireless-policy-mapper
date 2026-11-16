@@ -217,7 +217,15 @@ try {
 
     $runtimeDirectory = Join-Path $testRoot "runtime files"
     [System.IO.Directory]::CreateDirectory($runtimeDirectory) | Out-Null
-    Add-Type -TypeDefinition 'public class PackagingFixtureRuntime { public static int Main(string[] args) { return 0; } }' -OutputAssembly (Join-Path $runtimeDirectory "python.exe") -OutputType ConsoleApplication
+    # Add-Type wildcard-resolves its output path on Windows PowerShell 5.1.
+    # Stage compilation separately; all builder/runtime fixture paths stay bracketed.
+    $compileDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("wlc_compile_" + [Guid]::NewGuid().ToString("N"))
+    [System.IO.Directory]::CreateDirectory($compileDirectory) | Out-Null
+    try {
+        $compiledExe = Join-Path $compileDirectory "python.exe"
+        Add-Type -TypeDefinition 'public class PackagingFixtureRuntime { public static int Main(string[] args) { return 0; } }' -OutputAssembly $compiledExe -OutputType ConsoleApplication
+        [System.IO.File]::Move($compiledExe, (Join-Path $runtimeDirectory "python.exe"))
+    } finally { Remove-Item -LiteralPath $compileDirectory -Recurse -Force }
     foreach ($name in @("python311.dll", "python311.zip", "python311._pth")) {
         [System.IO.File]::WriteAllText((Join-Path $runtimeDirectory $name), "synthetic runtime")
     }
