@@ -66,6 +66,26 @@ try {
     Write-FixtureZip $guiZip @{ "current.txt" = "current gui" }
     Write-Host "PASS exact-version package selection"
 
+    # Round-trip real nested files through literal ZIP destinations and overwrite.
+    $archiveSource = Join-Path $testRoot "source [tree]"
+    $nested = Join-Path $archiveSource "nested [entry]"
+    [System.IO.Directory]::CreateDirectory($nested) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $nested "payload.txt"), "round trip bytes")
+    $roundTripZip = Join-Path $testRoot "round trip [archive].zip"
+    Compress-ArchiveWithRetry -DirectoryPath $archiveSource -DestinationPath $roundTripZip
+    $archiveDestination = Join-Path $testRoot "expanded [tree]"
+    Expand-LiteralArchive -LiteralPath $roundTripZip -DestinationPath $archiveDestination
+    $expandedFile = Join-Path $archiveDestination "nested [entry]\payload.txt"
+    Assert-True ([System.IO.File]::ReadAllText($expandedFile) -eq "round trip bytes") "literal nested paths and archive root layout preserved"
+    [System.IO.File]::WriteAllText($expandedFile, "old bytes")
+    Expand-LiteralArchive -LiteralPath $roundTripZip -DestinationPath $archiveDestination
+    Assert-True ([System.IO.File]::ReadAllText($expandedFile) -eq "round trip bytes") "existing extraction files overwritten"
+    $outsideZip = Join-Path $testRoot "outside-entry.zip"
+    Write-FixtureZip $outsideZip @{ "../escaped.txt" = "must not extract" }
+    Assert-Throws { Expand-LiteralArchive -LiteralPath $outsideZip -DestinationPath $archiveDestination } "entry outside destination rejected"
+    Assert-True (-not [System.IO.File]::Exists((Join-Path $testRoot "escaped.txt"))) "extraction stays within destination"
+    Write-Host "PASS literal ZIP round trip, extraction overwrite and destination containment"
+
     $runtimeFixture = Join-Path $testRoot "runtime.zip"
     Write-FixtureZip $runtimeFixture @{
         "python.exe" = "synthetic executable"; "python311.dll" = "synthetic DLL"

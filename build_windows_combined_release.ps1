@@ -30,10 +30,10 @@ $webZip = $packages.Web
 [System.IO.Directory]::CreateDirectory((Join-Path $releaseRoot "web")) | Out-Null
 
 Write-Host "Extracting GUI/CLI ZIP: $guiZip"
-Expand-Archive -LiteralPath $guiZip -DestinationPath $guiExtractDir -Force
+Expand-LiteralArchive -LiteralPath $guiZip -DestinationPath $guiExtractDir
 
 Write-Host "Extracting Streamlit portable ZIP: $webZip"
-Expand-Archive -LiteralPath $webZip -DestinationPath $webExtractDir -Force
+Expand-LiteralArchive -LiteralPath $webZip -DestinationPath $webExtractDir
 
 Copy-Item -LiteralPath $readmeTemplate -Destination (Join-Path $releaseRoot "README_START_HERE_KO.txt") -Force
 Get-ChildItem -LiteralPath $guiExtractDir | ForEach-Object {

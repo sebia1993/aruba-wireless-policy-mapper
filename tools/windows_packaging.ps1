@@ -42,19 +42,51 @@ function Compress-ArchiveWithRetry {
         [Parameter(Mandatory = $true)][string]$DestinationPath,
         [ValidateRange(1, 1000)][int]$Attempts = 5
     )
-    # Passing children preserves the established ZIP root layout without a wildcard path.
+    # Archive cmdlets on Windows PowerShell wildcard-resolve destination parents
+    # even with -LiteralPath. The .NET API keeps both sides literal.
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
     $contents = @(Get-ChildItem -LiteralPath $DirectoryPath | ForEach-Object { $_.FullName })
     if ($contents.Count -eq 0) { throw "Cannot package an empty directory: $DirectoryPath" }
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
         try {
             if (Test-Path -LiteralPath $DestinationPath) { Remove-Item -LiteralPath $DestinationPath -Force }
-            Compress-Archive -LiteralPath $contents -DestinationPath $DestinationPath -Force -ErrorAction Stop
+            [System.IO.Compression.ZipFile]::CreateFromDirectory(
+                $DirectoryPath, $DestinationPath, [System.IO.Compression.CompressionLevel]::Optimal, $false
+            )
             return
         } catch {
             if ($attempt -eq $Attempts) { throw }
             Start-Sleep -Seconds 1
         }
     }
+}
+
+function Expand-LiteralArchive {
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [Parameter(Mandatory = $true)][string]$DestinationPath
+    )
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $root = [System.IO.Path]::GetFullPath($DestinationPath).TrimEnd([char[]]"\/") + [System.IO.Path]::DirectorySeparatorChar
+    [System.IO.Directory]::CreateDirectory($root) | Out-Null
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($LiteralPath)
+    try {
+        foreach ($entry in $archive.Entries) {
+            $target = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($root, $entry.FullName))
+            if (-not $target.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "ZIP entry is outside the extraction directory: $($entry.FullName)"
+            }
+            if ($entry.Name -eq "") {
+                [System.IO.Directory]::CreateDirectory($target) | Out-Null
+            } else {
+                [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($target)) | Out-Null
+                # Preserve the builders' existing -Force overwrite behavior.
+                [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $target, $true)
+            }
+        }
+    } finally { $archive.Dispose() }
 }
 
 function Get-CurrentReleasePackages {

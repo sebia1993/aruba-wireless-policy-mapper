@@ -71,7 +71,7 @@ if (Test-Path -LiteralPath $releaseZip) {
 Get-EmbeddedPythonArchive -Path $embeddedZip -Uri $embeddedUrl -PythonTag $pythonTag
 
 Write-Host "Extracting Python embeddable runtime..."
-Expand-Archive -LiteralPath $embeddedZip -DestinationPath $pythonDir -Force
+Expand-LiteralArchive -LiteralPath $embeddedZip -DestinationPath $pythonDir
 [System.IO.Directory]::CreateDirectory($sitePackages) | Out-Null
 
 $pthPath = Join-Path $pythonDir "python${pythonTag}._pth"
