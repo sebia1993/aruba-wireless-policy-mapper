@@ -6,6 +6,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $originalLocation = Get-Location
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("wlc [packaging] space " + [Guid]::NewGuid().ToString("N"))
 [System.IO.Directory]::CreateDirectory($testRoot) | Out-Null
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $testState = @{ DownloadCount = 0; DownloadMode = "success"; CopyAttempts = 0; FailCopies = 0; ExeCopyAttempts = 0 }
 

@@ -79,6 +79,7 @@ function Test-EmbeddedPythonArchive {
     )
     $archive = $null
     try {
+        Add-Type -AssemblyName System.IO.Compression
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         $archive = [System.IO.Compression.ZipFile]::OpenRead($Path)
         foreach ($name in @("python.exe", "python${PythonTag}.dll", "python${PythonTag}.zip", "python${PythonTag}._pth")) {
