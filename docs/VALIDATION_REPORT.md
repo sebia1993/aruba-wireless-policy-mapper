@@ -17,6 +17,8 @@
 | Windows GUI / CLI 패키지 | ✅ | GitHub Actions Windows runner |
 | Streamlit portable 패키지 | ✅ | GitHub Actions Windows runner |
 | GUI + Web 통합 ZIP | ✅ | GitHub Actions Windows runner |
+| 오프라인 주석 작업 저장·복구·재사용 | ✅ 자동·합성 검증 | `tests/js/annotation_core.test.js`, `annotation_editor.test.js`, `annotation_import.test.js` |
+| 주석 포함 PDF·Excel 및 장비별 출력 구분 | ✅ 자동·합성 검증 | `tests/js/annotation_export.test.js`, `tests/test_annotation_export.py`, `tests/test_annotation_integration.py` |
 | 실제 운영 환경 검증 | 비식별 요약만 공개 | 실제 운영 정보는 외부 공개 대상 아님 |
 
 > 자동 테스트가 실제 WLC 검증을 대체한다고 표현하지 않습니다. 실제 운영 환경에서 확인한 결과가 있더라도 공개 저장소에는 장비별 원문 증거를 올리지 않습니다.
@@ -68,7 +70,13 @@
 
 ```powershell
 python -m pytest
+npm ci --ignore-scripts
+npm test
 ```
+
+주석 기능은 JSON 작업 파일의 복원과 오류 시 현재 작업 유지, 빈 주석, 이전 임시저장, 장비별 주석 재사용, 중복·변경 규칙과 미연결 설명 보존을 검사합니다. Excel은 실제 생성된 XLSX를 openpyxl로 다시 읽어 수식 형태의 문자열과 긴 한글·이모지 주석의 보존을 확인합니다. PDF는 인쇄용 HTML의 출력 범위와 내용, 같은 이름의 WLC·Role·ACL이 여러 개 있을 때 상세 행별 주소·포트·범위·식별자 구분을 검사합니다.
+
+위 PDF 검사는 실제 Windows 브라우저에서의 PDF 저장·페이지 배치 또는 사내 프린터 검증을 의미하지 않습니다. 실제 사내 장비·파일·Windows·인쇄 환경 검증은 사용자 범위이며 이번 주석 기능의 개발 완료율에서 제외합니다.
 
 통합 검증:
 

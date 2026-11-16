@@ -4,6 +4,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const {JSDOM} = require('jsdom');
+const Core = require('../../src/wlc_role_acl_collector/static/annotation_core.js');
+const fixture = require('./editor_fixture.js');
 const staticDir = path.resolve(__dirname, '../../src/wlc_role_acl_collector/static');
 const target = path.join(staticDir, 'annotation_export.js');
 const exporter = fs.existsSync(target) ? require(target) : {};
@@ -43,6 +46,46 @@ test('print view is complete inert HTML with full notes and all report sections'
   assert.ok(html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));assert.ok(!/<script\b|\bon\w+=|<iframe\b|<link\b/i.test(html));
   for(const text of [longNote,'=1+1','orphan-a','unmatched note','office','partial','2026-11-16T13:00:00Z','선택 역할: selected']) assert.ok(html.includes(text),text.slice(0,40));
   assert.ok(html.includes('A4 landscape'));assert.ok(html.includes('table-header-group'));assert.ok(html.includes('overflow-wrap:anywhere'));
+});
+test('PDF detail rows keep same-named controllers and policy occurrences distinguishable', () => {
+  const p=fixture(), controller=p.snapshot.controllers[0], role=p.snapshot.roles[0], rule=p.snapshot.rules[0];
+  const annotation=p.annotations.rules['rule-a'];
+  const cases=[
+    {suffix:'a',host:'192.0.2.1',port:22,scope:'/md/first',aliasValue:'198.51.100.10'},
+    {suffix:'b',host:'192.0.2.2',port:2222,scope:'/md/second',aliasValue:'203.0.113.10'}
+  ];
+  p.snapshot.controllers=[];p.snapshot.roles=[];p.snapshot.rules=[];p.annotations.rules={};
+  for (const c of cases) {
+    const cid='controller-'+c.suffix, rid='role-'+c.suffix, ruleId='rule-'+c.suffix;
+    p.snapshot.controllers.push({...controller,id:cid,host:c.host,port:c.port,scope:c.scope});
+    p.snapshot.roles.push({...role,id:rid,controllerId:cid});
+    p.snapshot.rules.push({...rule,id:ruleId,controllerId:cid,roleId:rid});
+    p.snapshot.aliases.push({id:'alias-'+c.suffix,controllerId:cid,name:'SAME_ALIAS',entries:[{type:'host',value:c.aliasValue,raw:'host '+c.aliasValue}]});
+    p.annotations.roles[rid]={...annotation,text:'Role note '+c.suffix};
+    p.annotations.rules[ruleId]={...annotation,text:'Rule note '+c.suffix};
+    p.changes.push({type:'context_changed',controllerId:cid,roleId:rid,ruleId:ruleId,message:'Change '+c.suffix,previousRaw:rule.raw});
+  }
+  const dom=new JSDOM(exporter.printHtml(Core.buildExportModel(p,{type:'all'})));
+  try {
+    const sections=new Map(Array.from(dom.window.document.querySelectorAll('section'),s=>[s.querySelector('h2').textContent,s]));
+    for (const c of cases) {
+      const expectations=[
+        ['Role 설명','Role note '+c.suffix,'role-'+c.suffix],
+        ['ACL 상세','Rule note '+c.suffix,'rule-'+c.suffix],
+        ['변경·확인 사항','Change '+c.suffix,'rule-'+c.suffix],
+        ['Alias 상세',c.aliasValue,'alias-'+c.suffix]
+      ];
+      for (const [section,marker,entityId] of expectations) {
+        const row=Array.from(sections.get(section).querySelectorAll('tbody tr')).find(r=>r.textContent.includes(marker));
+        assert.ok(row,section+' row exists');
+        const target=row.cells[0].textContent;
+        for (const value of ['controller-'+c.suffix,c.host,String(c.port),c.scope,entityId]) {
+          assert.ok(target.includes(value),section+' target must identify '+value);
+        }
+        assert.ok(!target.includes(c.suffix==='a'?'192.0.2.2':'192.0.2.1'),section+' must not identify the other controller');
+      }
+    }
+  } finally {dom.window.close();}
 });
 test('browser UMD works offline from the supplied model without consulting document rows', () => {
   const sandbox = {document:new Proxy({}, {get(){throw new Error('Exporter must not read the editor DOM');}})};

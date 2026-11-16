@@ -110,19 +110,35 @@
   function escape(value) { return str(value).replace(/[&<>"']/g, function (char) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]; }); }
   function printHtml(model) {
     var tables = datasets(model);
+    var controllers = new Map((model.controllers || []).map(function (c) { return [c.id, c]; }));
     function table(headers, rows) {
       return '<table><thead><tr>' + headers.map(function (v) { return '<th scope="col">' + escape(v) + '</th>'; }).join('') + '</tr></thead><tbody>' + (rows.length ? rows.map(function (row) { return '<tr>' + row.map(function (v) { return '<td>' + escape(v) + '</td>'; }).join('') + '</tr>'; }).join('') : '<tr><td colspan="' + headers.length + '">이 범위에 해당 항목이 없습니다.</td></tr>') + '</tbody></table>';
     }
-    function grouped(data, groups) {
+    function controllerContext(id) {
+      var controller = controllers.get(id);
+      var lines = ['컨트롤러 ID: ' + (str(id) || '미확인')];
+      if (controller) {
+        lines.push('장비 주소: ' + (str(controller.host) || '미확인'));
+        lines.push('접속 포트: ' + (controller.port ? str(controller.port) : '미확인'));
+        lines.push('설정 범위: ' + (str(controller.scope) || '미확인'));
+      }
+      return lines.join('\n');
+    }
+    function grouped(data, groups, controllerColumn) {
       return table(groups.map(function (g) { return g[0]; }),data.rows.map(function (row) {
-        return groups.map(function (g) { return g.slice(1).map(function (i) { return data.headers[i] + ': ' + str(row[i]); }).join('\n'); });
+        return groups.map(function (g, index) {
+          var content = g.slice(1).map(function (i) { return data.headers[i] + ': ' + str(row[i]); }).join('\n');
+          // Display names can repeat. Keep the endpoint and stable identities
+          // beside each note, including when a detail table spans PDF pages.
+          return index === 0 ? content + '\n' + controllerContext(row[controllerColumn]) : content;
+        });
       }));
     }
     var sections = '<section><h2>보고 요약</h2>' + table(tables[0].headers,tables[0].rows) + '</section>';
-    sections += '<section><h2>Role 설명</h2>' + grouped(tables[1],[['장비 / Role',2,3],['연결 / 수집 정보',4,5,6,7,8,9],['보고용 설명',10],['확인 / 이력',11,12,13,14,18]]) + '</section>';
-    sections += '<section><h2>ACL 상세</h2>' + grouped(tables[2],[['장비 / Role / ACL',2,4,5,6,7],['규칙',8,9,10,11,12,13,14],['주석',15],['확인 / 이력',16,17,18,19,23]]) + '</section>';
-    sections += '<section><h2>변경·확인 사항</h2>' + grouped(tables[3],[['구분 / 대상',0,1,2,4,6,8],['변경 / 미연결 정보',9,10,11,13,14],['주석',15],['확인 / 이력',16,17,18,19,23]]) + '</section>';
-    sections += '<section><h2>Alias 상세</h2>' + grouped(tables[4],[['장비 / Alias',2,3],['항목',4,5,6,7]]) + '</section>';
+    sections += '<section><h2>Role 설명</h2>' + grouped(tables[1],[['장비 / Role',2,3,0],['연결 / 수집 정보',4,5,6,7,8,9],['보고용 설명',10],['확인 / 이력',11,12,13,14,18]],1) + '</section>';
+    sections += '<section><h2>ACL 상세</h2>' + grouped(tables[2],[['장비 / Role / ACL',2,4,5,6,7,3,0],['규칙',8,9,10,11,12,13,14],['주석',15],['확인 / 이력',16,17,18,19,23]],1) + '</section>';
+    sections += '<section><h2>변경·확인 사항</h2>' + grouped(tables[3],[['구분 / 대상',0,1,2,4,6,8,5,7],['변경 / 미연결 정보',9,10,11,13,14],['주석',15],['확인 / 이력',16,17,18,19,23]],3) + '</section>';
+    sections += '<section><h2>Alias 상세</h2>' + grouped(tables[4],[['장비 / Alias',2,3,0],['항목',4,5,6,7]],1) + '</section>';
     return '<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>무선 정책 주석 보고서</title><style>' +
       '*{box-sizing:border-box}body{margin:24px;color:#172b4d;font:12px/1.55 "Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif}h1{font-size:25px;color:#173d64;margin-bottom:6px}h2{font-size:17px;margin:22px 0 8px}p{white-space:pre-wrap;overflow-wrap:anywhere}table{border-collapse:collapse;width:100%;table-layout:fixed;margin-bottom:18px}th,td{border:1px solid #bdcddd;padding:7px;text-align:left;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}th{background:#e4edf5;font-weight:700}thead{display:table-header-group}tr{break-inside:auto}section{break-before:page}section:first-of-type{break-before:auto}h2{break-after:avoid}tbody tr:nth-child(even){background:#f5f8fb}@page{size:A4 landscape;margin:12mm}@media print{body{margin:0;font-size:11px}h1{font-size:20px}th,td{padding:5px}thead{display:table-header-group}h1,h2{break-after:avoid}table{break-inside:auto}p{orphans:3;widows:3}}' +
       '</style></head><body><h1>무선 정책 주석 보고서</h1><p>범위: ' + escape(model.scopeLabel) + '\n내보내기: ' + escape(model.exportedAt) + '\n프로젝트: ' + escape(model.projectId) + ' / 스냅샷: ' + escape(model.snapshotId) + ' / 리비전: ' + escape(model.revision) + '</p>' + sections + '</body></html>';
