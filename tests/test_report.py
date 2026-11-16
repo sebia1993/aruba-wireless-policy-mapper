@@ -107,7 +107,6 @@ def test_write_excel_and_html_report(tmp_path):
     assert 'id="filter"' not in html
     assert 'id="ssid-table"' not in html
     assert 'class="toolbar no-print"' not in html
-    assert "<details" not in html
     assert "<th>SSID</th>" not in html
     assert "<th>AP Group</th>" not in html
     assert "<th>AAA Profile</th>" not in html
@@ -150,13 +149,13 @@ def test_write_excel_and_html_report(tmp_path):
     assert 'class="comment-print"' in html
     assert 'id="acl-comments-data"' in html
     assert "localStorage" in html
-    assert "commentStorageKey" in html
-    assert "임시저장 복원됨" in html
+    assert 'id="annotation-project-data"' in html
+    assert 'id="annotation-workspace"' in html
     assert "저장됨" in html
     assert "주석 포함 HTML 저장" in html
     assert "PDF 저장/인쇄" in html
-    assert "window.print()" in html
-    assert "beforeprint" in html
+    assert "AnnotationEditorApp?.printPdf()" in html
+    assert "window.addEventListener('beforeprint', preparePrint)" not in html
     assert "@media print" in html
     assert 'class="report-actions no-print"' in html
     assert 'id="save-role-png"' in html
@@ -165,7 +164,7 @@ def test_write_excel_and_html_report(tmp_path):
     assert 'class="role-report-description"' in html
     assert 'class="role-description-input"' in html
     assert 'id="role-descriptions-data"' in html
-    assert "wlc-role-report-descriptions:" in html
+    assert "wlc-role-report-descriptions:" not in html
     assert "collectRoleDescriptions()" in html
     assert "syncRoleDescriptionDomValues()" in html
     assert "입력된 설명이 없습니다." in html
@@ -223,7 +222,7 @@ def test_write_excel_and_html_report(tmp_path):
     assert "runAccessCheck" in html
     assert "accessHighlightRule" in html
     assert "function syncAccessRoleSelection(roleName)" in html
-    assert "syncAccessRoleSelection(selectedPanel.dataset.role || '')" in html
+    assert "syncAccessRoleSelection(selectedPanel.dataset.roleKey || selectedPanel.dataset.role || '')" in html
     assert "const accessHistoryEnabled = false" in html
     assert "syncAccessHistoryDomValues" in html
     assert "Access Check History" not in html
@@ -236,7 +235,6 @@ def test_write_excel_and_html_report(tmp_path):
     assert 'class="acl-rule-row other-acl-rule" data-other-acl="true" hidden' in html
     assert "syncOtherAclRows" in html
     assert "panel.querySelectorAll('.other-acl-rule')" in html
-    assert "document.querySelectorAll('.other-acl-rule')" in html
     assert 'colspan="8"' in html
     assert "alias-type-host" in html
     assert "alias-type-network" in html
@@ -377,7 +375,8 @@ def test_write_report_does_not_export_local_role_network_mapping_by_default(tmp_
     assert "Local Role Network" not in html
     assert "10.30.0.0/24" not in html
     assert "10.31.0.0/24" not in html
-    assert '"localNetworks"' not in html
+    project = json.loads(re.search(r'<script type="application/json" id="annotation-project-data">(.*?)</script>', html, re.S).group(1))
+    assert project["snapshot"]["localNetworks"] == []
 
 
 def test_write_report_exports_local_role_network_mapping_when_enabled(tmp_path):
@@ -468,7 +467,7 @@ def test_html_hides_zero_user_roles_when_user_table_is_reliable(tmp_path):
     assert 'data-zero-user-role-count="1"' in html
     assert "Show zero-user roles" in html
     assert "Hide zero-user roles" in html
-    assert 'data-role="empty-role" data-zero-user-role="true" hidden' in html
+    assert re.search(r'data-role="empty-role"[^>]*data-zero-user-role="true" hidden', html)
     assert 'class="role-tab zero-user-role"' in html
     assert "syncZeroUserRoles" in html
     assert "document.querySelectorAll('.zero-user-role')" in html

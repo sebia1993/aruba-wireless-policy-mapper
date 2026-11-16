@@ -21,12 +21,12 @@ GitHub Actions의 `Release` workflow를 수동 실행하며, 다음과 같이 �
 
 ## 배포 산출물
 
-일반 사용자에게 직접 제공하는 Release asset은 다음 Windows 통합 ZIP 하나입니다.
+일반 사용자용 실행 파일은 Windows 통합 ZIP으로 제공하며, SHA-256 체크섬과 Python 의존성 SBOM을 함께 공개합니다.
 
 ```text
-wlc-role-acl-collector_v0.2.0_windows.zip
-wlc-role-acl-collector_v0.2.0_windows.zip.sha256
-wlc-role-acl-collector_v0.2.0_sbom.cdx.json
+wlc-role-acl-collector_v0.3.0_windows.zip
+wlc-role-acl-collector_v0.3.0_windows.zip.sha256
+wlc-role-acl-collector_v0.3.0_sbom.cdx.json
 ```
 
 GitHub가 자동 표시하는 `Source code (zip)`과 `Source code (tar.gz)`는 실행용 배포 파일이 아닙니다.
@@ -61,13 +61,21 @@ web/
   config/
 ```
 
-SHA-256은 Release notes와 별도 `.sha256` asset에 기록합니다. CycloneDX JSON SBOM과 GitHub build provenance도 함께 공개합니다.
+SHA-256은 Release notes와 별도 `.sha256` asset에 기록합니다. CycloneDX JSON SBOM과 GitHub build provenance도 함께 공개합니다. SBOM의 목록 범위는 `requirements-web-lock.txt`에 고정한 Python 의존성입니다.
 
 Paramiko 수정 릴리스가 아직 없는 `CVE-2026-44405`는 정확히 한 건만 감사 예외로 고정합니다. 서버 키 probe와 실제 연결에서 RSA/SHA-1을 비활성화하고 맞춤 고정 키 policy로 인증 전에 키 재료를 검증하며, 근거·제거 조건·재검토 기한은 `docs/DEPENDENCY_AUDIT_EXCEPTIONS_KO.md`에 공개합니다.
 
 ## Release 전 검증
 
-PR Validation이 성공한 상태에서 수동 Release workflow를 실행합니다.
+릴리스 준비 변경의 PR Validation이 성공한 상태에서 병합한 `main` 커밋에 수동 Release workflow를 실행합니다. Release workflow는 해당 커밋의 자동 검사와 Windows 패키지 검증을 다시 수행한 뒤 공개 자산을 발행합니다.
+
+Release workflow와 같은 Python 3.11, Node.js 22 환경을 준비하고 잠금 의존성을 먼저 설치합니다. Python 통합 검사도 Node.js와 JSDOM을 사용하므로 `pytest` 전에 JavaScript 의존성 설치를 완료해야 합니다.
+
+```powershell
+python -m pip install --require-hashes -r requirements-lock.txt
+python -m pip install --no-deps --no-build-isolation -e .
+npm ci --ignore-scripts
+```
 
 기본 검증:
 
@@ -78,6 +86,7 @@ python -m pip check
 python -m pip_audit -r requirements-lock.txt --strict --ignore-vuln CVE-2026-44405
 python -m pip_audit -r requirements-web-lock.txt --strict --ignore-vuln CVE-2026-44405
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\validate.ps1
+npm test
 ```
 
 Windows GUI / CLI:
@@ -161,3 +170,5 @@ Release notes와 asset에는 다음 정보를 포함하지 않습니다.
 - Streamlit 자체 사용자 로그인/권한 관리 기능은 없습니다.
 - 코드서명, installer, MSIX는 현재 범위가 아닙니다.
 - Windows EXE는 Windows runner 또는 Windows PC에서 검증합니다.
+- PDF 저장은 별도 브라우저 인쇄 창에서 `PDF로 저장`을 선택하는 방식입니다.
+- 이번 주석 기능의 실제 회사 장비·Windows 사용자 환경·인쇄 결과 수동 검증은 사용자의 별도 범위입니다.

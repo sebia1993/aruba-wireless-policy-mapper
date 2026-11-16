@@ -2,6 +2,7 @@ import hashlib
 import runpy
 import subprocess
 import sys
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -296,6 +297,7 @@ def test_verify_combined_release_package_checks_zip_contents_and_checksum(tmp_pa
 
 def test_release_documentation_describes_current_package_contract():
     repo_root = Path(__file__).parents[1]
+    version = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     app = (repo_root / "app.py").read_text(encoding="utf-8")
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
     release_notes = (repo_root / "RELEASE_NOTES.md").read_text(encoding="utf-8")
@@ -307,7 +309,7 @@ def test_release_documentation_describes_current_package_contract():
     web_lock = (repo_root / "requirements-web-lock.txt").read_text(encoding="utf-8")
 
     for text in (readme, release_notes):
-        assert "wlc-role-acl-collector_v0.2.0_windows.zip" in text
+        assert f"wlc-role-acl-collector_v{version}_windows.zip" in text
         assert "WlcRoleAclCollectorGUI.exe" in text
         assert "WlcRoleAclCollectorCLI.exe" in text
         assert "start_webapp.cmd" in text
@@ -315,8 +317,8 @@ def test_release_documentation_describes_current_package_contract():
         assert "README_START_HERE_KO.txt" in text
         assert "Source code (zip)" in text
 
-    assert "wlc-role-acl-collector_v0.2.0_windows.zip.sha256" in release_notes
-    assert "wlc-role-acl-collector_v0.2.0_sbom.cdx.json" in release_notes
+    assert f"wlc-role-acl-collector_v{version}_windows.zip.sha256" in release_notes
+    assert f"wlc-role-acl-collector_v{version}_sbom.cdx.json" in release_notes
 
     assert "SSID → AAA Profile → 기본 Role → ACL → Alias" in readme
     assert "Access Check" in readme

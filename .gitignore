@@ -27,6 +27,7 @@ config/private/
 
 # Virtual environments
 .venv/
+node_modules/
 venv/
 env/
 

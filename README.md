@@ -6,7 +6,7 @@
 
 > 실제 운영 데이터는 저장소에 포함하지 않습니다. 문서와 화면 예시는 비식별 샘플·Mock 데이터만 사용합니다.
 
-> **실제 환경 검증:** 본 프로젝트는 실제 사내 운영 환경에서 기능 검증을 완료했습니다. 다만 사내 보안정책상 운영망 데이터(장비 출력, IP/Hostname, 계정, 원본 로그 및 기타 내부 데이터)는 외부 반출이 불가하여 공개 저장소에는 포함하지 않았습니다. 공개 Demo·fixture·문서 예시는 비식별 합성 데이터로 대체했으며, 공개 CI/자동 테스트 결과는 재현 가능한 공개 증거로 별도 제공합니다. 실제 환경 검증에 사용한 사내 원본 데이터 자체는 보안상 공개하지 않습니다.
+> **실제 환경 검증:** 기존 수집·분석 기능은 실제 사내 운영 환경에서 검증했습니다. 이번 오프라인 주석 작업·보고 기능의 회사 장비/Windows/인쇄 환경 수동 검증은 별도 사용자 범위입니다. 다만 사내 보안정책상 운영망 데이터(장비 출력, IP/Hostname, 계정, 원본 로그 및 기타 내부 데이터)는 외부 반출이 불가하여 공개 저장소에는 포함하지 않았습니다. 공개 Demo·fixture·문서 예시는 비식별 합성 데이터로 대체했으며, 공개 CI/자동 테스트 결과는 재현 가능한 공개 증거로 별도 제공합니다. 실제 환경 검증에 사용한 사내 원본 데이터 자체는 보안상 공개하지 않습니다.
 
 ## 포트폴리오 요약
 
@@ -160,10 +160,15 @@ SSID → Role → ACL 상세와 Access Check의 이전 HTML 예시는 [2026-06-3
 - 관리자 요약
 - SSID / Role 관계
 - Role별 ACL 상세
-- ACL 주석 및 Role 설명
-- 선택 Role PNG 저장
+- 기본 `주석·보고서` 화면에서 Role 설명·ACL 주석·확인 상태 편집
+- JSON 작업 저장·열기, 이전 주석 재사용과 미연결 설명 보존
+- 전체/선택 Role/변경·확인 범위의 실제 XLSX와 브라우저 인쇄를 통한 PDF 저장
+- 현재 작업을 담은 독립 HTML 편집기 저장
+- 원본 `수집 결과·통신 확인`의 선택 Role PNG 저장
 - Access Check
 - 부분 수집 시 영향 Role/SSID와 권장 조치
+
+작업을 이어 갈 기준은 수집본·설명·확인 이력을 함께 보관하는 JSON 파일입니다. `작업 열기`는 작업 전체를 바꾸고, `이전 주석 가져오기`는 현재 수집본에 설명을 대조합니다. 다운로드는 디스크의 기존 파일을 자동 덮어쓰지 않으며 Excel/PDF는 보고용입니다. 자세한 절차는 [주석 작업·저장·보고 범위](docs/USER_GUIDE_KO.md#8-작업-저장재사용보고서-내보내기)를 참고하십시오. 이번 주석 기능의 실제 회사 장비·Windows·인쇄 환경 수동 검증은 별도 사용자 범위입니다.
 
 ## 안전 및 운영 원칙
 
@@ -203,7 +208,7 @@ SSID → Role → ACL 상세와 Access Check의 이전 HTML 예시는 [2026-06-3
 일반 사용자는 GitHub **Releases**의 Windows 통합 ZIP을 사용합니다.
 
 ```text
-wlc-role-acl-collector_v0.2.0_windows.zip
+wlc-role-acl-collector_v0.3.0_windows.zip
 ```
 
 압축을 완전히 푼 뒤 목적에 맞는 실행 경로를 선택합니다.
@@ -261,12 +266,14 @@ http://127.0.0.1:8763
 
 ## 개발 및 검증
 
-Python 3.11 이상에서:
+Python 3.11 이상과 Node.js 20 이상에서:
 
 ```powershell
 python -m pip install --require-hashes -r requirements-lock.txt
 python -m pip install --no-deps --no-build-isolation -e .
+npm ci --ignore-scripts
 python -m pytest
+npm test
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\validate.ps1
 ```
 
