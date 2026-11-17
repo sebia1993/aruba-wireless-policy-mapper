@@ -33,6 +33,7 @@ from .collection_health import (
 from .diagnostic_mode import DiagnosticCancelledError, run_diagnostic
 from .diagnostics import classify_error_message, summarize_collection_failure
 from .gui_support import GuiConnectionInput, build_target_from_gui_input, default_gui_output_dir
+from .hostkeys import approve_unknown_host_key, check_host_key, probe_host_key
 from .models import CollectionResult, CommandOutput, ParsedController, RoleNetworkDefinition
 from .report import build_parsed_controllers, create_run_dir, write_raw_result, write_reports
 from .role_networks import RoleNetworkDefinitionError, RoleNetworkLoadSummary, load_role_network_definitions_with_summary
@@ -1622,11 +1623,18 @@ class WlcRoleAclCollectorGui(ctk.CTk):
         self.running_progress_title_var.set("데이터 수집 진행 중")
         self._set_running(True)
         self._log("수집을 시작합니다.")
-        self.worker = threading.Thread(
-            target=self._run_collection_worker,
-            args=(target, output_dir, timeout, role_networks),
-            daemon=False,
-        )
+        if target.controller.protocol == "ssh":
+            self.worker = threading.Thread(
+                target=self._run_host_key_preflight_worker,
+                args=("collection", target, output_dir, timeout, role_networks),
+                daemon=False,
+            )
+        else:
+            self.worker = threading.Thread(
+                target=self._run_collection_worker,
+                args=(target, output_dir, timeout, role_networks),
+                daemon=False,
+            )
         self.worker.start()
 
     def _start_diagnostic(self) -> None:
@@ -1644,11 +1652,18 @@ class WlcRoleAclCollectorGui(ctk.CTk):
         self.running_progress_title_var.set("안전 진단 진행 중")
         self._set_running(True)
         self._log("안전 진단을 시작합니다.")
-        self.worker = threading.Thread(
-            target=self._run_diagnostic_worker,
-            args=(target, output_dir, timeout),
-            daemon=False,
-        )
+        if target.controller.protocol == "ssh":
+            self.worker = threading.Thread(
+                target=self._run_host_key_preflight_worker,
+                args=("diagnostic", target, output_dir, timeout, []),
+                daemon=False,
+            )
+        else:
+            self.worker = threading.Thread(
+                target=self._run_diagnostic_worker,
+                args=(target, output_dir, timeout),
+                daemon=False,
+            )
         self.worker.start()
 
     def _read_form(self) -> GuiConnectionInput:
@@ -1668,6 +1683,179 @@ class WlcRoleAclCollectorGui(ctk.CTk):
         except tk.TclError as exc:
             raise ValueError("Timeout seconds는 숫자로 입력하세요.") from exc
         return validate_timeout_seconds(value)
+
+    def _run_host_key_preflight_worker(
+        self, kind, target, output_dir: Path, timeout: int, role_networks
+    ) -> None:
+        """Probe the server identity without sending username/password.
+
+        A worker only reports the observed fingerprint to the GUI event queue.
+        The main thread owns the approval dialog. A successful approval is still
+        checked a second time by the pinned-key Netmiko connection.
+        """
+        if self.cancel_event.is_set():
+            self.event_queue.put(("cancelled", {"run_dir": None, "run_log": None}))
+            return
+        self.event_queue.put(("status", "SSH 서버 키를 확인하는 중입니다."))
+        try:
+            observation = probe_host_key(
+                target.controller.host,
+                target.controller.port,
+                timeout=min(15.0, float(timeout)),
+            )
+            state = check_host_key(observation)
+            if state not in {"trusted", "unknown", "changed"}:
+                raise RuntimeError("SSH 서버 키 승인 상태를 확인할 수 없습니다.")
+        except Exception as exc:
+            if self.cancel_event.is_set():
+                self.event_queue.put(("cancelled", {"run_dir": None, "run_log": None}))
+            else:
+                failure = classify_error_message(str(exc))
+                self.event_queue.put(
+                    (
+                        "error",
+                        {
+                            "message": (
+                                "SSH 서버 키 사전 확인 실패\n"
+                                + failure.as_text()
+                                + "\n\nWLC의 SSH 서비스, 관리망 접근 및 서버 키 설정을 확인하세요."
+                            ),
+                            "run_dir": None,
+                            "run_log": None,
+                        },
+                    )
+                )
+            return
+        if self.cancel_event.is_set():
+            self.event_queue.put(("cancelled", {"run_dir": None, "run_log": None}))
+            return
+        self.event_queue.put(
+            (
+                "ssh_key_result",
+                {
+                    "kind": kind,
+                    "target": target,
+                    "output_dir": output_dir,
+                    "timeout": timeout,
+                    "role_networks": role_networks,
+                    "state": state,
+                    "observation": observation,
+                },
+            )
+        )
+
+    def _ask_host_key_approval(self, observation) -> bool:
+        """Ask on the GUI thread; never silently accept a first-seen SSH key."""
+        message = (
+            "처음 접속하는 SSH 서버입니다.\n\n"
+            f"대상: {observation.lookup_name}\n"
+            f"키 종류: {observation.key_type}\n"
+            f"SHA-256 지문:\n{observation.fingerprint}\n\n"
+            "WLC 관리 화면이나 담당자를 통해 이 지문을 별도로 확인했습니까?\n"
+            "확인한 지문과 완전히 일치하는 경우에만 [예]를 누르세요.\n\n"
+            "승인하면 이 WLC의 키를 저장하고 이후 접속에서 자동으로 확인합니다.\n"
+            "확인하지 않았다면 [아니요]를 눌러 접속을 중단하세요."
+        )
+        return messagebox.askyesno(
+            "SSH 서버 키 최초 승인", message, parent=self, default="no", icon="warning"
+        )
+
+    def _apply_host_key_preflight(self, payload: dict[str, object]) -> None:
+        """Consume a probe result on the GUI thread before starting WLC auth."""
+        if self.cancel_event.is_set() or self.close_requested:
+            self.event_queue.put(("cancelled", {"run_dir": None, "run_log": None}))
+            return
+        observation = payload["observation"]
+        state = payload["state"]
+        if state == "changed":
+            failure = classify_error_message(
+                "승인된 SSH 서버 키와 현재 키가 달라 연결을 차단했습니다."
+            )
+            self.event_queue.put(
+                (
+                    "error",
+                    {
+                        "message": failure.as_text(),
+                        "run_dir": None,
+                        "run_log": None,
+                    },
+                )
+            )
+            return
+        if state == "unknown":
+            if not self._ask_host_key_approval(observation):
+                self.event_queue.put(
+                    (
+                        "cancelled",
+                        {
+                            "run_dir": None,
+                            "run_log": None,
+                            "reason": "SSH 서버 키 승인을 취소했습니다. 로그인 정보는 전송하지 않았습니다.",
+                        },
+                    )
+                )
+                return
+            if self.cancel_event.is_set() or self.close_requested:
+                self.event_queue.put(("cancelled", {"run_dir": None, "run_log": None}))
+                return
+            try:
+                approve_unknown_host_key(observation)
+            except Exception as exc:
+                failure = classify_error_message(str(exc))
+                self.event_queue.put(
+                    (
+                        "error",
+                        {
+                            "message": failure.as_text(),
+                            "run_dir": None,
+                            "run_log": None,
+                        },
+                    )
+                )
+                return
+            self.event_queue.put(("log", "새 SSH 서버 키를 승인 정보에 등록했습니다."))
+        elif state != "trusted":
+            self.event_queue.put(
+                (
+                    "error",
+                    {
+                        "message": "SSH 서버 키의 승인 상태를 판별하지 못해 접속을 차단했습니다.",
+                        "run_dir": None,
+                        "run_log": None,
+                    },
+                )
+            )
+            return
+        self._start_authenticated_worker(
+            payload["kind"],
+            payload["target"],
+            payload["output_dir"],
+            payload["timeout"],
+            payload["role_networks"],
+        )
+
+    def _start_authenticated_worker(
+        self, kind, target, output_dir: Path, timeout: int, role_networks
+    ) -> None:
+        """Continue the original GUI collection or diagnostic worker."""
+        if self.cancel_event.is_set() or self.close_requested:
+            self.event_queue.put(("cancelled", {"run_dir": None, "run_log": None}))
+            return
+        if kind == "collection":
+            self.worker = threading.Thread(
+                target=self._run_collection_worker,
+                args=(target, output_dir, timeout, role_networks),
+                daemon=False,
+            )
+        elif kind == "diagnostic":
+            self.worker = threading.Thread(
+                target=self._run_diagnostic_worker,
+                args=(target, output_dir, timeout),
+                daemon=False,
+            )
+        else:
+            raise ValueError("지원되지 않는 작업 유형입니다.")
+        self.worker.start()
 
     def _run_collection_worker(self, target, output_dir: Path, timeout: int, role_networks) -> None:
         # 일반 수집 모드는 문제 분석을 위해 raw 명령 결과를 로컬 run_dir 아래에 저장합니다.
@@ -1850,6 +2038,8 @@ class WlcRoleAclCollectorGui(ctk.CTk):
                     self._set_stage(str(payload))
                 elif event == "log":
                     self._log(str(payload))
+                elif event == "ssh_key_result":
+                    self._apply_host_key_preflight(payload)
                 elif event == "done":
                     paths = payload
                     summary = paths.get("summary")
@@ -1921,16 +2111,17 @@ class WlcRoleAclCollectorGui(ctk.CTk):
                             note="사용자 요청으로 중단했습니다. 부분 수집 데이터는 정책 판단에 사용하지 마세요.",
                         )
                     )
-                    self.status_var.set("취소되었습니다. 장비 접속 세션을 종료했습니다.")
-                    self._log("[WARNING] 사용자 요청으로 수집을 취소했습니다.")
+                    cancel_message = paths.get("reason") or "취소되었습니다. 장비 접속 세션을 종료했습니다."
+                    self.status_var.set(cancel_message)
+                    self._log("[WARNING] " + cancel_message)
                     if paths.get("run_log"):
                         self._log(f"Run log: {paths['run_log']}")
                     self._set_result_buttons(folder_enabled=bool(self.last_run_dir), report_enabled=False)
                     if not self.close_requested:
                         messagebox.showinfo(
                             "실행 취소",
-                            "작업을 취소하고 장비 접속 세션을 종료했습니다.\n"
-                            "부분 수집 데이터는 정책 판단에 사용하지 마세요.",
+                            (paths.get("reason") or "작업을 취소하고 장비 접속 세션을 종료했습니다.")
+                            + "\n부분 수집 데이터는 정책 판단에 사용하지 마세요.",
                         )
                 elif event == "error":
                     self._set_stage("failed")
