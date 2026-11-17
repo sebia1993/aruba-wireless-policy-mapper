@@ -58,10 +58,11 @@
     }
     return walk(value, '$', 0);
   }
-  function obj(v, path, keys) {
+  function obj(v, path, keys, optional = []) {
     if (v === null || typeof v !== 'object' || Array.isArray(v)) fail(path, 'expected object');
     if (keys) {
-      for (const key of Object.keys(v)) if (!keys.includes(key)) fail(path + '.' + key, 'unknown field');
+      const allowed=keys.concat(optional);
+      for (const key of Object.keys(v)) if (!allowed.includes(key)) fail(path + '.' + key, 'unknown field');
       for (const key of keys) if (!Object.hasOwn(v, key)) fail(path + '.' + key, 'required field missing');
     }
   }
@@ -83,8 +84,7 @@
     // Manual SSID and device category belong to a Role's annotation, never to
     // the collected SSID mapping or to an individual ACL rule.
     const keys=['text','status','updatedAt','confirmedAt','reasons','source'];
-    if(isRole)keys.push('manualSsid','deviceType');
-    obj(v,path,keys);
+    obj(v,path,keys,isRole?['manualSsid','deviceType']:[]);
     str(v.text,path+'.text');choice(v.status,STATUSES,path+'.status');timestamp(v.updatedAt,path+'.updatedAt');timestamp(v.confirmedAt,path+'.confirmedAt',true);strings(v.reasons,path+'.reasons');
     if(v.source!==null){obj(v.source,path+'.source',['projectId','snapshotId','recordId','confirmedAt']);id(v.source.projectId,path+'.source.projectId');id(v.source.snapshotId,path+'.source.snapshotId');id(v.source.recordId,path+'.source.recordId');timestamp(v.source.confirmedAt,path+'.source.confirmedAt',true);}
     if(isRole) {
