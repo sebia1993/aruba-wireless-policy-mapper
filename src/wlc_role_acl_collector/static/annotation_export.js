@@ -38,19 +38,19 @@
       return ['변경', '', x.type, x.controllerId, controller?controller.name:'', x.roleId, role?role.name:'', x.ruleId, rule?rule.acl:'', rule?rule.raw:'', x.message, x.previousRaw, '', '', '', '', '', '', '', '', '', '', '', ''];
     });
     (m.unresolvedAnnotations || []).forEach(function (x) {
-      changes.push(['미연결 주석', x.id, x.kind, x.controllerId, x.controllerName, '', x.roleName, '', x.acl, x.raw, x.reason, '', list(x.candidateIds), x.sourceProjectId, x.sourceSnapshotId].concat(annotationColumns(x.annotation)));
+      changes.push(['미연결 주석', x.id, x.kind, x.controllerId, x.controllerName, '', x.roleName, '', x.acl, x.raw, x.reason+(x.kind==='role'&&x.annotation.manualSsid?'\n직접 입력 SSID: '+x.annotation.manualSsid:'')+(x.kind==='role'&&x.annotation.deviceType?'\n단말: '+x.annotation.deviceType:''), '', list(x.candidateIds), x.sourceProjectId, x.sourceSnapshotId].concat(annotationColumns(x.annotation)));
     });
     // Review rows retain the exact occurrence IDs alongside changes and unmatched notes.
     roles.concat(rules).forEach(function (x) {
       var a = record(x.annotation);
-      if (a.status === 'needs_review' || a.status === 'reused' || (a.status === 'unreviewed' && str(a.text))) {
+      if (a.status === 'needs_review' || a.status === 'reused' || (a.status === 'unreviewed' && (str(a.text)||str(a.manualSsid)||str(a.deviceType)))) {
         var isRule = Object.prototype.hasOwnProperty.call(x, 'roleId');
         changes.push(['확인 필요', x.id, isRule ? 'rule' : 'role', x.controllerId, x.controllerName, isRule ? x.roleId : x.id, isRule ? x.roleName : x.name, isRule ? x.id : '', x.acl, x.raw, list(a.reasons), '', '', '', ''].concat(annotationColumns(a)));
       }
     });
     return [
       {name:'보고 요약', headers:['분류', '항목 / 식별자', '내용'], rows:summary},
-      {name:'Role 설명', headers:['Role ID','컨트롤러 ID','컨트롤러','Role','SSID','Role 유형','ACL 바인딩 순서','원문 바인딩','문맥 수집 완료','관측 사용자 수'].concat(annotationHeaders), rows:roles.map(function (x) { return [x.id,x.controllerId,x.controllerName,x.name,list(x.ssids),list(x.roleTypes),list(x.aclOrder),list(x.bindingRaw),x.contextComplete,x.observedUsers].concat(annotationColumns(x.annotation)); })},
+      {name:'Role 설명', headers:['Role ID','컨트롤러 ID','컨트롤러','Role','수집 SSID','Role 유형','ACL 바인딩 순서','원문 바인딩','문맥 수집 완료','관측 사용자 수','SSID 명 (직접 입력)','단말 구분'].concat(annotationHeaders), rows:roles.map(function (x) { return [x.id,x.controllerId,x.controllerName,x.name,list(x.ssids),list(x.roleTypes),list(x.aclOrder),list(x.bindingRaw),x.contextComplete,x.observedUsers,str(record(x.annotation).manualSsid),str(record(x.annotation).deviceType)].concat(annotationColumns(x.annotation)); })},
       {name:'ACL 상세', headers:['규칙 ID','컨트롤러 ID','컨트롤러','Role ID','Role','ACL','시퀀스','발생 순번','원문 규칙','출발지','목적지','서비스','동작','출발지 해석','목적지 해석'].concat(annotationHeaders), rows:rules.map(function (x) { return [x.id,x.controllerId,x.controllerName,x.roleId,x.roleName,x.acl,x.sequence,x.ordinal,x.raw,x.source,x.destination,x.service,x.action,json(x.sourceInterpretation),json(x.destinationInterpretation)].concat(annotationColumns(x.annotation)); })},
       {name:'변경·확인 사항', headers:['구분','레코드 ID','유형','컨트롤러 ID','컨트롤러','Role ID','Role','규칙 ID','ACL','원문 규칙','사유 / 변경 내용','이전 규칙','후보 ID','가져온 프로젝트 ID','가져온 스냅샷 ID'].concat(annotationHeaders), rows:changes},
       {name:'Alias 상세', headers:['Alias ID','컨트롤러 ID','컨트롤러','Alias','항목 순번','유형','값','원문'], rows:aliases.flatMap(function (x) {
@@ -135,7 +135,7 @@
       }));
     }
     var sections = '<section><h2>보고 요약</h2>' + table(tables[0].headers,tables[0].rows) + '</section>';
-    sections += '<section><h2>Role 설명</h2>' + grouped(tables[1],[['장비 / Role',2,3,0],['연결 / 수집 정보',4,5,6,7,8,9],['보고용 설명',10],['확인 / 이력',11,12,13,14,18]],1) + '</section>';
+    sections += '<section><h2>Role 설명</h2>' + grouped(tables[1],[['장비 / Role',2,3,0],['직접 입력 SSID / 단말',10,11],['수집 연결 정보',4,5,6,7,8,9],['보고용 설명',12],['확인 / 이력',13,14,15,16,20]],1) + '</section>';
     sections += '<section><h2>ACL 상세</h2>' + grouped(tables[2],[['장비 / Role / ACL',2,4,5,6,7,3,0],['규칙',8,9,10,11,12,13,14],['주석',15],['확인 / 이력',16,17,18,19,23]],1) + '</section>';
     sections += '<section><h2>변경·확인 사항</h2>' + grouped(tables[3],[['구분 / 대상',0,1,2,4,6,8,5,7],['변경 / 미연결 정보',9,10,11,13,14],['주석',15],['확인 / 이력',16,17,18,19,23]],3) + '</section>';
     sections += '<section><h2>Alias 상세</h2>' + grouped(tables[4],[['장비 / Alias',2,3,0],['항목',4,5,6,7]],1) + '</section>';

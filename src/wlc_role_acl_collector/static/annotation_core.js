@@ -58,10 +58,11 @@
     }
     return walk(value, '$', 0);
   }
-  function obj(v, path, keys) {
+  function obj(v, path, keys, optional = []) {
     if (v === null || typeof v !== 'object' || Array.isArray(v)) fail(path, 'expected object');
     if (keys) {
-      for (const key of Object.keys(v)) if (!keys.includes(key)) fail(path + '.' + key, 'unknown field');
+      const allowed=keys.concat(optional);
+      for (const key of Object.keys(v)) if (!allowed.includes(key)) fail(path + '.' + key, 'unknown field');
       for (const key of keys) if (!Object.hasOwn(v, key)) fail(path + '.' + key, 'required field missing');
     }
   }
@@ -79,10 +80,17 @@
     if (month<1 || month>12 || day<1 || day>new Date(Date.UTC(year,month,0)).getUTCDate() || Number(v.slice(11,13))>23 || Number(v.slice(14,16))>59 || Number(v.slice(17,19))>59) fail(path, 'invalid calendar date');
   }
   function choice(v, values, path) { if (!values.includes(v)) fail(path, 'unsupported value'); }
-  function record(v, path) {
-    obj(v,path,['text','status','updatedAt','confirmedAt','reasons','source']);
+  function record(v, path, isRole = false) {
+    // Manual SSID and device category belong to a Role's annotation, never to
+    // the collected SSID mapping or to an individual ACL rule.
+    const keys=['text','status','updatedAt','confirmedAt','reasons','source'];
+    obj(v,path,keys,isRole?['manualSsid','deviceType']:[]);
     str(v.text,path+'.text');choice(v.status,STATUSES,path+'.status');timestamp(v.updatedAt,path+'.updatedAt');timestamp(v.confirmedAt,path+'.confirmedAt',true);strings(v.reasons,path+'.reasons');
     if(v.source!==null){obj(v.source,path+'.source',['projectId','snapshotId','recordId','confirmedAt']);id(v.source.projectId,path+'.source.projectId');id(v.source.snapshotId,path+'.source.snapshotId');id(v.source.recordId,path+'.source.recordId');timestamp(v.source.confirmedAt,path+'.source.confirmedAt',true);}
+    if(isRole) {
+      if(Object.hasOwn(v,'manualSsid'))str(v.manualSsid,path+'.manualSsid',true,512);
+      if(Object.hasOwn(v,'deviceType'))choice(v.deviceType,['','PC','mobile','ETC'],path+'.deviceType');
+    }
   }
   function indexed(rows, path) {
     arr(rows,path);const map=new Map();
@@ -102,8 +110,8 @@
     s.aliases.forEach((a,i)=>{const path='$.snapshot.aliases['+i+']';obj(a,path,['id','controllerId','name','entries']);ref(controllers,a.controllerId,path+'.controllerId');str(a.name,path+'.name',false,4096);arr(a.entries,path+'.entries');a.entries.forEach((e,j)=>{obj(e,path+'.entries['+j+']',['type','value','raw']);['type','value','raw'].forEach(k=>str(e[k],path+'.entries['+j+'].'+k));});});
     arr(s.localNetworks,'$.snapshot.localNetworks');s.localNetworks.forEach((n,i)=>{const path='$.snapshot.localNetworks['+i+']';obj(n,path,['controllerId','roleId','network','subnetMask','status','notes']);ref(controllers,n.controllerId,path+'.controllerId');ref(roles,n.roleId,path+'.roleId');if(roles.get(n.roleId).controllerId!==n.controllerId)fail(path,'role/controller mismatch');['network','subnetMask','status','notes'].forEach(k=>str(n[k],path+'.'+k));});
     arr(s.issues,'$.snapshot.issues');s.issues.forEach((v,i)=>{const path='$.snapshot.issues['+i+']';obj(v,path,['controllerId','roleId','message']);ref(controllers,v.controllerId,path+'.controllerId');ref(roles,v.roleId,path+'.roleId',true);if(v.roleId && roles.get(v.roleId).controllerId!==v.controllerId)fail(path,'role/controller mismatch');str(v.message,path+'.message');});
-    obj(p.annotations,'$.annotations',['roles','rules']);for(const kind of ['roles','rules']){const map=kind==='roles'?roles:rules;obj(p.annotations[kind],'$.annotations.'+kind);for(const [key,v]of Object.entries(p.annotations[kind])){ref(map,key,'$.annotations.'+kind+'.'+key);record(v,'$.annotations.'+kind+'.'+key);}}
-    const unresolvedIds=new Set();arr(p.unresolvedAnnotations,'$.unresolvedAnnotations');p.unresolvedAnnotations.forEach((u,i)=>{const path='$.unresolvedAnnotations['+i+']';obj(u,path,['id','kind','controllerId','controllerName','roleName','acl','raw','annotation','reason','candidateIds','sourceProjectId','sourceSnapshotId']);id(u.id,path+'.id');if(unresolvedIds.has(u.id))fail(path,'duplicate unresolved identifier');unresolvedIds.add(u.id);choice(u.kind,['role','rule'],path+'.kind');id(u.controllerId,path+'.controllerId',true);['controllerName','roleName','acl','raw','reason'].forEach(k=>str(u[k],path+'.'+k));record(u.annotation,path+'.annotation');strings(u.candidateIds,path+'.candidateIds');u.candidateIds.forEach(x=>id(x,path+'.candidateIds'));id(u.sourceProjectId,path+'.sourceProjectId');id(u.sourceSnapshotId,path+'.sourceSnapshotId');});
+    obj(p.annotations,'$.annotations',['roles','rules']);for(const kind of ['roles','rules']){const map=kind==='roles'?roles:rules;obj(p.annotations[kind],'$.annotations.'+kind);for(const [key,v]of Object.entries(p.annotations[kind])){ref(map,key,'$.annotations.'+kind+'.'+key);record(v,'$.annotations.'+kind+'.'+key,kind==='roles');}}
+    const unresolvedIds=new Set();arr(p.unresolvedAnnotations,'$.unresolvedAnnotations');p.unresolvedAnnotations.forEach((u,i)=>{const path='$.unresolvedAnnotations['+i+']';obj(u,path,['id','kind','controllerId','controllerName','roleName','acl','raw','annotation','reason','candidateIds','sourceProjectId','sourceSnapshotId']);id(u.id,path+'.id');if(unresolvedIds.has(u.id))fail(path,'duplicate unresolved identifier');unresolvedIds.add(u.id);choice(u.kind,['role','rule'],path+'.kind');id(u.controllerId,path+'.controllerId',true);['controllerName','roleName','acl','raw','reason'].forEach(k=>str(u[k],path+'.'+k));record(u.annotation,path+'.annotation',u.kind==='role');strings(u.candidateIds,path+'.candidateIds');u.candidateIds.forEach(x=>id(x,path+'.candidateIds'));id(u.sourceProjectId,path+'.sourceProjectId');id(u.sourceSnapshotId,path+'.sourceSnapshotId');});
     arr(p.changes,'$.changes');p.changes.forEach((c,i)=>{const path='$.changes['+i+']';obj(c,path,['type','controllerId','roleId','ruleId','message','previousRaw']);str(c.type,path+'.type',false,4096);ref(controllers,c.controllerId,path+'.controllerId',true);ref(roles,c.roleId,path+'.roleId',true);ref(rules,c.ruleId,path+'.ruleId',true);if(c.roleId && c.controllerId && roles.get(c.roleId).controllerId!==c.controllerId)fail(path,'role/controller mismatch');if(c.ruleId && ((c.roleId && rules.get(c.ruleId).roleId!==c.roleId)||(c.controllerId&&rules.get(c.ruleId).controllerId!==c.controllerId)))fail(path,'rule context mismatch');str(c.message,path+'.message');str(c.previousRaw,path+'.previousRaw');});
     arr(p.importHistory,'$.importHistory');p.importHistory.forEach((h,i)=>{const path='$.importHistory['+i+']';obj(h,path,['projectId','snapshotId','importedAt','reused','needsReview','unresolved']);id(h.projectId,path+'.projectId');id(h.snapshotId,path+'.snapshotId');timestamp(h.importedAt,path+'.importedAt');['reused','needsReview','unresolved'].forEach(k=>integer(h[k],path+'.'+k,0));});
     return p;
@@ -228,7 +236,7 @@
     return {project:validateProject(current),summary};
   }
   function emptyRecord(updatedAt){return {text:'',status:'unreviewed',updatedAt,confirmedAt:'',reasons:[],source:null};}
-  function pending(a){return !!a&&(a.status==='reused'||a.status==='needs_review'||(a.status==='unreviewed'&&a.text!==''));}
+  function pending(a){return !!a&&(a.status==='reused'||a.status==='needs_review'||(a.status==='unreviewed'&&(a.text!==''||!!a.manualSsid||!!a.deviceType)));}
   function buildExportModel(value,scope,now){
     const p=validateProject(value),exportedAt=nowValue(now);scope=safeCopy(scope||{type:'all'});obj(scope,'scope');for(const key of Object.keys(scope))if(!['type','roleIds'].includes(key))fail('scope.'+key,'unknown field');choice(scope.type,['all','selected','review'],'scope.type');const ids=scope.roleIds===undefined?[]:scope.roleIds;strings(ids,'scope.roleIds');const byId=new Map(p.snapshot.roles.map(r=>[r.id,r]));for(const id of ids)if(!byId.has(id))fail('scope.roleIds','unknown role ID');
     let roles=p.snapshot.roles,rules=p.snapshot.rules;

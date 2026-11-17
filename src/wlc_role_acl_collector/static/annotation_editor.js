@@ -240,12 +240,12 @@
 
     function visibleRoles() {
       const term=search.toLocaleLowerCase();
-      return project.snapshot.roles.filter(r=>(!reviewOnly || roleNeedsReview(r)) && (!term || [r.name,controller(r.controllerId)?.name,...r.ssids].join(' ').toLocaleLowerCase().includes(term)));
+      return project.snapshot.roles.filter(r=>(!reviewOnly || roleNeedsReview(r)) && (!term || [r.name,controller(r.controllerId)?.name,...r.ssids,record('roles',r.id).manualSsid||'',record('roles',r.id).deviceType||''].join(' ').toLocaleLowerCase().includes(term)));
     }
 
     function renderRoleList() {
       const roles=visibleRoles();
-      $('ann-role-list').innerHTML=roles.map(r=>`<div class="ann-role-item ${r.id===activeRole?'active':''}"><input type="checkbox" data-select-role="${escapeHtml(r.id)}" aria-label="${escapeHtml((controller(r.controllerId)?.name||'')+' / '+r.name)} 보고에 포함" ${selectedRoles.has(r.id)?'checked':''}><button type="button" data-open-role="${escapeHtml(r.id)}" aria-pressed="${r.id===activeRole}"><strong>${escapeHtml(r.name)}</strong><span>${escapeHtml(controller(r.controllerId)?.name||'')} · ${rulesOf(r.id).length} 규칙${roleNeedsReview(r)?' · 확인 필요':''}</span></button></div>`).join('') || '<p class="ann-empty">조건에 맞는 Role이 없습니다.</p>';
+      $('ann-role-list').innerHTML=roles.map(r=>`<div class="ann-role-item ${r.id===activeRole?'active':''}"><input type="checkbox" data-select-role="${escapeHtml(r.id)}" aria-label="${escapeHtml((controller(r.controllerId)?.name||'')+' / '+r.name)} 보고에 포함" ${selectedRoles.has(r.id)?'checked':''}><button type="button" data-open-role="${escapeHtml(r.id)}" aria-pressed="${r.id===activeRole}"><strong>${escapeHtml(r.name)}</strong><span>SSID: ${escapeHtml(record('roles',r.id).manualSsid||'미입력')} · 단말: ${escapeHtml(record('roles',r.id).deviceType||'미지정')}</span><span>${escapeHtml(controller(r.controllerId)?.name||'')} · ${rulesOf(r.id).length} 규칙${roleNeedsReview(r)?' · 확인 필요':''}</span></button></div>`).join('') || '<p class="ann-empty">조건에 맞는 Role이 없습니다.</p>';
     }
 
     function noteEditor(kind,id,label) {
@@ -259,7 +259,10 @@
       const c=controller(r.controllerId), rows=rulesOf(r.id);
       const networks=project.snapshot.localNetworks.filter(n=>n.roleId===r.id);
       const aliases=project.snapshot.aliases.filter(a=>a.controllerId===r.controllerId);
-      target.innerHTML=`<div class="ann-role-header"><div><div class="ann-kicker">${escapeHtml(c?.name||'')} · ${escapeHtml(c?.host||'장비 주소 미확인')}</div><h2>${escapeHtml(r.name)}</h2><p>SSID: ${escapeHtml(r.ssids.join(', ')||'연결 정보 없음')} · 관측 사용자 ${r.observedUsers}명 · ${rows.length} 규칙</p></div><span class="ann-coverage ${c?.coverage==='completed'?'':'incomplete'}">${COVERAGE[c?.coverage]||'미확인'}</span></div>
+      target.innerHTML=`<div class="ann-role-header"><div><div class="ann-kicker">${escapeHtml(c?.name||'')} · ${escapeHtml(c?.host||'장비 주소 미확인')}</div><div class="ann-role-title-row"><h2>${escapeHtml(r.name)}</h2><div class="ann-role-fields">
+          <label for="ann-manual-ssid">SSID 명 <input type="text" id="ann-manual-ssid" data-manual-ssid="${escapeHtml(r.id)}" value="${escapeHtml(record('roles',r.id).manualSsid||'')}" maxlength="512" autocomplete="off" placeholder="직접 입력"></label>
+          <label for="ann-device-type">단말 구분 <select id="ann-device-type" data-device-type="${escapeHtml(r.id)}" aria-label="${escapeHtml(r.name)} 단말 구분">${['','PC','mobile','ETC'].map(v=>'<option value="'+v+'" '+((record('roles',r.id).deviceType||'')===v?'selected':'')+'>'+(v||'미지정')+'</option>').join('')}</select></label>
+        </div></div><p>수집 SSID: ${escapeHtml(r.ssids.join(', ')||'연결 정보 없음')} · 관측 사용자 ${r.observedUsers}명 · ${rows.length} 규칙</p></div><span class="ann-coverage ${c?.coverage==='completed'?'':'incomplete'}">${COVERAGE[c?.coverage]||'미확인'}</span></div>
         <div class="ann-role-note"><h3>보고용 Role 설명</h3><p class="ann-help">업무 목적 · 대상 사용자 · 주요 접근 범위 · 예외 및 확인 사항을 정리하세요.</p>${noteEditor('roles',r.id,r.name+' Role 설명')}</div>
         ${networks.length?'<div class="ann-local"><strong>포함된 내부망 대역</strong><p>'+networks.map(n=>escapeHtml(n.network+' / '+n.subnetMask+' · '+n.status)).join('<br>')+'</p></div>':''}
         <div class="ann-section-title"><h3>ACL 행별 주석</h3><span>다른 ACL과 사용자 0명 Role도 작업 파일에 보관됩니다.</span></div>
@@ -273,8 +276,22 @@
     function renderChanges() {
       $('ann-changes').innerHTML=project.changes.length?'<ul class="ann-change-list">'+project.changes.map(c=>'<li><strong>'+escapeHtml([controller(c.controllerId)?.name,role(c.roleId)?.name].filter(Boolean).join(' / '))+'</strong> '+escapeHtml(c.message)+(c.previousRaw?'<pre>'+escapeHtml(c.previousRaw)+'</pre>':'')+'</li>').join('')+'</ul>':'<p class="ann-empty">이전 작업을 가져오면 규칙과 수집 문맥의 변경 사항을 여기에 표시합니다.</p>';
       $('ann-unresolved').innerHTML=project.unresolvedAnnotations.length?'<h3>미연결 주석 '+project.unresolvedAnnotations.length+'개</h3><p class="ann-help">동일 규칙 중복, 장비 미확인 또는 변경된 규칙의 설명입니다. 대상 행을 직접 선택해 연결할 수 있습니다. 기존 주석이 있으면 이 목록에 보관합니다.</p>'+project.unresolvedAnnotations.map(u=>{
-        return '<article class="ann-orphan"><h4>'+escapeHtml(u.controllerName+' / '+u.roleName+(u.acl?' / '+u.acl:''))+'</h4><p>'+escapeHtml(u.reason)+'</p><pre>'+escapeHtml(u.raw)+'</pre><blockquote>'+escapeHtml(u.annotation.text||'(빈 주석)')+'</blockquote><label>연결할 '+(u.kind==='role'?'Role':'규칙')+' <select data-link-target="'+escapeHtml(u.id)+'"><option value="">대상을 선택하세요</option></select></label><button type="button" data-link-orphan="'+escapeHtml(u.id)+'">선택한 행에 주석 연결</button><small>출처 '+escapeHtml(u.sourceProjectId)+' · '+escapeHtml(u.sourceSnapshotId)+'</small></article>';
+        return '<article class="ann-orphan"><h4>'+escapeHtml(u.controllerName+' / '+u.roleName+(u.acl?' / '+u.acl:''))+'</h4><p>'+escapeHtml(u.reason)+'</p><pre>'+escapeHtml(u.raw)+'</pre><blockquote>'+escapeHtml(u.annotation.text||'(빈 주석)')+(u.kind==='role'&&u.annotation.manualSsid?'<p>직접 입력 SSID: '+escapeHtml(u.annotation.manualSsid)+'</p>':'')+(u.kind==='role'&&u.annotation.deviceType?'<p>단말: '+escapeHtml(u.annotation.deviceType)+'</p>':'')+'</blockquote><label>연결할 '+(u.kind==='role'?'Role':'규칙')+' <select data-link-target="'+escapeHtml(u.id)+'"><option value="">대상을 선택하세요</option></select></label><button type="button" data-link-orphan="'+escapeHtml(u.id)+'">선택한 행에 주석 연결</button><small>출처 '+escapeHtml(u.sourceProjectId)+' · '+escapeHtml(u.sourceSnapshotId)+'</small></article>';
       }).join(''):'';
+    }
+
+    // These values are editable annotations. Collected SSID mappings stay unchanged.
+    function editRoleField(id,field,value) {
+      const old=record('roles',id),original=old[field]||'';
+      if(value===original)return true;
+      if(!commitEdit(next=>{next.annotations.roles[id]={...old,[field]:value,status:'unreviewed',updatedAt:new Date().toISOString(),confirmedAt:''};})) {
+        const input=Array.from(root.querySelectorAll('[data-manual-ssid],[data-device-type]')).find(el=>el.dataset.manualSsid===id||el.dataset.deviceType===id);
+        if(input)input.value=original;
+        return false;
+      }
+      const select=Array.from(root.querySelectorAll('[data-status-id]')).find(el=>el.dataset.statusKind==='roles'&&el.dataset.statusId===id);
+      if(select)select.value='unreviewed';
+      return true;
     }
 
     function editNote(kind,id,text) {
@@ -453,6 +470,7 @@
     function onInput(event) {
       const el=event.target;
       if (el.id==='ann-search') {search=el.value;renderRoleList();return;}
+      if (el.dataset.manualSsid) {editRoleField(el.dataset.manualSsid,'manualSsid',el.value);return;}
       if (el.dataset.noteId) editNote(el.dataset.noteKind,el.dataset.noteId,el.value);
     }
 
@@ -480,6 +498,7 @@
     function onChange(event) {
       const el=event.target;
       if (el.dataset.selectRole) {if(el.checked)selectedRoles.add(el.dataset.selectRole);else selectedRoles.delete(el.dataset.selectRole);return;}
+      if (el.dataset.deviceType) {editRoleField(el.dataset.deviceType,'deviceType',el.value);return;}
       if (el.dataset.statusId) {
         const kind=el.dataset.statusKind,id=el.dataset.statusId,old=record(kind,id),now=new Date().toISOString();
         if (!commitEdit(next=>{next.annotations[kind][id]={...old,status:el.value,updatedAt:now,confirmedAt:el.value==='reviewed'?now:''};})) el.value=old.status;
