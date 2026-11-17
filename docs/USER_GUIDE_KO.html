@@ -206,11 +206,11 @@ python -m wlc_role_acl_collector.gui_app</code></pre>
     <p>SSH는 승인된 서버 키와 일치할 때만 연결합니다. <strong>Windows GUI에서는 최초 접속 전 별도 CLI 실행이 필요하지 않습니다.</strong></p>
     <ol>
       <li>WLC 관리 화면, 자산대장 또는 네트워크 담당자에게서 SSH 서버 키의 SHA-256 지문을 별도 경로로 확인합니다.</li>
-      <li>GUI의 <code>분석 시작</code> 또는 <code>안전 진단</code>에서 로그인 정보를 보내기 전에 SSH 서버 키를 자동 조회합니다.</li>
-      <li>처음 보는 키라면 지문 확인창이 나타납니다. 별도 경로로 확인한 지문이 일치하는 경우에만 승인하세요. 거절하면 로그인 정보는 전송하지 않습니다.</li>
-      <li>이미 승인된 키는 창 없이 진행하며, 기존 승인 키와 다르면 자동 변경 없이 차단합니다. 검증 없이 <code>known_hosts</code>를 교체하지 마십시오.</li>
+      <li>GUI에서 <code>분석 시작</code> 또는 <code>안전 진단</code>을 누르면 로그인 정보를 보내기 전에 서버 키를 자동으로 조회합니다.</li>
+      <li>처음 보는 키라면 지문 확인창을 표시합니다. 별도 경로에서 확인한 지문과 완전히 일치하는 경우에만 승인하세요. 거절하면 로그인 정보는 전송하지 않습니다.</li>
+      <li>이미 승인된 키는 별도 창 없이 진행하고, 승인된 키와 달라졌다면 자동 변경 없이 차단합니다. 장비 교체 등 정당한 변경인지 확인하기 전에는 <code>known_hosts</code>를 삭제하거나 바꾸지 마십시오.</li>
     </ol>
-    <p><strong>웹앱과 CLI는 기존 별도 승인 방식을 유지합니다.</strong> <code>web\\trust_host_key.cmd</code> 또는 아래 명령으로 지문을 확인한 뒤 <code>TRUST</code>를 입력합니다.</p>
+    <p><strong>웹앱과 CLI는 기존 별도 승인 방식을 유지합니다.</strong> 통합 ZIP의 <code>web\\trust_host_key.cmd</code>를 실행하거나 다음 명령을 사용할 수 있습니다. 지문 대조 후 정확히 <code>TRUST</code>를 입력합니다.</p>
     <pre><code>python -m wlc_role_acl_collector trust-host-key --host 192.0.2.10 --port 22</code></pre>
     <p>Telnet은 서버 키 검증과 암호화를 제공하지 않습니다. 계정과 장비 출력이 평문으로 전송되므로 격리된 관리망에서 위험을 승인한 경우에만 사용하고, SSH 실패 시 대체 수단으로 자동 선택되지 않습니다.</p>
     <h3>Streamlit 웹앱을 사용하는 경우</h3>
