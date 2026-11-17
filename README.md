@@ -243,7 +243,7 @@ gui\WlcRoleAclCollectorGUI.exe
 4. `정상 완료 / 부분 완료 / 수집 실패` 상태를 확인합니다.
 5. HTML/Excel 결과에서 SSID → Role → ACL 관계를 확인합니다.
 
-명령행(CLI) 또는 웹앱에서는 기존대로 서버 키를 별도 승인합니다. 예: `WlcRoleAclCollectorCLI.exe trust-host-key --host 192.0.2.10 --port 22`.
+로컬 웹앱은 신규 SSH 장비 접속 시 SHA-256 지문 승인창을 표시합니다. 별도 확인 후 체크박스를 선택하고 승인해야 수집이 시작됩니다. 명령행(CLI)은 `WlcRoleAclCollectorCLI.exe trust-host-key --host 192.0.2.10 --port 22`로 별도 승인합니다.
 
 ### 로컬 웹앱
 
@@ -257,7 +257,7 @@ web\start_webapp.cmd
 http://127.0.0.1:8763
 ```
 
-웹앱은 실행한 PC의 loopback 주소에서만 동작합니다. 서버 또는 원격 공용 서비스로 배포하지 마십시오.
+웹앱은 실행한 PC의 loopback 주소에서만 동작합니다. 최초 SSH 접속 시 지문을 보여 주는 승인창이 열리며, 이미 승인한 키는 창 없이 확인합니다. 저장된 키와 달라진 경우에는 연결을 차단하고 자동으로 갱신하지 않습니다. 서버 또는 원격 공용 서비스로 배포하지 마십시오.
 
 더 자세한 실행 절차는 [사용자 가이드](docs/USER_GUIDE_KO.md)를 참고하십시오.
 
