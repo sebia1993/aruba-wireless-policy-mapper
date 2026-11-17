@@ -1,0 +1,36 @@
+name: One-time v0.4.1 release dispatch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/release-triggers/v0.4.1'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch:
+    name: Trigger checked v0.4.1 release
+    if: github.repository == 'sebia1993/aruba-wireless-policy-mapper'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check version and run official release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(gh api "repos/${GITHUB_REPOSITORY}/contents/pyproject.toml?ref=main" --jq '.content' | base64 --decode | sed -n 's/^version = "\([^"]*\)".*/\1/p' | head -n1)"
+          if [[ "$version" != "0.4.1" ]]; then
+            echo "::error::Expected v0.4.1 on main, found '$version'"
+            exit 1
+          fi
+          if gh release view v0.4.1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "v0.4.1 already published; no duplicate dispatch"
+            exit 0
+          fi
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main
+          echo 'Requested official v0.4.1 release.'
