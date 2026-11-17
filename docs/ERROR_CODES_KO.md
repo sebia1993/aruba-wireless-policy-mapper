@@ -30,6 +30,9 @@
 | WLC-RPT-001 | DGN-REPORT | 출력 폴더 쓰기 실패 | Documents 등 로컬 쓰기 가능 폴더 선택 |
 | WLC-RPT-002 | DGN-REPORT | 리포트 생성 실패 | 파일 잠금, 경로 길이, 권한 확인 |
 | WLC-SEC-001 | DGN-SEC | 마스킹 self-test 실패 | 리포트 외부 공유 금지, 도구 재배포 |
+| WLC-SEC-002 | DGN-SEC | SSH 서버 키 미승인 | GUI 최초 접속 시 SHA-256 지문 확인 후 승인 또는 CLI 수동 등록 |
+| WLC-SEC-003 | DGN-SEC | 기존 승인 키와 현재 키가 다름 | 자동 승인·교체 금지, 관리자에게 지문 변경 확인 |
+| WLC-SEC-004 | DGN-SEC | SSH 서버 키 사전 조회 실패 | SSH 포트·접속 경로·서버 키 알고리즘 점검 |
 | WLC-MOCK-001 | DGN-MOCK | mock 서버 시작 실패 | 포트 충돌, 로컬 방화벽 확인 |
 | WLC-MOCK-002 | DGN-MOCK | mock 시나리오 오류 | JSON 형식과 필수 command 확인 |
 | WLC-UNK-001 | DGN-UNKNOWN | 미분류 오류 | 안전 진단 리포트만 공유 |
