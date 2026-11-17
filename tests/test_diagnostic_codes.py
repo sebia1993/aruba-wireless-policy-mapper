@@ -26,3 +26,20 @@ def test_legacy_failure_info_exposes_new_code():
 
     assert info.category == "authentication"
     assert info.code == "WLC-AUTH-001"
+
+
+def test_ssh_host_key_errors_have_specific_security_codes():
+    from wlc_role_acl_collector.diagnostic_codes import classify_message_to_code
+    assert classify_message_to_code("미승인 SSH 서버 키입니다. trust-host-key로 확인하세요.").code == "WLC-SEC-002"
+    assert classify_message_to_code("승인된 SSH 서버 키와 현재 키가 달라 연결을 차단했습니다.").code == "WLC-SEC-003"
+    assert classify_message_to_code("SSH 서버 키를 안전하게 확인하지 못했습니다.").code == "WLC-SEC-004"
+
+
+def test_gui_ssh_key_errors_get_security_guidance_instead_of_unknown():
+    from wlc_role_acl_collector.diagnostics import classify_error_message
+    mismatch = classify_error_message("승인된 SSH 서버 키와 현재 키가 달라 연결을 차단했습니다.")
+    assert mismatch.code == "WLC-SEC-003"
+    assert mismatch.category == "security"
+    assert "지문" in mismatch.suggestion
+    timeout = classify_error_message("SSH 서버 키를 안전하게 확인하지 못했습니다.")
+    assert timeout.code == "WLC-SEC-004"

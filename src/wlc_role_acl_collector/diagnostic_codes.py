@@ -202,6 +202,36 @@ DIAGNOSTIC_CODES: dict[str, DiagnosticCode] = {
         operator_action="Do not export diagnostic files. Rebuild or update the tool before use.",
         retryable=False,
     ),
+    "WLC-SEC-002": DiagnosticCode(
+        code="WLC-SEC-002",
+        stage="DGN-SEC",
+        category="security",
+        title="SSH host key is not approved",
+        safe_message="SSH authentication was blocked until the first-seen server key is verified.",
+        likely_cause="This WLC has not yet been approved in the app-specific known_hosts store.",
+        operator_action="Confirm the SHA-256 fingerprint through an independent WLC management channel before approving.",
+        retryable=True,
+    ),
+    "WLC-SEC-003": DiagnosticCode(
+        code="WLC-SEC-003",
+        stage="DGN-SEC",
+        category="security",
+        title="SSH host key has changed",
+        safe_message="The WLC SSH server key did not match the previously approved key.",
+        likely_cause="The WLC key changed, the device was replaced, or the connection is intercepted.",
+        operator_action="Stop the connection and investigate the key change with the network administrator. Never auto-replace the pinned key.",
+        retryable=False,
+    ),
+    "WLC-SEC-004": DiagnosticCode(
+        code="WLC-SEC-004",
+        stage="DGN-SEC",
+        category="security",
+        title="SSH host key probe failed",
+        safe_message="The SSH server identity could not be checked before authentication.",
+        likely_cause="SSH handshake, network transport, protocol algorithm, or local runtime failure.",
+        operator_action="Verify the WLC SSH service, port, network path and supported host-key algorithms. Do not bypass SSH key verification.",
+        retryable=True,
+    ),
     "WLC-MOCK-001": DiagnosticCode(
         code="WLC-MOCK-001",
         stage="DGN-MOCK",
@@ -242,6 +272,13 @@ def get_diagnostic_code(code: str) -> DiagnosticCode:
 def classify_message_to_code(message: str, *, command_id: str = "") -> DiagnosticCode:
     normalized = (message or "").casefold()
     normalized_command = (command_id or "").casefold()
+
+    if ("승인된 ssh 서버 키" in normalized and any(token in normalized for token in ("달라", "변경"))) or "host key mismatch" in normalized:
+        return DIAGNOSTIC_CODES["WLC-SEC-003"]
+    if "미승인 ssh 서버 키" in normalized or "trust-host-key" in normalized:
+        return DIAGNOSTIC_CODES["WLC-SEC-002"]
+    if "ssh 서버 키" in normalized or "ssh host key probe" in normalized:
+        return DIAGNOSTIC_CODES["WLC-SEC-004"]
 
     if normalized_command == "enable" or (
         "enable" in normalized and any(token in normalized for token in ("failed", "denied", "password"))

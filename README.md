@@ -209,7 +209,7 @@ SSID → Role → ACL 상세와 Access Check의 이전 HTML 예시는 [2026-06-3
 일반 사용자는 GitHub **Releases**의 Windows 통합 ZIP을 사용합니다.
 
 ```text
-wlc-role-acl-collector_v0.4.0_windows.zip
+wlc-role-acl-collector_v0.4.1_windows.zip
 ```
 
 압축을 완전히 푼 뒤 목적에 맞는 실행 경로를 선택합니다.
@@ -238,16 +238,12 @@ gui\WlcRoleAclCollectorGUI.exe
 권장 흐름:
 
 1. WLC 주소와 SSH/Telnet 접속 정보를 입력합니다.
-2. SSH를 선택했다면 최초 1회 아래 명령으로 별도 관리 경로에서 확인한 서버 키 지문을 승인합니다.
+2. 필요한 경우 Enable password와 Role 대역표 Excel을 지정합니다.
+3. `분석 시작`을 실행합니다. SSH는 서버 키를 인증 전에 자동 조회하며, 처음 보는 키라면 SHA-256 지문 확인창이 나타납니다. 반드시 별도 관리 경로의 지문과 대조한 뒤 승인하세요. 이미 승인된 키는 창 없이 진행하며, 변경된 키는 자동 승인 없이 차단됩니다.
+4. `정상 완료 / 부분 완료 / 수집 실패` 상태를 확인합니다.
+5. HTML/Excel 결과에서 SSID → Role → ACL 관계를 확인합니다.
 
-```powershell
-.\WlcRoleAclCollectorCLI.exe trust-host-key --host 192.0.2.10 --port 22
-```
-
-3. 필요한 경우 Enable password와 Role 대역표 Excel을 지정합니다.
-4. `분석 시작`을 실행합니다.
-5. `정상 완료 / 부분 완료 / 수집 실패` 상태를 확인합니다.
-6. HTML/Excel 결과에서 SSID → Role → ACL 관계를 확인합니다.
+명령행(CLI) 또는 웹앱에서는 기존대로 서버 키를 별도 승인합니다. 예: `WlcRoleAclCollectorCLI.exe trust-host-key --host 192.0.2.10 --port 22`.
 
 ### 로컬 웹앱
 

@@ -9,7 +9,7 @@ GUI에서 실행:
 1. `WlcRoleAclCollectorGUI.exe` 실행
 2. WLC IP, protocol, port, username, password 입력
 3. `고급 옵션 표시` 클릭
-4. `안전 진단` 클릭
+4. `안전 진단` 클릭. SSH 최초 접속은 지문 확인창이 나타나며, 별도 경로로 SHA-256 지문을 검증한 뒤에만 승인합니다. 기존 승인 키는 자동 검사하고 변경 키는 차단합니다.
 5. 완료 후 `HTML 보고서 열기` 또는 `결과 폴더 열기` 클릭
 
 CLI에서 실행:
