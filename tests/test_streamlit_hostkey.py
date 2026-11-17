@@ -10,7 +10,7 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from wlc_role_acl_collector import web_ssh_hostkey, web_logic
-from wlc_role_acl_collector.web_logic import WebCollectionResult
+from wlc_role_acl_collector.web_logic import WebArtifact, WebCollectionResult
 
 
 APP_PATH = Path(__file__).parents[1] / "app.py"
@@ -37,7 +37,15 @@ def prepared_app(monkeypatch):
         "run_web_collection",
         lambda *_args, **_kwargs: (
             calls.append("collect"),
-            WebCollectionResult(True, "synthetic-run", {}, [], []),
+            WebCollectionResult(
+                True, "synthetic-run", {}, [], [],
+                artifacts={
+                    key: WebArtifact(
+                        f"synthetic.{key}", b"synthetic", "application/octet-stream"
+                    )
+                    for key in ("xlsx", "csv", "html")
+                },
+            ),
         )[1],
     )
     app = AppTest.from_file(str(APP_PATH)).run(timeout=20)
@@ -57,7 +65,7 @@ def test_unknown_key_shows_fingerprint_and_never_authenticates_early(monkeypatch
     assert "pending_web_ssh_host_key" in app.session_state
     assert any("SHA256:synthetic-fingerprint" in item.value for item in app.code)
     assert app.button(key="web_ssh_approve").disabled
-    assert any("별도 관리 경로" in item.value for item in app.warning)
+    assert any("별도 관리 경로" in item.value for item in app.info)
 
 
 def test_verified_approval_precedes_collection_and_clears_pending(monkeypatch, prepared_app):
