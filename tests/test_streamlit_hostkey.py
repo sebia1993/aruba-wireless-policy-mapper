@@ -65,7 +65,7 @@ def test_unknown_key_shows_fingerprint_and_never_authenticates_early(monkeypatch
     assert "pending_web_ssh_host_key" in app.session_state
     assert any("SHA256:synthetic-fingerprint" in item.value for item in app.code)
     assert app.button(key="web_ssh_approve").disabled
-    assert any("별도 관리 경로" in item.value for item in app.info)
+    assert any("WLC 관리 화면" in item.value for item in app.info)
 
 
 def test_verified_approval_precedes_collection_and_clears_pending(monkeypatch, prepared_app):
