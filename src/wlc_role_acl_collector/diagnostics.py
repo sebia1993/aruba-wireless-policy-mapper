@@ -22,6 +22,21 @@ def classify_error_message(message: str) -> FailureInfo:
     diagnostic_code = classify_message_to_code(message)
     normalized = message.lower()
 
+    if diagnostic_code.code in {"WLC-SEC-002", "WLC-SEC-003", "WLC-SEC-004"}:
+        if diagnostic_code.code == "WLC-SEC-003":
+            action = "승인된 서버 키가 변경됐습니다. 지문을 별도 경로로 확인하고 담당자와 원인을 조사하세요. 자동 변경하지 마세요."
+        elif diagnostic_code.code == "WLC-SEC-002":
+            action = "최초 접속 시 GUI 승인창에서 별도 경로의 SHA-256 지문과 비교해 확인한 뒤 승인하세요."
+        else:
+            action = "WLC SSH 포트, 접속 경로, 서버 키 알고리즘과 Windows 보안 정책을 확인하세요. 키 검증은 우회하지 마세요."
+        return FailureInfo(
+            category="security",
+            title="SSH 서버 키 확인에 실패했습니다",
+            detail=message or diagnostic_code.safe_message,
+            suggestion=action,
+            code=diagnostic_code.code,
+        )
+
     if diagnostic_code.code == "WLC-AUTH-002":
         return FailureInfo(
             category="enable_authentication",
