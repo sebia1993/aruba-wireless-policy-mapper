@@ -21,7 +21,7 @@
 - 이 프로젝트의 목적은 조회·분석이며 장비 설정 변경 기능을 제공하지 않습니다.
 - 실제 WLC 접속은 운영자가 승인된 계정과 네트워크에서 명시적으로 실행해야 합니다.
 - SSH는 장비 계정을 보내기 전에 SHA-256 서버 키 지문을 확인하고 앱 전용 `known_hosts`에 고정합니다.
-- Paramiko 4.0의 RSA/SHA-1 취약 경로는 host key와 public-key 인증 알고리즘 양쪽에서 `ssh-rsa`를 비활성화해 차단합니다. 고정된 감사 예외의 근거와 제거 조건은 [`docs/DEPENDENCY_AUDIT_EXCEPTIONS_KO.md`](docs/DEPENDENCY_AUDIT_EXCEPTIONS_KO.md)에 공개합니다.
+- Paramiko 5.0.0은 RSA/SHA-1 서명을 지원하지 않습니다. 앱도 서버 키 확인과 실제 인증에 `ssh-rsa` 비활성화를 명시합니다. 두 잠금 파일은 취약점 예외 없이 감사합니다. [이전 예외 이력](docs/DEPENDENCY_AUDIT_EXCEPTIONS_KO.md)
 - 승인되지 않은 SSH 키와 변경된 키를 차단하며, 기존 키는 자동 교체하지 않습니다.
 - Telnet은 평문 전송이므로 격리된 관리망에서 위험을 승인해 직접 선택한 경우에만 사용하며 SSH 실패 시 자동 전환하지 않습니다.
 - GUI/Web/CLI의 자동 테스트와 CI는 실제 운영 장비에 접속하지 않습니다.

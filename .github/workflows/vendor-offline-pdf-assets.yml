@@ -1,0 +1,92 @@
+name: Vendor Offline PDF Assets
+
+on:
+  push:
+    branches: [feature/pdf-direct-report-20261118]
+    paths:
+      - '.github/workflows/vendor-offline-pdf-assets.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    name: Vendor pinned PDFMake and Korean font for offline HTML
+    if: github.repository == 'sebia1993/aruba-wireless-policy-mapper' && github.ref == 'refs/heads/feature/pdf-direct-report-20261118'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out fixed development branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+      - name: Fetch pinned open-source assets and verify Git object hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          path=src/wlc_role_acl_collector/static
+          mkdir -p "$path"
+          curl -fsSL --retry 3 \
+            https://raw.githubusercontent.com/bpampuch/pdfmake/975e26f66317cba1e509df3d1c9bb76fd22174d7/build/pdfmake.min.js \
+            -o "$path/pdfmake.min.js"
+          [[ "$(git hash-object "$path/pdfmake.min.js")" == "e1243641a94e4f665c0c855037a3960737cc8323" ]] || { echo "pdfmake Git blob mismatch"; exit 1; }
+          curl -fsSL --retry 3 \
+            https://raw.githubusercontent.com/google/fonts/7af0d90b4d532ffa4b041937b560c6df4e7b1e95/ofl/nanumgothic/NanumGothic-Regular.ttf \
+            -o "$RUNNER_TEMP/NanumGothic-Regular.ttf"
+          [[ "$(git hash-object "$RUNNER_TEMP/NanumGothic-Regular.ttf")" == "2aa2b20905b4136808a0126d8e36e5c0f576715c" ]] || { echo "Nanum Gothic Git blob mismatch"; exit 1; }
+          curl -fsSL --retry 3 \
+            https://raw.githubusercontent.com/bpampuch/pdfmake/975e26f66317cba1e509df3d1c9bb76fd22174d7/LICENSE \
+            -o "$path/pdfmake.LICENSE.txt"
+          curl -fsSL --retry 3 \
+            https://raw.githubusercontent.com/google/fonts/7af0d90b4d532ffa4b041937b560c6df4e7b1e95/ofl/nanumgothic/OFL.txt \
+            -o "$path/NanumGothic.OFL.txt"
+          python - <<'PY'
+          import base64
+          from pathlib import Path
+          import os
+
+          static = Path("src/wlc_role_acl_collector/static")
+          font = Path(os.environ["RUNNER_TEMP"], "NanumGothic-Regular.ttf")
+          value = base64.b64encode(font.read_bytes()).decode("ascii")
+          head = """/* Offline NanumGothic-Regular TTF bundled under SIL OFL 1.1.
+           * License: NanumGothic.OFL.txt (in distribution and HTML).
+           * Generated only from the pinned upstream, never fetched at application runtime. */
+          (function(root, factory) {
+            'use strict';
+            if (typeof module === 'object' && module.exports) module.exports=factory(root);
+            else factory(root);
+          }(typeof globalThis !== 'undefined' ? globalThis : this, function(root) {
+            'use strict';
+            var vfs={'NanumGothic-Regular.ttf':'"""
+          tail = """'};
+            if(root.pdfMake)root.pdfMake.vfs=Object.assign({},root.pdfMake.vfs||{},vfs);
+            return vfs;
+          }));
+          """
+          result = head + value + tail
+          (static / "pdfmake_nanum.vfs.js").write_text(result, encoding="utf-8")
+          if len(result) < 2700000:
+              raise SystemExit("Generated font VFS is suspiciously small")
+          PY
+          node -e "const pm=require('./src/wlc_role_acl_collector/static/pdfmake.min.js');const f=require('./src/wlc_role_acl_collector/static/pdfmake_nanum.vfs.js');if(typeof pm.createPdf!=='function' || typeof f['NanumGothic-Regular.ttf']!=='string')process.exit(2)"
+          test "$(wc -c < "$path/pdfmake.min.js")" -gt 1300000
+          test "$(wc -c < "$path/pdfmake.LICENSE.txt")" -gt 1000
+          test "$(wc -c < "$path/NanumGothic.OFL.txt")" -gt 4000
+      - name: Commit vendored browser files only to this development branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            src/wlc_role_acl_collector/static/pdfmake.min.js \
+            src/wlc_role_acl_collector/static/pdfmake_nanum.vfs.js \
+            src/wlc_role_acl_collector/static/pdfmake.LICENSE.txt \
+            src/wlc_role_acl_collector/static/NanumGothic.OFL.txt
+          if git diff --cached --quiet; then
+            echo "Already bundled"
+            exit 0
+          fi
+          git commit -m "chore(pdf): vendor pinned pdfmake and Korean font for offline HTML"
+          git push origin HEAD:refs/heads/feature/pdf-direct-report-20261118

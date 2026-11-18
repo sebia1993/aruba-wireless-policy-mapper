@@ -30,7 +30,7 @@ class PinnedHostKeyPolicy(paramiko.MissingHostKeyPolicy):
             return
         if state == "unknown":
             raise paramiko.SSHException(
-                "미승인 SSH 서버 키입니다. trust-host-key로 지문을 확인하고 먼저 승인하세요."
+                "미승인 SSH 서버 키입니다. GUI 또는 Web의 SHA-256 지문 확인창에서 먼저 승인하세요."
             )
         raise paramiko.SSHException("승인된 SSH 서버 키와 현재 키가 달라 연결을 차단했습니다.")
 
@@ -60,7 +60,7 @@ class _BoundedSSHClient(paramiko.SSHClient):
         self._setup_cancel_event = cancel_event
 
     def invoke_shell(self, *args, **kwargs):
-        # Paramiko 4's get_pty()/invoke_shell() wait on events without a timeout;
+        # Paramiko's get_pty()/invoke_shell() wait on events without a timeout;
         # channel.settimeout() does not affect those waits. Closing the transport
         # releases channel-open and channel-request events. The caller performs
         # the actual connection work synchronously; only this small guard runs

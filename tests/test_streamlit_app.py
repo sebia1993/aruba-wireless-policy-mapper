@@ -5,6 +5,22 @@ import pytest
 
 from streamlit.testing.v1 import AppTest
 from wlc_role_acl_collector.web_logic import WebArtifact, WebCollectionResult
+from wlc_role_acl_collector import web_ssh_hostkey
+
+
+@pytest.fixture(autouse=True)
+def _preapproved_ssh_for_existing_app_tests(monkeypatch):
+    """These legacy tests exercise result retention, not host-key onboarding."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        web_ssh_hostkey,
+        "inspect_ssh_host_key",
+        lambda *_args, **_kwargs: web_ssh_hostkey.WebSSHHostKeyReview(
+            observation=SimpleNamespace(host="192.0.2.10", port=22),
+            state="trusted",
+        ),
+    )
 
 
 APP_PATH = Path(__file__).parents[1] / "app.py"
@@ -62,6 +78,9 @@ def test_streamlit_successful_retry_replaces_previous_results(monkeypatch):
     app.session_state["last_result"] = _successful_web_result("old-success")
     app.session_state["last_attempt_failed"] = True
     app.run(timeout=20)
+    next(item for item in app.text_input if item.label == "WLC IP").set_value("192.0.2.10")
+    next(item for item in app.text_input if item.label == "장비 ID").set_value("sample")
+    next(item for item in app.text_input if item.label == "장비 PW").set_value("synthetic")
     app.button[0].click().run(timeout=20)
 
     assert not app.exception

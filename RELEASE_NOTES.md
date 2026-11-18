@@ -12,7 +12,7 @@ GitHub Actions의 `Release` workflow를 수동 실행하며, 다음과 같이 �
 - SSID / AAA / Role / ACL / Alias 관계 해석 변경
 - Access Check 판정 로직 변경
 - Excel / CSV / HTML 결과 의미 또는 구조 변경
-- GUI / Web / CLI 실행 방식 변경
+- GUI / Web 실행 방식 변경
 - Windows 패키지 또는 통합 ZIP 구조 변경
 - 운영상 중요한 오류 수정
 - 호환성에 영향을 줄 수 있는 의존성 변경
@@ -24,9 +24,9 @@ GitHub Actions의 `Release` workflow를 수동 실행하며, 다음과 같이 �
 일반 사용자용 실행 파일은 Windows 통합 ZIP으로 제공하며, SHA-256 체크섬과 Python 의존성 SBOM을 함께 공개합니다.
 
 ```text
-wlc-role-acl-collector_v0.4.1_windows.zip
-wlc-role-acl-collector_v0.4.1_windows.zip.sha256
-wlc-role-acl-collector_v0.4.1_sbom.cdx.json
+wlc-role-acl-collector_v0.5.0_windows.zip
+wlc-role-acl-collector_v0.5.0_windows.zip.sha256
+wlc-role-acl-collector_v0.5.0_sbom.cdx.json
 ```
 
 GitHub가 자동 표시하는 `Source code (zip)`과 `Source code (tar.gz)`는 실행용 배포 파일이 아닙니다.
@@ -37,7 +37,6 @@ GitHub가 자동 표시하는 `Source code (zip)`과 `Source code (tar.gz)`는 �
 README_START_HERE_KO.txt
 gui/
   WlcRoleAclCollectorGUI.exe
-  WlcRoleAclCollectorCLI.exe
   USER_GUIDE_KO.md
   USER_GUIDE_KO.html
   DEVELOPER_GUIDE_KO.md
@@ -53,7 +52,6 @@ gui/
   config/
 web/
   start_webapp.cmd
-  trust_host_key.cmd
   webapp_settings.cmd
   README_WEBAPP_KO.txt
   python/
@@ -63,7 +61,7 @@ web/
 
 SHA-256은 Release notes와 별도 `.sha256` asset에 기록합니다. CycloneDX JSON SBOM과 GitHub build provenance도 함께 공개합니다. SBOM의 목록 범위는 `requirements-web-lock.txt`에 고정한 Python 의존성입니다.
 
-Paramiko 수정 릴리스가 아직 없는 `CVE-2026-44405`는 정확히 한 건만 감사 예외로 고정합니다. 서버 키 probe와 실제 연결에서 RSA/SHA-1을 비활성화하고 맞춤 고정 키 policy로 인증 전에 키 재료를 검증하며, 근거·제거 조건·재검토 기한은 `docs/DEPENDENCY_AUDIT_EXCEPTIONS_KO.md`에 공개합니다.
+개발용 및 Web용 잠금 파일에는 Netmiko 4.8.0과 Paramiko 5.0.0을 함께 고정합니다. 두 파일 모두 취약점 예외 없이 감사합니다. 이전 RSA/SHA-1 예외를 제거한 근거는 [의존성 감사 예외 이력](docs/DEPENDENCY_AUDIT_EXCEPTIONS_KO.md)에 기록합니다.
 
 ## Release 전 검증
 
@@ -83,17 +81,17 @@ npm ci --ignore-scripts
 python -m pytest -q
 python -m compileall -q src tests tools
 python -m pip check
-python -m pip_audit -r requirements-lock.txt --strict --ignore-vuln CVE-2026-44405
-python -m pip_audit -r requirements-web-lock.txt --strict --ignore-vuln CVE-2026-44405
+python -m pip_audit -r requirements-lock.txt --strict
+python -m pip_audit -r requirements-web-lock.txt --strict
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\validate.ps1
 npm test
 ```
 
-Windows GUI / CLI:
+Windows GUI:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_gui_exe.ps1
-python .\tools\verify_release_package.py --dist .\dist --smoke-cli
+python .\tools\verify_release_package.py --dist .\dist
 ```
 
 Streamlit portable:
@@ -170,5 +168,5 @@ Release notes와 asset에는 다음 정보를 포함하지 않습니다.
 - Streamlit 자체 사용자 로그인/권한 관리 기능은 없습니다.
 - 코드서명, installer, MSIX는 현재 범위가 아닙니다.
 - Windows EXE는 Windows runner 또는 Windows PC에서 검증합니다.
-- PDF 저장은 별도 브라우저 인쇄 창에서 `PDF로 저장`을 선택하는 방식입니다.
-- 이번 주석 기능의 실제 회사 장비·Windows 사용자 환경·인쇄 결과 수동 검증은 사용자의 별도 범위입니다.
+- HTML 보고서는 포함된 한글 글꼴을 사용해 PDF를 오프라인으로 직접 생성합니다. Excel과 PDF 모두 간단 보고서와 상세 보고서를 제공합니다.
+- 이번 주석 기능의 실제 회사 장비·Windows 사용자 환경·PDF 표시 결과 수동 검증은 사용자의 별도 범위입니다.

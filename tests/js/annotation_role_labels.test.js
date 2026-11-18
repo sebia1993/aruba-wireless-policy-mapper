@@ -40,7 +40,7 @@ test('old JSON projects remain valid and manual Role fields are strictly validat
   assert.deepEqual(Core.validateProject(p),p);
   p.annotations.roles['role-a'] = record('sWave_works', 'PC');
   assert.equal(Core.parseProject(JSON.stringify(p)).annotations.roles['role-a'].deviceType,'PC');
-  for (const device of ['', 'PC', 'mobile', 'ETC']) {
+  for (const device of ['', 'PC', 'windows_pc', 'macbook', 'mobile', 'ETC']) {
     p.annotations.roles['role-a'].deviceType = device;
     assert.doesNotThrow(()=>Core.validateProject(p));
   }
@@ -56,13 +56,16 @@ test('old JSON projects remain valid and manual Role fields are strictly validat
   assert.throws(()=>Core.validateProject(p),/deviceType/);
 });
 
-test('HTML Role header permits manual SSID and a single PC/mobile/ETC selection', () => {
+test('HTML Role header permits manual SSID, Windows PC, MacBook and legacy categories', () => {
   const env=mount(),doc=env.window.document;
   try {
     const ssid=doc.querySelector('[data-manual-ssid="role-a"]');
     const type=doc.querySelector('[data-device-type="role-a"]');
     assert.ok(ssid);assert.ok(type);
-    assert.deepEqual(Array.from(type.options,o=>o.value),['','PC','mobile','ETC']);
+    assert.deepEqual(Array.from(type.options,o=>o.value),['','windows_pc','macbook','PC','mobile','ETC']);
+    assert.equal(Array.from(type.options).find(o=>o.value==='windows_pc').textContent,'윈도우 PC');
+    assert.equal(Array.from(type.options).find(o=>o.value==='macbook').textContent,'맥북');
+    assert.equal(Array.from(type.options).find(o=>o.value==='PC').textContent,'PC (기존 분류)');
     assert.equal(ssid.value,'');assert.equal(type.value,'');
     assert.match(doc.querySelector('.ann-role-header').textContent,/수집 SSID: corp/);
     ssid.value='sWave_works';ssid.dispatchEvent(new env.window.Event('input',{bubbles:true}));

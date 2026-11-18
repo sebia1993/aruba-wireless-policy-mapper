@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from wlc_role_acl_collector import web_ssh_hostkey
 from wlc_role_acl_collector.config import default_port_for_protocol
 from wlc_role_acl_collector.diagnostics import classify_error_message
 from wlc_role_acl_collector.web_logic import (
@@ -10,6 +11,7 @@ from wlc_role_acl_collector.web_logic import (
     WebCollectionBusyError,
     format_web_progress,
     run_web_collection,
+    validate_web_request,
 )
 
 
@@ -29,7 +31,21 @@ def main() -> None:
     _render_sidebar_notice()
     submitted, request = _render_input_form()
     if submitted:
-        _run_collection(request)
+        _submit_collection(request)
+
+    review = st.session_state.get("pending_web_ssh_host_key")
+    if isinstance(review, web_ssh_hostkey.WebSSHHostKeyReview):
+        _show_ssh_host_key_review(request, review)
+
+    issue = st.session_state.get("last_collection_issue")
+    if issue:
+        level, message, detail = issue
+        if level == "warning":
+            st.warning(message)
+        else:
+            st.error(message)
+        if detail:
+            st.code(detail, language="text")
 
     failed_result = st.session_state.get("last_failed_result")
     if isinstance(failed_result, WebCollectionResult):
@@ -127,6 +143,120 @@ def _render_input_form() -> tuple[bool, WebCollectionRequest]:
     return submitted, request
 
 
+def _submit_collection(request: WebCollectionRequest) -> None:
+    """SSH must pass a credential-free server-key review before collection."""
+    st.session_state.pop("last_collection_issue", None)
+    st.session_state.pop("pending_web_ssh_host_key", None)
+    st.session_state.pop("web_ssh_verified", None)
+    if request.protocol.strip().lower() != "ssh":
+        _run_collection(request)
+        return
+    try:
+        validate_web_request(request)
+    except ValueError as exc:
+        st.session_state["last_attempt_failed"] = True
+        st.error(f"입력값을 확인하세요: {exc}")
+        return
+
+    try:
+        review = web_ssh_hostkey.inspect_ssh_host_key(
+            request.host, request.port, timeout=request.timeout
+        )
+    except Exception:
+        st.session_state["last_attempt_failed"] = True
+        st.error("SSH 서버 키 사전 확인에 실패했습니다.")
+        st.info("WLC의 SSH 서비스 및 관리망 연결을 확인하세요. 로그인 정보는 전송하지 않았습니다.")
+        return
+
+    if review.state == "trusted":
+        _run_collection(request)
+    elif review.state == "unknown":
+        st.session_state["pending_web_ssh_host_key"] = review
+        st.session_state["last_attempt_failed"] = True
+    else:
+        st.session_state["last_attempt_failed"] = True
+        st.error("WLC-SEC-003: 이전에 승인된 SSH 서버 키와 현재 키가 다릅니다. 연결을 차단했습니다.")
+        st.warning("장비 교체·초기화 여부와 지문을 관리자에게 확인하세요. 자동 재승인은 지원하지 않습니다.")
+
+
+def _show_ssh_host_key_review(
+    request: WebCollectionRequest, review: web_ssh_hostkey.WebSSHHostKeyReview
+) -> None:
+    observation = review.observation
+    if (
+        request.protocol.strip().lower() != "ssh"
+        or request.host.strip() != observation.host
+        or request.port != observation.port
+    ):
+        st.session_state.pop("pending_web_ssh_host_key", None)
+        st.warning("접속 대상 또는 방식이 바뀌어 이전 지문 승인을 취소했습니다.")
+        return
+
+    # Streamlit >=1.37 provides a browser modal. Older supported versions
+    # receive exactly the same explicit approval controls in an inline panel.
+    dialog = getattr(st, "dialog", None)
+    if callable(dialog):
+        dialog("SSH 서버 키 최초 승인")(_render_ssh_host_key_review_body)(request, review)
+    else:
+        with st.container(border=True):
+            st.subheader("SSH 서버 키 최초 승인")
+            _render_ssh_host_key_review_body(request, review)
+
+
+def _render_ssh_host_key_review_body(
+    request: WebCollectionRequest, review: web_ssh_hostkey.WebSSHHostKeyReview
+) -> None:
+    observation = review.observation
+    st.warning("처음 접속하는 SSH 장비입니다. 로그인 정보를 전송하기 전에 서버 키를 확인해야 합니다.")
+    st.write(f"대상: `{observation.lookup_name}`")
+    st.write(f"키 종류: `{observation.key_type}`")
+    st.write("SHA-256 서버 키 지문:")
+    st.code(observation.fingerprint, language="text")
+    st.info("WLC 관리 화면이나 담당자를 통해 지문을 별도로 확인하고, 완전히 일치하는 경우에만 승인하세요.")
+    verified = st.checkbox(
+        "별도 관리 경로로 확인한 지문과 완전히 일치합니다.",
+        value=False,
+        key="web_ssh_verified",
+    )
+    approve, reject = st.columns(2)
+    with approve:
+        if st.button(
+            "지문 승인 후 수집 실행",
+            key="web_ssh_approve",
+            disabled=not verified,
+            type="primary",
+            use_container_width=True,
+        ):
+            try:
+                validate_web_request(request)
+                web_ssh_hostkey.approve_reviewed_ssh_host_key(
+                    review,
+                    host=request.host,
+                    port=request.port,
+                    timeout=request.timeout,
+                )
+            except Exception:
+                st.session_state.pop("pending_web_ssh_host_key", None)
+                st.session_state["last_attempt_failed"] = True
+                st.error(
+                    "SSH 서버 키 승인에 실패했습니다. 지문·대상·포트 또는 키 저장 상태가 "
+                    "변경되었을 수 있습니다. 로그인을 시도하지 않았으므로 다시 확인해 주세요."
+                )
+            else:
+                st.session_state.pop("pending_web_ssh_host_key", None)
+                _run_collection(request)
+                st.rerun()
+    with reject:
+        if st.button(
+            "승인 거부 / 접속 취소",
+            key="web_ssh_reject",
+            use_container_width=True,
+        ):
+            st.session_state.pop("pending_web_ssh_host_key", None)
+            st.session_state["last_attempt_failed"] = True
+            st.rerun()
+
+
 def _run_collection(request: WebCollectionRequest) -> None:
     previous = st.session_state.get("last_result")
     preserve_previous = isinstance(previous, WebCollectionResult) and previous.success
@@ -161,7 +291,6 @@ def _run_collection(request: WebCollectionRequest) -> None:
     try:
         with st.spinner("WLC 정보를 수집하고 보고서를 생성하는 중입니다."):
             result = run_web_collection(request, progress_callback=on_progress)
-        progress_bar.progress(100)
         if result.success or not preserve_previous:
             st.session_state["last_result"] = result
         else:
@@ -175,22 +304,15 @@ def _run_collection(request: WebCollectionRequest) -> None:
         else:
             status_box.error("수집에 실패했습니다. 오류 내용을 확인하세요.")
     except WebCollectionBusyError as exc:
-        progress_bar.progress(100)
-        status_box.warning(str(exc))
-        logs.append(str(exc))
-        log_box.code("\n".join(logs[-80:]), language="text")
+        st.session_state["last_collection_issue"] = ("warning", str(exc), "")
     except ValueError as exc:
-        progress_bar.progress(100)
-        status_box.error("입력값을 확인하세요.")
-        logs.append(str(exc))
-        log_box.code("\n".join(logs[-80:]), language="text")
+        st.session_state["last_collection_issue"] = ("error", "입력값을 확인하세요.", str(exc))
     except Exception as exc:
-        progress_bar.progress(100)
         failure = classify_error_message(str(exc))
-        status_box.error(failure.title)
-        logs.append(f"오류 코드: {failure.code}")
-        logs.append(failure.suggestion)
-        log_box.code("\n".join(logs[-80:]), language="text")
+        st.session_state["last_collection_issue"] = (
+            "error", failure.title, f"오류 코드: {failure.code}\n{failure.suggestion}"
+        )
+    progress_bar.progress(100)
 
 
 def _render_result(result: WebCollectionResult, *, previous: bool = False) -> None:
