@@ -3,7 +3,7 @@
 ## Unreleased — 단말 구분 PC 세분화
 - 기존 PC 외에 `윈도우 PC`와 `맥북`을 추가하여 Role 목록과 편집 화면에 구분해 표시합니다.
 - 기존 파일의 `PC` 값은 OS 미확인 분류로 그대로 유지하며 임의로 윈도우 PC로 변경하지 않습니다.
-- 새 분류는 JSON·독립 HTML·주석 재사용·Excel/PDF 한글 표시까지 유지하고 schemaVersion 1과의 호환성을 보존합니다.
+- 새 분류는 JSON·독립 HTML·주석 재사용·Excel/PDF 한글 표시까지 유지하며 기존 schemaVersion 1 파일을 새 버전에서 읽습니다. 다만 새 분류 값이 들어간 파일은 예전 프로그램에서 열리지 않을 수 있습니다.
 
 ## Unreleased — C안 Role 내부 탭형 HTML 통합
 
