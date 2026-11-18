@@ -30,7 +30,7 @@ class PinnedHostKeyPolicy(paramiko.MissingHostKeyPolicy):
             return
         if state == "unknown":
             raise paramiko.SSHException(
-                "미승인 SSH 서버 키입니다. trust-host-key로 지문을 확인하고 먼저 승인하세요."
+                "미승인 SSH 서버 키입니다. GUI 또는 Web의 SHA-256 지문 확인창에서 먼저 승인하세요."
             )
         raise paramiko.SSHException("승인된 SSH 서버 키와 현재 키가 달라 연결을 차단했습니다.")
 

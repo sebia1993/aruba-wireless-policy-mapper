@@ -64,13 +64,13 @@ jobs:
           npm test
           if ($LASTEXITCODE -ne 0) { throw "Offline annotation tests failed." }
 
-      - name: Build Windows GUI and CLI package
+      - name: Build Windows GUI package
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_gui_exe.ps1
 
-      - name: Verify GUI and CLI package
+      - name: Verify GUI-only package
         shell: pwsh
-        run: python .\tools\verify_release_package.py --dist .\dist --smoke-cli
+        run: python .\tools\verify_release_package.py --dist .\dist
 
       - name: Build Streamlit portable package
         shell: pwsh

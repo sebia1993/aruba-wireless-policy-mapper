@@ -12,7 +12,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 
 def hardened_disabled_algorithms() -> dict[str, list[str]]:
@@ -189,34 +189,6 @@ def _host_keys_update_lock(path: Path):
                 yield
             finally:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-
-
-def trust_host_key_interactive(
-    host: str,
-    port: int,
-    *,
-    timeout: float = 15.0,
-    known_hosts_path: Path | None = None,
-    input_func: Callable[[str], str] = input,
-    output_func: Callable[[str], None] = print,
-) -> Path:
-    observation = probe_host_key(host, port, timeout=timeout)
-    path = known_hosts_path or default_known_hosts_path()
-    state = check_host_key(observation, known_hosts_path=path)
-    output_func(f"대상: {observation.lookup_name}")
-    output_func(f"키 형식: {observation.key_type}")
-    output_func(f"SHA-256 지문: {observation.fingerprint}")
-    if state == "trusted":
-        output_func("이미 승인된 SSH 서버 키와 일치합니다.")
-        return path
-    if state == "changed":
-        raise RuntimeError("승인된 SSH 서버 키와 현재 키가 달라 연결을 차단했습니다.")
-    answer = input_func("별도 관리 경로로 지문을 확인했다면 TRUST를 입력하세요: ").strip()
-    if answer != "TRUST":
-        raise PermissionError("SSH 서버 키를 승인하지 않았습니다.")
-    approve_unknown_host_key(observation, known_hosts_path=path)
-    output_func(f"앱 전용 known_hosts에 저장했습니다: {path}")
-    return path
 
 
 def _load_host_keys(path: Path):

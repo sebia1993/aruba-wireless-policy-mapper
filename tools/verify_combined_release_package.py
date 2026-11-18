@@ -1,7 +1,7 @@
 """Validate the single combined Windows release ZIP.
 
 The combined package is the only file uploaded to GitHub Releases. It contains
-the GUI/CLI package under ``gui/`` and the Streamlit portable package under
+the GUI-only package under ``gui/`` and the Streamlit portable package under
 ``web/``.
 """
 
@@ -19,7 +19,6 @@ from pathlib import Path
 REQUIRED_FILES = {
     "README_START_HERE_KO.txt",
     "gui/WlcRoleAclCollectorGUI.exe",
-    "gui/WlcRoleAclCollectorCLI.exe",
     "gui/USER_GUIDE_KO.md",
     "gui/USER_GUIDE_KO.html",
     "gui/DEVELOPER_GUIDE_KO.md",
@@ -38,7 +37,6 @@ REQUIRED_FILES = {
     "gui/config/mock_scenarios/permission_denied.json",
     "gui/config/mock_scenarios/success_minimal.json",
     "web/start_webapp.cmd",
-    "web/trust_host_key.cmd",
     "web/webapp_settings.cmd",
     "web/README_WEBAPP_KO.txt",
     "web/python/python.exe",
@@ -57,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--zip", dest="zip_path", type=Path, help="combined release ZIP path")
     parser.add_argument("--dist", type=Path, default=Path("dist"), help="directory containing a combined release ZIP")
     parser.add_argument("--expected-sha256", help="expected SHA256 hash for the combined ZIP")
-    parser.add_argument("--smoke", action="store_true", help="run GUI CLI and web portable smoke checks on Windows")
+    parser.add_argument("--smoke", action="store_true", help="run web portable smoke checks on Windows")
     parser.add_argument(
         "--require-smoke",
         action="store_true",
@@ -111,6 +109,9 @@ def _verify_required_files(names: set[str]) -> None:
     missing = sorted(REQUIRED_FILES - names)
     if missing:
         raise SystemExit("Combined release ZIP is missing required files:\n" + "\n".join(f"- {item}" for item in missing))
+    forbidden = {"gui/WlcRoleAclCollectorCLI.exe", "web/trust_host_key.cmd"} & names
+    if forbidden:
+        raise SystemExit("Removed CLI artifacts are present in the combined ZIP: " + ", ".join(sorted(forbidden)))
 
 
 def _verify_required_prefixes(names: set[str]) -> None:
@@ -144,27 +145,7 @@ def _smoke_combined_package(zip_path: Path, *, require: bool) -> None:
         with zipfile.ZipFile(zip_path) as archive:
             archive.extractall(extract_dir)
 
-        _smoke_cli(extract_dir)
         _smoke_web(extract_dir)
-
-
-def _smoke_cli(extract_dir: Path) -> None:
-    cli_exe = extract_dir / "gui" / "WlcRoleAclCollectorCLI.exe"
-    if not cli_exe.exists():
-        raise SystemExit(f"CLI executable was not found after extraction: {cli_exe}")
-
-    completed = subprocess.run(
-        [str(cli_exe), "--help"],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    output = f"{completed.stdout}\n{completed.stderr}"
-    if completed.returncode != 0:
-        raise SystemExit(f"CLI smoke command failed with exit code {completed.returncode}:\n{output.strip()}")
-    if "collect" not in output or "diagnose" not in output:
-        raise SystemExit("CLI help output did not include expected commands: collect, diagnose")
 
 
 def _smoke_web(extract_dir: Path) -> None:
