@@ -24,9 +24,9 @@ GitHub Actions의 `Release` workflow를 수동 실행하며, 다음과 같이 �
 일반 사용자용 실행 파일은 Windows 통합 ZIP으로 제공하며, SHA-256 체크섬과 Python 의존성 SBOM을 함께 공개합니다.
 
 ```text
-wlc-role-acl-collector_v0.4.1_windows.zip
-wlc-role-acl-collector_v0.4.1_windows.zip.sha256
-wlc-role-acl-collector_v0.4.1_sbom.cdx.json
+wlc-role-acl-collector_v0.5.0_windows.zip
+wlc-role-acl-collector_v0.5.0_windows.zip.sha256
+wlc-role-acl-collector_v0.5.0_sbom.cdx.json
 ```
 
 GitHub가 자동 표시하는 `Source code (zip)`과 `Source code (tar.gz)`는 실행용 배포 파일이 아닙니다.
@@ -168,5 +168,5 @@ Release notes와 asset에는 다음 정보를 포함하지 않습니다.
 - Streamlit 자체 사용자 로그인/권한 관리 기능은 없습니다.
 - 코드서명, installer, MSIX는 현재 범위가 아닙니다.
 - Windows EXE는 Windows runner 또는 Windows PC에서 검증합니다.
-- PDF 저장은 별도 브라우저 인쇄 창에서 `PDF로 저장`을 선택하는 방식입니다.
-- 이번 주석 기능의 실제 회사 장비·Windows 사용자 환경·인쇄 결과 수동 검증은 사용자의 별도 범위입니다.
+- HTML 보고서는 포함된 한글 글꼴을 사용해 PDF를 오프라인으로 직접 생성합니다. Excel과 PDF 모두 간단 보고서와 상세 보고서를 제공합니다.
+- 이번 주석 기능의 실제 회사 장비·Windows 사용자 환경·PDF 표시 결과 수동 검증은 사용자의 별도 범위입니다.

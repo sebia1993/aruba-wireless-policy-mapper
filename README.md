@@ -163,10 +163,10 @@ SSID → Role → ACL 상세와 Access Check의 이전 HTML 예시는 [2026-06-3
 - **B안 원본·주석 통합 테이블:** 선택한 Role 안에서 `통합 정책·주석` / `ACL 접근 판정` 두 탭을 사용합니다. Source/Destination/Service/Action과 주석을 같은 ACL 행에 보여주고, 원문·관련 Alias·수집 근거는 각 규칙에서 필요할 때만 펼칩니다. 중복된 `수집 상세` 탭은 제거합니다
 - Role 옆 `SSID 명` 직접 입력 및 `단말 구분`(윈도우 PC / 맥북 / mobile / ETC, 기존 파일의 PC 분류 유지) 선택. 수집된 SSID와 분리하여 JSON·주석 HTML·이전 주석 재사용·Excel/PDF 보고 내용에 보관. 과거 작업 파일은 새 버전에서도 열리지만, 새 기기 분류를 저장한 작업 파일은 이를 지원하지 않는 구버전에서 열리지 않을 수 있습니다
 - JSON 작업 저장·열기, 이전 주석 재사용과 미연결 설명 보존
-- 전체/선택 Role/변경·확인 범위의 실제 XLSX 및 **인쇄 창 없는 오프라인 한글 텍스트 PDF 직접 다운로드**. 상급자 보고서는 핵심 요약→Role 현황→확인 필요→전용·공통 ACL·Alias 부록 순서로 구성
+- 전체/선택 Role/변경·확인 범위의 실제 XLSX 및 **인쇄 창 없는 오프라인 한글 텍스트 PDF 직접 다운로드**. 간단 보고서는 규칙과 행별 주석을 보여주며, 상세 보고서는 핵심 요약→Role 현황→확인 필요→전용·공통 ACL·Alias 부록 순서로 구성
 - 현재 작업을 담은 독립 HTML 편집기 저장
 - `통합 정책·주석`의 수집 신뢰도·원본 근거 요약, 고급 접힘 영역에서 원본 전체 보고서·선택 Role PNG 저장(원본 수집본이 일치할 때만 사용 가능)
-- `global-sacl`, `re-guard`, `logon-control` 공통 ACL 3종은 Role의 주석 화면에서 기본 숨김, `공통 ACL 함께 보기`로 복원. 정확한 ACL 이름만 분류하며 원본·저장·보고 데이터는 변하지 않습니다.
+- `global-sacl`, `ra-guard`, `re-guard`, `logon-control` 공통 ACL은 Role의 주석 화면에서 기본 숨김, `공통 ACL 함께 보기`로 복원. 정확한 ACL 이름만 분류하며 원본·저장·보고 데이터는 변하지 않습니다.
 - Access Check
 - 부분 수집 시 영향 Role/SSID와 권장 조치
 
@@ -210,7 +210,7 @@ SSID → Role → ACL 상세와 Access Check의 이전 HTML 예시는 [2026-06-3
 일반 사용자는 GitHub **Releases**의 Windows 통합 ZIP을 사용합니다.
 
 ```text
-wlc-role-acl-collector_v0.4.1_windows.zip
+wlc-role-acl-collector_v0.5.0_windows.zip
 ```
 
 압축을 완전히 푼 뒤 목적에 맞는 실행 경로를 선택합니다.
