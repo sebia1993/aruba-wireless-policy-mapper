@@ -212,8 +212,9 @@ def test_combined_release_build_contract():
         assert expected in verifier
 
     assert "Source code" in readme
-    assert '"gui/WlcRoleAclCollectorCLI.exe",' not in verifier
-    assert '"trust_host_key.cmd",' not in verifier
+    verifier_module = runpy.run_path(str(repo_root / "tools" / "verify_combined_release_package.py"))
+    assert "gui/WlcRoleAclCollectorCLI.exe" not in verifier_module["REQUIRED_FILES"]
+    assert "web/trust_host_key.cmd" not in verifier_module["REQUIRED_FILES"]
     assert "gui\\WlcRoleAclCollectorGUI.exe" in readme
     assert "web\\start_webapp.cmd" in readme
 
