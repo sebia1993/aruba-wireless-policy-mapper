@@ -16,7 +16,7 @@
   // Never modify the collected snapshot, rule order, annotations, or exports.
   const SYSTEM_COMMON_ACLS = new Set(['global-sacl', 're-guard', 'logon-control']);
   const isCommonAcl = acl => SYSTEM_COMMON_ACLS.has(String(acl || '').trim().toLowerCase());
-  const SCRIPT_IDS = ['annotation-core-script','annotation-export-script','annotation-exceljs-script','annotation-import-script','annotation-editor-script'];
+  const SCRIPT_IDS = ['annotation-core-script','annotation-export-script','annotation-exceljs-script','annotation-import-script','annotation-pdfmake-script','annotation-pdf-font-script','annotation-pdf-export-script','annotation-editor-script'];
   const MAX_FILE_BYTES = 50 * 1024 * 1024;
   const MAX_RECOVERY_LENGTH = 25000000;
   const clone = value => JSON.parse(JSON.stringify(value));
@@ -73,6 +73,7 @@
     const doc = options.document || win.document;
     const core = options.core || win.AnnotationCore;
     const exporter = options.exporter || win.AnnotationExport;
+    const pdfExporter = options.pdfExporter || win.AnnotationPdf;
     const importer = options.importer || win.AnnotationImport;
     const root = doc.getElementById('annotation-workspace');
     if (!root || !core) throw new Error('주석 작업 화면을 초기화할 수 없습니다.');
@@ -261,7 +262,7 @@
       root.className='annotation-workspace';
       root.innerHTML=`
         <div class="ann-top"><div><div class="ann-kicker">WIRELESS POLICY REVIEW</div><h1>무선 정책 통합 관리</h1><p>Role별 ACL 원본과 주석을 한 표에서 확인하고, 필요한 수집 근거만 펼쳐보세요.</p></div></div>
-        <div class="ann-toolbar"><div class="ann-file-actions"><button type="button" id="ann-open">작업 열기</button><button type="button" id="ann-save" class="ann-primary">작업 저장</button><button type="button" id="ann-reuse">이전 주석 가져오기</button><button type="button" id="ann-save-html">주석 포함 HTML 저장</button></div><div class="ann-export-actions"><label for="ann-export-scope">보고 범위</label><select id="ann-export-scope"><option value="all">전체 정책</option><option value="selected">선택한 Role</option><option value="review">변경·확인 필요 항목</option></select><button type="button" id="ann-pdf">PDF 저장</button><button type="button" id="ann-xlsx">Excel 저장</button></div></div>
+        <div class="ann-toolbar"><div class="ann-file-actions"><button type="button" id="ann-open">작업 열기</button><button type="button" id="ann-save" class="ann-primary">작업 저장</button><button type="button" id="ann-reuse">이전 주석 가져오기</button><button type="button" id="ann-save-html">주석 포함 HTML 저장</button></div><div class="ann-export-actions"><label for="ann-export-scope">보고 범위</label><select id="ann-export-scope"><option value="all">전체 정책</option><option value="selected">선택한 Role</option><option value="review">변경·확인 필요 항목</option></select><button type="button" id="ann-pdf">PDF 다운로드</button><button type="button" id="ann-xlsx">Excel 저장</button></div></div>
         <input type="file" id="ann-file" accept=".json,.html,.htm,application/json,text/html" hidden>
         <div class="ann-status" id="ann-status" role="status" aria-live="polite"></div>
         <div id="ann-recovery" class="ann-recovery" ${pendingDraft?'':'hidden'}><div><strong>이 파일에서 이어서 작성한 임시작업이 있습니다.</strong><p>현재는 파일의 내용을 표시하고 있습니다. 복구하면 임시작업의 전체 주석 상태를 적용합니다.</p></div><button type="button" id="ann-restore">임시작업 복구</button><button type="button" id="ann-discard-draft">임시작업 버리기</button></div>
@@ -527,20 +528,23 @@
       finally {button.disabled=false;}
     }
 
-    function printPdf() {
+    async function downloadPdf() {
+      const button=$('ann-pdf');
       try {
-        if (!exporter) throw new Error('PDF 출력 모듈을 찾을 수 없습니다.');
-        const model=exportModel(), html=exporter.printHtml(model);
-        const target=win.open('','_blank');
-        if (!target) throw new Error('인쇄 창이 차단되었습니다. 이 파일의 팝업을 허용하고 다시 눌러 주세요.');
-        target.opener=null;
-        target.document.open();target.document.write(html);target.document.close();
-        const print=()=>{if (!target.closed) {target.focus();target.print();}};
-        const ready=target.document.fonts?.ready || Promise.resolve();
-        ready.then(()=>target.setTimeout(print,100));
-        target.addEventListener('afterprint',()=>{status('인쇄 창에서 PDF 저장 또는 취소를 마쳤습니다. 저장 여부는 브라우저에서 확인해 주세요.','ready');},{once:true});
-        status('인쇄 창을 열었습니다. 대상을 PDF로 저장으로 선택하세요. 보고 범위: '+model.scopeLabel,'ready');return true;
-      } catch (error) {status('PDF 출력 실패: '+error.message,'error');return false;}
+        if (!pdfExporter || !win.pdfMake) throw new Error('오프라인 PDF 생성 모듈을 찾을 수 없습니다. 배포 패키지를 확인해 주세요.');
+        const model=exportModel();
+        button.disabled=true;
+        status('상급자 보고용 PDF를 생성하는 중입니다. 범위: '+model.scopeLabel,'pending');
+        const bytes=await pdfExporter.createPdfBytes(model,win.pdfMake);
+        download(new win.Blob([bytes],{type:'application/pdf'}),filename('_management_report.pdf'));
+        status('PDF 파일 다운로드를 요청했습니다. '+model.scopeLabel+' · Role '+model.roles.length+'개 · 규칙 '+model.rules.length+'개 · 작업 버전 '+model.revision,'download');
+        return true;
+      } catch (error) {
+        status('PDF 생성 실패: '+error.message+' · 현재 주석과 작업 상태는 유지됩니다.','error');
+        return false;
+      } finally {
+        button.disabled=false;
+      }
     }
 
     function linkOrphan(id) {
@@ -640,7 +644,7 @@
         case 'ann-reuse':fileMode='reuse';$('ann-file').click();break;
         case 'ann-save':saveProject();break;
         case 'ann-save-html':saveHtml();break;
-        case 'ann-pdf':printPdf();break;
+        case 'ann-pdf':downloadPdf();break;
         case 'ann-xlsx':exportXlsx();break;
         case 'ann-select-visible':visibleRoles().forEach(r=>selectedRoles.add(r.id));renderRoleList();break;
         case 'ann-clear-selection':selectedRoles.clear();renderRoleList();break;
@@ -666,7 +670,7 @@
     win.addEventListener('beforeunload',event=>{
       if(isDirty()){event.preventDefault();event.returnValue='';}
     });
-    const api={getProject:()=>clone(project),openText,reuseText,restoreDraft,saveProject,saveHtml,printPdf,exportXlsx,exportModel};
+    const api={getProject:()=>clone(project),openText,reuseText,restoreDraft,saveProject,saveHtml,downloadPdf,exportXlsx,exportModel};
     win.AnnotationEditorApp=api;
     return api;
   }

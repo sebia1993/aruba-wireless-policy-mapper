@@ -107,7 +107,7 @@
       const a=r.annotation||{};
       return [
         bodyCell(nonempty(r.controllerName)+'\n'+nonempty(r.name)+'\nRole ID: '+nonempty(r.id)),
-        bodyCell((r.ssids||[]).map(str).join(', ')||'연결 정보 없음'+'\n수기 SSID: '+nonempty(a.manualSsid,'미입력')),
+        bodyCell(((r.ssids||[]).map(str).join(', ')||'연결 정보 없음')+'\n수기 SSID: '+nonempty(a.manualSsid,'미입력')),
         bodyCell(device(a.deviceType)),
         bodyCell('전용 '+own.length+'건\n공통 '+sharedRole.length+'건'),
         bodyCell(label(a.status)+'\n'+nonempty(a.text,'(설명 미작성)'))

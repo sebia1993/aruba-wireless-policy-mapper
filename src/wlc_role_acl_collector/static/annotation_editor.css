@@ -76,7 +76,7 @@ body { margin:0; background:#eef2f6; color:#172033; font-family:"Segoe UI","Malg
 #source-report[hidden] { display:none!important; }
 @media(max-width:1000px) { .annotation-workspace {padding:16px;}.ann-layout {grid-template-columns:205px minmax(0,1fr);gap:12px;}.ann-role-detail {padding:16px;}.ann-top {align-items:flex-start;}.ann-mode {max-width:190px;} }
 @media(max-width:720px) { .annotation-workspace {padding:12px;}.ann-top {display:block;}.ann-mode {max-width:none;margin-top:14px;}.ann-layout {display:block;}.ann-sidebar {position:static;max-height:280px;margin-bottom:14px;}.ann-role-header {flex-wrap:wrap;}.ann-toolbar {padding:10px;}.ann-export-actions {border-top:1px solid #dfe6ef;padding-top:10px;width:100%;}.ann-top h1 {font-size:25px;} }
-@media print { .annotation-workspace {display:none;} #source-report {display:none!important;} body::after {content:"PDF 저장 버튼을 눌러 보고 범위를 선택한 인쇄용 보고서를 열어 주세요.";display:block;padding:30px;font-size:18px;} }
+/* PDF is generated as a downloadable file. No browser print dialog is used. */
 
 /* Unified Role tabs: policy editing, original ACL check and collection evidence. */
 .ann-role-workspace{min-width:0;background:#fff;border:1px solid #d6dde7;border-radius:10px;overflow:hidden}
@@ -122,7 +122,6 @@ body { margin:0; background:#eef2f6; color:#172033; font-family:"Segoe UI","Malg
 .ann-source-details>summary{font-size:12px;font-weight:650;color:#1e4b74;cursor:pointer}
 .ann-source-details>.ann-help{margin:12px 0!important}
 .ann-source-details #ann-source-slot{min-width:0;overflow:hidden}
-#ann-source-slot #source-report .report-actions #print-pdf{display:none}
 @media(max-width:720px){
   .ann-role-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}
   .ann-collection-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
