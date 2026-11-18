@@ -63,7 +63,7 @@ web/
 
 SHA-256은 Release notes와 별도 `.sha256` asset에 기록합니다. CycloneDX JSON SBOM과 GitHub build provenance도 함께 공개합니다. SBOM의 목록 범위는 `requirements-web-lock.txt`에 고정한 Python 의존성입니다.
 
-Paramiko 수정 릴리스가 아직 없는 `CVE-2026-44405`는 정확히 한 건만 감사 예외로 고정합니다. 서버 키 probe와 실제 연결에서 RSA/SHA-1을 비활성화하고 맞춤 고정 키 policy로 인증 전에 키 재료를 검증하며, 근거·제거 조건·재검토 기한은 `docs/DEPENDENCY_AUDIT_EXCEPTIONS_KO.md`에 공개합니다.
+개발용 및 Web용 잠금 파일에는 Netmiko 4.8.0과 Paramiko 5.0.0을 함께 고정합니다. 두 파일 모두 취약점 예외 없이 감사합니다. 이전 RSA/SHA-1 예외를 제거한 근거는 [의존성 감사 예외 이력](docs/DEPENDENCY_AUDIT_EXCEPTIONS_KO.md)에 기록합니다.
 
 ## Release 전 검증
 
@@ -83,8 +83,8 @@ npm ci --ignore-scripts
 python -m pytest -q
 python -m compileall -q src tests tools
 python -m pip check
-python -m pip_audit -r requirements-lock.txt --strict --ignore-vuln CVE-2026-44405
-python -m pip_audit -r requirements-web-lock.txt --strict --ignore-vuln CVE-2026-44405
+python -m pip_audit -r requirements-lock.txt --strict
+python -m pip_audit -r requirements-web-lock.txt --strict
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\validate.ps1
 npm test
 ```

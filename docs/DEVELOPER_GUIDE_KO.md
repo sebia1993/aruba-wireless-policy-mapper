@@ -155,7 +155,7 @@ Streamlit은 `_ACTIVE_TARGETS`와 `_target_collection_slot()`으로 같은 WLC�
 
 `web_logic.run_web_collection()`은 입력 검증을 통과한 뒤 `workspace`, `role_networks`, `collection`, `raw_storage`, `parsing`, `report`, `download` 단계 중 현재 위치를 추적합니다. 예상하지 못한 오류는 원본 예외나 내부 경로 대신 안전한 오류 코드, 실패 단계, 한국어 권장 조치가 담긴 `WebCollectionResult(success=False)`로 반환합니다. 잘못된 Role 대역표와 동일 WLC 중복 실행은 사용자가 직접 수정할 수 있도록 기존 예외 계약을 유지합니다.
 
-SSH 연결은 `hostkeys.py`와 `collector._build_connect_params()`가 앱 전용 `known_hosts`를 공유합니다. `trust-host-key`는 인증 전에 서버 키를 probe하고 사용자가 지문을 별도 경로로 확인한 경우에만 최초 키를 저장합니다. Netmiko 연결은 `ssh_strict=True`, 시스템 키 비활성화, 앱 전용 키 파일 사용을 강제합니다. `ssh_connection.py`는 Paramiko 4.0이 RSA known_hosts 항목을 보고 `ssh-rsa` 우선순위를 되살리는 경로를 피하기 위해 키 파일을 `SSHClient`에 직접 로드하지 않고, SHA2-only 교환 뒤 인증 전에 `PinnedHostKeyPolicy`로 키 재료를 비교합니다. 변경된 키와 미승인 키를 자동 등록하거나 Telnet으로 우회하는 코드를 추가하지 않습니다.
+SSH 연결은 `hostkeys.py`와 `collector._build_connect_params()`가 앱 전용 `known_hosts`를 공유합니다. `trust-host-key`는 인증 전에 서버 키를 probe하고 사용자가 지문을 별도 경로로 확인한 경우에만 최초 키를 저장합니다. Netmiko 연결은 `ssh_strict=True`, 시스템 키 비활성화, 앱 전용 키 파일 사용을 강제합니다. `ssh_connection.py`는 Paramiko 5와 함께 사용하며, 키 교환 뒤 인증 전에 `PinnedHostKeyPolicy`로 앱 전용 파일의 키 재료와 서버 키를 직접 비교합니다. 변경된 키와 미승인 키를 자동 등록하거나 Telnet으로 우회하는 코드를 추가하지 않습니다.
 
 Telnet은 사용자가 명시적으로 선택한 경우에만 사용합니다. 평문 위험 안내를 유지하고 SSH 오류를 이유로 프로토콜을 자동 변경하지 않습니다. `validation.build_show_netdestination_command()`와 `build_show_rights_command()`는 장비 출력에서 발견한 식별자를 중앙에서 검증하므로 동적 명령을 문자열 보간으로 직접 만들지 않습니다.
 

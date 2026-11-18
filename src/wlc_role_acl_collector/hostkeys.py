@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 
 def hardened_disabled_algorithms() -> dict[str, list[str]]:
-    """Paramiko 4.0의 RSA/SHA-1 경로를 모든 SSH 연결에서 차단합니다."""
+    """서버 키 확인과 실제 SSH 연결에서 RSA/SHA-1 서명을 명시적으로 차단합니다."""
 
     return {"keys": ["ssh-rsa"], "pubkeys": ["ssh-rsa"]}
 
