@@ -1,2 +1,1 @@
---require-hashes
--r requirements-lock.txt
+--require-hashes\n-r requirements-lock.txt\n
