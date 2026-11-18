@@ -493,14 +493,14 @@ test('exact-name common ACLs are hidden by default, reversible, and preserved in
     const text=doc.querySelector('.ann-rules').textContent;
     for(const name of ['re-guardian','logon-control-v2','custom-global-sacl','role-specific']) assert.ok(text.includes(name),name);
     for(const name of ['global-sacl','re-guard','logon-control']) {
-      assert.ok(!Array.from(doc.querySelectorAll('.ann-rules tbody strong')).some(x=>x.textContent.toLowerCase()===name),name);
+      assert.ok(!Array.from(doc.querySelectorAll('.ann-rules tbody tr > td:first-child > strong')).some(x=>x.textContent.toLowerCase()===name),name);
     }
     assert.equal(env.app.exportModel().rules.length,10);
     for(const name of names) assert.ok(env.app.exportModel().rules.some(x=>x.acl===name));
     const control=doc.getElementById('ann-show-common-acl');
     control.checked=true;control.dispatchEvent(new env.window.Event('change',{bubbles:true}));
     assert.equal(count(),10);
-    assert.deepEqual(Array.from(doc.querySelectorAll('.ann-rules tbody tr strong')).map(x=>x.textContent),[original.acl,...names]);
+    assert.deepEqual(Array.from(doc.querySelectorAll('.ann-rules tbody tr > td:first-child > strong')).map(x=>x.textContent),[original.acl,...names]);
     assert.equal(env.app.getProject().revision,p.revision);
     const reset=doc.getElementById('ann-show-common-acl');
     reset.checked=false;reset.dispatchEvent(new env.window.Event('change',{bubbles:true}));
