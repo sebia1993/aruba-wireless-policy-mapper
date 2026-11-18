@@ -166,7 +166,7 @@ SSID → Role → ACL 상세와 Access Check의 이전 HTML 예시는 [2026-06-3
 - 전체/선택 Role/변경·확인 범위의 실제 XLSX와 브라우저 인쇄를 통한 PDF 저장
 - 현재 작업을 담은 독립 HTML 편집기 저장
 - Role 내부 `수집 상세` 탭의 선택 Role PNG 저장 및 수집 품질·원본 확인
-- `global-sacl`은 Role의 주석 화면에서 기본 숨김, `공통 ACL 함께 보기`로 복원 (원본·저장·보고 데이터 불변)
+- `global-sacl`, `re-guard`, `logon-control` 공통 ACL 3종은 Role의 주석 화면에서 기본 숨김, `공통 ACL 함께 보기`로 복원. 정확한 ACL 이름만 분류하며 원본·저장·보고 데이터는 변하지 않습니다.
 - Access Check
 - 부분 수집 시 영향 Role/SSID와 권장 조치
 

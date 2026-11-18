@@ -710,3 +710,14 @@ def _acl_row(role: str, acl: str, sequence: int) -> dict[str, object]:
         "access_flags": "",
         "raw_rule": "",
     }
+
+
+def test_common_infrastructure_acls_are_not_role_related_by_name():
+    from wlc_role_acl_collector.report import _is_role_related_acl
+
+    for role in ("employee", "re-guard", "logon-control"):
+        for common in ("global-sacl", "re-guard", "logon-control", "RE-GUARD", " LOGON-CONTROL "):
+            assert not _is_role_related_acl(role, common)
+    for role, acl in (("re-guard", "re-guard-custom"), ("logon-control", "logon-control-v2"), ("re-guard", "employee-re-guard")):
+        assert _is_role_related_acl(role, acl)
+    assert _is_role_related_acl("employee", "employee-policy")

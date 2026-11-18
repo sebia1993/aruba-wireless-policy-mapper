@@ -475,22 +475,52 @@ test('C layout has one Role workspace with three internal tabs and no legacy mod
   } finally {env.close();}
 });
 
-test('global-sacl is hidden only in UI; full snapshot and exports retain all rules and notes', () => {
-  const p=fixture(), original=p.snapshot.rules[0], common={...original,id:'global-1',acl:'global-sacl',ordinal:2};
-  p.snapshot.rules.push(common);
-  p.annotations.rules[common.id]={text:'전역 인증 정책',status:'reviewed',updatedAt:p.updatedAt,confirmedAt:p.updatedAt,reasons:[],source:null};
+test('exact-name common ACLs are hidden by default, reversible, and preserved in snapshots and export', () => {
+  const p=fixture(), original=p.snapshot.rules[0];
+  const names=['global-sacl','re-guard','logon-control','Re-Guard','LOGON-CONTROL','re-guardian','logon-control-v2','custom-global-sacl','role-specific'];
+  names.forEach((acl,i)=>{
+    const rule={...original,id:'test-rule-'+i,acl,ordinal:i+2,raw:'policy '+acl};
+    p.snapshot.rules.push(rule);
+    p.annotations.rules[rule.id]={text:'주석 '+acl,status:'reviewed',updatedAt:p.updatedAt,confirmedAt:p.updatedAt,reasons:[],source:null};
+  });
   const env=mount(p),doc=env.window.document;
   try {
-    assert.equal(doc.querySelectorAll('.ann-rules tbody tr').length,1);
+    const count=()=>doc.querySelectorAll('.ann-rules tbody tr').length;
+    assert.equal(count(),5);
     assert.equal(doc.getElementById('ann-show-common-acl').checked,false);
-    assert.equal(env.app.exportModel().rules.length,2);
-    assert.equal(env.app.getProject().annotations.rules['global-1'].text,'전역 인증 정책');
+    assert.match(doc.querySelector('.ann-role-header').textContent,/전용 5개.*공통 5개/);
+    assert.match(doc.getElementById('ann-role-list').textContent,/5 전용 규칙.*5 공통 규칙/);
+    const text=doc.querySelector('.ann-rules').textContent;
+    for(const name of ['re-guardian','logon-control-v2','custom-global-sacl','role-specific']) assert.ok(text.includes(name),name);
+    for(const name of ['global-sacl','re-guard','logon-control']) {
+      assert.ok(!Array.from(doc.querySelectorAll('.ann-rules tbody strong')).some(x=>x.textContent.toLowerCase()===name),name);
+    }
+    assert.equal(env.app.exportModel().rules.length,10);
+    for(const name of names) assert.ok(env.app.exportModel().rules.some(x=>x.acl===name));
     const control=doc.getElementById('ann-show-common-acl');
-    control.checked=true;
-    control.dispatchEvent(new env.window.Event('change',{bubbles:true}));
-    assert.equal(doc.querySelectorAll('.ann-rules tbody tr').length,2);
-    assert.match(doc.querySelector('.ann-rules').textContent,/global-sacl/);
+    control.checked=true;control.dispatchEvent(new env.window.Event('change',{bubbles:true}));
+    assert.equal(count(),10);
+    assert.deepEqual(Array.from(doc.querySelectorAll('.ann-rules tbody tr strong')).map(x=>x.textContent),[original.acl,...names]);
     assert.equal(env.app.getProject().revision,p.revision);
+    const reset=doc.getElementById('ann-show-common-acl');
+    reset.checked=false;reset.dispatchEvent(new env.window.Event('change',{bubbles:true}));
+    assert.equal(count(),5);
+    for(let i=0;i<names.length;i++) assert.equal(env.app.getProject().annotations.rules['test-rule-'+i].text,'주석 '+names[i]);
+  } finally {env.close();}
+});
+
+test('Role with only common ACLs does not claim no ACL policy was collected', () => {
+  const p=fixture();
+  p.snapshot.rules=p.snapshot.rules.map(r=>({...r,acl:'logon-control'}));
+  const env=mount(p),doc=env.window.document;
+  try {
+    assert.match(doc.querySelector('.ann-rules').textContent,/전용 ACL이 표시되지 않습니다/);
+    assert.match(doc.querySelector('.ann-rules').textContent,/공통 ACL 1개가 숨겨져 있습니다/);
+    assert.doesNotMatch(doc.querySelector('.ann-rules').textContent,/수집된 ACL 규칙이 없습니다/);
+    assert.equal(env.app.exportModel().rules.length,p.snapshot.rules.length);
+    const check=doc.getElementById('ann-show-common-acl');
+    check.checked=true;check.dispatchEvent(new env.window.Event('change',{bubbles:true}));
+    assert.match(doc.querySelector('.ann-rules').textContent,/logon-control/);
   } finally {env.close();}
 });
 

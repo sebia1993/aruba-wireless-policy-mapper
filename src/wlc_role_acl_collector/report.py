@@ -3413,6 +3413,10 @@ def _other_acl_row_count(role: str, rows: list[dict[str, Any]]) -> int:
 def _is_role_related_acl(role: str, acl_name: str) -> bool:
     role_name = role.strip().casefold()
     acl = acl_name.strip().casefold()
+    # Shared ACLs are not expanded by default on the source Role panel.
+    # The data and original order are untouched; Show other ACLs restores them.
+    if acl in {"global-sacl", "re-guard", "logon-control"}:
+        return False
     if not role_name or not acl:
         return False
     return acl == role_name or acl.startswith(role_name) or role_name in acl
