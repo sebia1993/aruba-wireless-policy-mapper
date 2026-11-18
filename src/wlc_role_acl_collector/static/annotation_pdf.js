@@ -5,7 +5,9 @@
   else root.AnnotationPdf = factory();
 }(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
-  const COMMON_ACLS = new Set(['global-sacl', 're-guard', 'logon-control']);
+  // Use the same common-ACL classifier as the interactive Role editor.
+  const aclCore = (typeof module==='object' && module.exports)
+    ? require('./annotation_core.js') : globalThis.AnnotationCore;
   const COLORS = {navy:'#183959', muted:'#587086', rule:'#D7E2EC', fill:'#EAF1F8', alert:'#A15C10'};
   const STATUS = {reviewed:'확인 완료',unreviewed:'미확인',reused:'이전 주석 재사용',needs_review:'재확인 필요'};
   const COVERAGE = {completed:'수집 완료',partial:'일부 수집',failed:'수집 실패',unknown:'수집 범위 미확인'};
@@ -17,7 +19,7 @@
   const title = text => ({text:str(text),style:'sectionHeading',margin:[0,13,0,6]});
   const para = (text,opts) => ({text:str(text),style:'smallText',margin:[0,2,0,6],...(opts||{})});
   const label = code => STATUS[str(code)] || nonempty(code,'미확인');
-  const common = acl => COMMON_ACLS.has(str(acl).trim().toLowerCase());
+  const common = acl => aclCore.isCommonAclName(acl);
   const device = v => ({windows_pc:'윈도우 PC',macbook:'맥북',PC:'PC (기존 분류)'}[str(v)] || nonempty(v,'미지정'));
   const roleKey = role => JSON.stringify([role.controllerId,role.id]);
   const roleTarget = role => nonempty(role.controllerName,'컨트롤러 미확인')+' / '+nonempty(role.name,'Role 미확인');

@@ -12,10 +12,6 @@
   const DEVICE_TYPES = [['','미지정'], ['windows_pc','윈도우 PC'], ['macbook','맥북'], ['PC','PC (기존 분류)'], ['mobile','mobile'], ['ETC','ETC']];
   const DEVICE_LABELS = new Map(DEVICE_TYPES);
   const deviceLabel = value => DEVICE_LABELS.get(value || '') || String(value || '미지정');
-  // Operationally shared ACLs: hide by exact name in the Role workspace only.
-  // Never modify the collected snapshot, rule order, annotations, or exports.
-  const SYSTEM_COMMON_ACLS = new Set(['global-sacl', 're-guard', 'logon-control']);
-  const isCommonAcl = acl => SYSTEM_COMMON_ACLS.has(String(acl || '').trim().toLowerCase());
   const SCRIPT_IDS = ['annotation-core-script','annotation-export-script','annotation-exceljs-script','annotation-import-script','annotation-pdfmake-script','annotation-pdf-font-script','annotation-pdf-export-script','annotation-editor-script'];
   const MAX_FILE_BYTES = 50 * 1024 * 1024;
   const MAX_RECOVERY_LENGTH = 25000000;
@@ -72,6 +68,7 @@
     const win = options.window || window;
     const doc = options.document || win.document;
     const core = options.core || win.AnnotationCore;
+    const isCommonAcl = acl => core.isCommonAclName(acl);
     const exporter = options.exporter || win.AnnotationExport;
     const pdfExporter = options.pdfExporter || win.AnnotationPdf;
     const importer = options.importer || win.AnnotationImport;
@@ -367,7 +364,7 @@
         <section class="ann-collection-strip" aria-label="선택 Role 수집 근거"><div class="ann-collection-summary"><span><strong>수집 상태</strong>${escapeHtml(COVERAGE[c?.coverage]||'미확인')}</span><span><strong>Role 문맥</strong>${r.contextComplete?'확인':'추가 확인 필요'}</span><span><strong>ACL 연결</strong>${r.aclOrder.length}개</span><span><strong>Alias</strong>${aliases.length}개 (장비 기준)</span><span><strong>실패 명령</strong>${(c?.failedCommands||[]).length}개</span></div><p class="ann-help">수집 완료는 정책 적절성이나 실제 통신 성공을 보증하지 않습니다. ${!sourceAvailable()?'현재 작업 파일 기준이며 연결된 원본 보고서가 없어 접근 판정이 제한됩니다.':''}</p>${(c?.failedCommands||[]).length?'<p class="ann-collection-attention">실패 명령: '+escapeHtml(c.failedCommands.join(', '))+'</p>':''}</section>
         <div class="ann-role-note"><h3>보고용 Role 설명</h3><p class="ann-help">업무 목적 · 대상 사용자 · 주요 접근 범위 · 예외 및 확인 사항을 정리하세요.</p>${noteEditor('roles',r.id,r.name+' Role 설명')}</div>
         ${networks.length?'<div class="ann-local"><strong>포함된 내부망 대역</strong><p>'+networks.map(n=>escapeHtml(n.network+' / '+n.subnetMask+' · '+n.status)).join('<br>')+'</p></div>':''}
-        <div class="ann-section-title"><h3>ACL 원본 · 주석 통합</h3><label class="ann-common-toggle"><input type="checkbox" id="ann-show-common-acl" ${showCommonAcl?'checked':''}>공통 ACL 함께 보기 ${commonAclRows.length?'('+commonAclRows.length+')':''}</label></div><p class="ann-help">공통 ACL(global-sacl, re-guard, logon-control)은 이름이 정확히 일치할 때 기본 숨김입니다. 수집 원본·주석·ACL 적용 순서·보고서에는 모두 보존됩니다.${!showCommonAcl&&commonAclRows.length?' '+commonAclRows.length+'개 공통 규칙이 화면에서 숨겨졌습니다.':''}</p>
+        <div class="ann-section-title"><h3>ACL 원본 · 주석 통합</h3><label class="ann-common-toggle"><input type="checkbox" id="ann-show-common-acl" ${showCommonAcl?'checked':''}>공통 ACL 함께 보기 ${commonAclRows.length?'('+commonAclRows.length+')':''}</label></div><p class="ann-help">공통 ACL은 기본 숨김이며 따옴표·특수 하이픈 등 이름 표기 차이도 구분합니다. 수집 원본·주석·ACL 적용 순서·보고서에는 모두 보존됩니다.${!showCommonAcl&&commonAclRows.length?' '+commonAclRows.length+'개 공통 규칙이 화면에서 숨겨졌습니다.':''}</p>
         <div class="ann-table-scroll" tabindex="0" role="region" aria-label="${escapeHtml(r.name)} ACL 원본 및 주석 표"><table class="ann-rules"><thead><tr><th>ACL / 순서</th><th>수집 정책 (Source / Destination / Service)</th><th>주석 · 확인 상태</th></tr></thead><tbody>${visibleRows.map(rule=>`<tr><td><strong>${escapeHtml(rule.acl)}</strong><span class="ann-sequence">#${escapeHtml(rule.sequence)} · Role 내 ${rule.ordinal}번째</span><span class="ann-action ${rule.action==='deny'?'deny':''}">${escapeHtml(rule.action||'미확인')}</span></td><td><dl class="ann-rule-fields"><dt>출발지</dt><dd>${escapeHtml(rule.source)}</dd><dt>목적지</dt><dd>${escapeHtml(rule.destination)}</dd><dt>서비스</dt><dd>${escapeHtml(rule.service)}</dd></dl><details class="ann-rule-evidence" data-rule-evidence="${escapeHtml(rule.id)}"><summary>ACL 원문 · Alias · 수집 근거</summary><div class="ann-rule-evidence-content" data-rule-evidence-body></div></details></td><td>${noteEditor('rules',rule.id,rule.acl+' '+rule.sequence+' 주석')}</td></tr>`).join('')||'<tr><td colspan="3">'+(rows.length && commonAclRows.length?'전용 ACL이 표시되지 않습니다. 공통 ACL '+commonAclRows.length+'개가 숨겨져 있습니다. 공통 ACL 함께 보기로 확인하세요.':'이 Role에 수집된 ACL 규칙이 없습니다.')+'</td></tr>'}</tbody></table></div>
         <details class="ann-context"><summary>전체 ACL 연결 순서 · Alias 목록 · 수집 확인 사항</summary><h3>ACL 연결 순서</h3><p>${escapeHtml(r.aclOrder.join(' → ')||'연결 정보 없음')}</p><pre>${escapeHtml(r.bindingRaw.join('\n'))}</pre><h3>이 장비의 Alias</h3>${aliases.map(a=>'<div class="ann-alias"><strong>'+escapeHtml(a.name)+'</strong><ul>'+a.entries.map(e=>'<li>'+escapeHtml(e.type+' '+e.value)+'</li>').join('')+'</ul></div>').join('')||'<p>수집된 Alias가 없습니다.</p>'}<h3>확인 사항</h3><ul>${project.snapshot.issues.filter(i=>i.controllerId===r.controllerId&&(!i.roleId||i.roleId===r.id)).map(i=>'<li>'+escapeHtml(i.message)+'</li>').join('')||'<li>추가 수집 확인 사항이 없습니다.</li>'}</ul></details>`;
       // HTML parsing consumes an initial LF in textarea markup. The project is

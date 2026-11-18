@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 import uuid
 from datetime import datetime
 from functools import lru_cache
@@ -3415,12 +3416,26 @@ def _other_acl_row_count(role: str, rows: list[dict[str, Any]]) -> int:
     return sum(1 for row in rows if not _is_role_related_acl(role, str(row.get("acl", ""))))
 
 
+def _common_acl_name(value: str) -> str:
+    """Normalize only for display classification, never the stored ACL."""
+    name = unicodedata.normalize("NFKC", value)
+    name = re.sub(r"[\u200B-\u200D\uFEFF]", "", name)
+    name = re.sub(r"[\u2010-\u2015\u2212\uFE63\uFF0D]", "-", name).strip().casefold()
+    for _ in range(3):
+        if len(name) < 2:
+            break
+        if (name[0], name[-1]) in {('"', '"'), ("'", "'"), ("“", "”"), ("‘", "’")}:
+            name = name[1:-1].strip()
+        else:
+            break
+    return name
+
+
 def _is_role_related_acl(role: str, acl_name: str) -> bool:
     role_name = role.strip().casefold()
     acl = acl_name.strip().casefold()
-    # Shared ACLs are not expanded by default on the source Role panel.
-    # The data and original order are untouched; Show other ACLs restores them.
-    if acl in {"global-sacl", "re-guard", "logon-control"}:
+    # Keep collected ACLs and evaluation order; hide known shared names only.
+    if _common_acl_name(acl_name) in {"global-sacl", "re-guard", "logon-control"}:
         return False
     if not role_name or not acl:
         return False
