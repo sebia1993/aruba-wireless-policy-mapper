@@ -291,7 +291,7 @@
 
     function visibleRoles() {
       const term=search.toLocaleLowerCase();
-      return project.snapshot.roles.filter(r=>(!reviewOnly || roleNeedsReview(r)) && (!term || [r.name,controller(r.controllerId)?.name,...r.ssids,record('roles',r.id).manualSsid||'',record('roles',r.id).deviceType||''].join(' ').toLocaleLowerCase().includes(term)));
+      return project.snapshot.roles.filter(r=>(!reviewOnly || roleNeedsReview(r)) && (!term || [r.name,controller(r.controllerId)?.name,...r.ssids,record('roles',r.id).manualSsid||'',record('roles',r.id).deviceType||'',deviceLabel(record('roles',r.id).deviceType)].join(' ').toLocaleLowerCase().includes(term)));
     }
 
     function renderRoleList() {

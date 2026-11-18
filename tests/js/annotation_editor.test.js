@@ -571,6 +571,11 @@ test('device category selector supports Windows PC and MacBook; saved files reta
     select.value='macbook';select.dispatchEvent(new env.window.Event('change',{bubbles:true}));
     assert.equal(env.app.getProject().annotations.roles['role-a'].deviceType,'macbook');
     assert.match(doc.getElementById('ann-role-list').textContent,/맥북/);
+    const search=doc.getElementById('ann-search');
+    search.value='맥북';search.dispatchEvent(new env.window.Event('input',{bubbles:true}));
+    assert.equal(doc.querySelectorAll('[data-open-role]').length,1);
+    assert.match(doc.getElementById('ann-role-list').textContent,/맥북/);
+    search.value='';search.dispatchEvent(new env.window.Event('input',{bubbles:true}));
     assert.equal(env.app.saveProject(),true);
     const json=await env.downloadedText();
     const saved=Core.parseProject(json);
