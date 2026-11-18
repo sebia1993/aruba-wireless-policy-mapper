@@ -276,7 +276,7 @@
       root.className='annotation-workspace';
       root.innerHTML=`
         <div class="ann-top"><div><div class="ann-kicker">WIRELESS POLICY REVIEW</div><h1>무선 정책 통합 관리</h1><p>Role별 ACL 원본과 주석을 한 표에서 확인하고, 필요한 수집 근거만 펼쳐보세요.</p></div></div>
-        <div class="ann-toolbar"><div class="ann-file-actions"><button type="button" id="ann-open">작업 열기</button><button type="button" id="ann-save" class="ann-primary">작업 저장</button><button type="button" id="ann-reuse">이전 주석 가져오기</button><button type="button" id="ann-save-html">주석 포함 HTML 저장</button></div><div class="ann-export-actions"><label for="ann-export-scope">보고 범위</label><select id="ann-export-scope"><option value="all">전체 정책</option><option value="selected">선택한 Role</option><option value="review">변경·확인 필요 항목</option></select><button type="button" id="ann-pdf">PDF 다운로드</button><button type="button" id="ann-xlsx">Excel 저장</button></div></div>
+        <div class="ann-toolbar"><div class="ann-file-actions"><button type="button" id="ann-open">작업 열기</button><button type="button" id="ann-save" class="ann-primary">작업 저장</button><button type="button" id="ann-reuse">이전 주석 가져오기</button><button type="button" id="ann-save-html">주석 포함 HTML 저장</button></div><div class="ann-export-actions"><label for="ann-export-scope">보고 범위</label><select id="ann-export-scope"><option value="all">전체 정책</option><option value="selected">선택한 Role</option><option value="review">변경·확인 필요 항목</option></select><label for="ann-export-profile">보고서 구성</label><select id="ann-export-profile"><option value="simple" selected>간단 보고서</option><option value="detailed">상세 보고서 (기존)</option></select><button type="button" id="ann-pdf">PDF 다운로드</button><button type="button" id="ann-xlsx">Excel 저장</button></div></div>
         <input type="file" id="ann-file" accept=".json,.html,.htm,application/json,text/html" hidden>
         <div class="ann-status" id="ann-status" role="status" aria-live="polite"></div>
         <div id="ann-recovery" class="ann-recovery" ${pendingDraft?'':'hidden'}><div><strong>이 파일에서 이어서 작성한 임시작업이 있습니다.</strong><p>현재는 파일의 내용을 표시하고 있습니다. 복구하면 임시작업의 전체 주석 상태를 적용합니다.</p></div><button type="button" id="ann-restore">임시작업 복구</button><button type="button" id="ann-discard-draft">임시작업 버리기</button></div>
@@ -529,14 +529,16 @@
       return core.buildExportModel(project,{type,roleIds:Array.from(selectedRoles)});
     }
 
+    function exportProfile() { return $('ann-export-profile')?.value==='detailed'?'detailed':'simple'; }
+
     async function exportXlsx() {
       const button=$('ann-xlsx');
       try {
         if (!exporter || !win.ExcelJS) throw new Error('Excel 출력 모듈을 찾을 수 없습니다.');
-        const model=exportModel();button.disabled=true;
-        status('Excel 파일을 만드는 중입니다. 보고 범위: '+model.scopeLabel,'pending');
-        const bytes=await exporter.workbookBytes(model,win.ExcelJS);
-        download(new win.Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),filename('_annotated.xlsx'));
+        const model=exportModel(), profile=exportProfile();button.disabled=true;
+        status('Excel '+(profile==='simple'?'간단':'상세')+' 보고서를 만드는 중입니다. 보고 범위: '+model.scopeLabel,'pending');
+        const bytes=await exporter.workbookBytes(model,win.ExcelJS,{profile});
+        download(new win.Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),filename(profile==='simple'?'_acl_summary.xlsx':'_annotated.xlsx'));
         status('Excel 다운로드를 요청했습니다. '+model.scopeLabel+' · Role '+model.roles.length+'개 · 규칙 '+model.rules.length+'개 · 작업 버전 '+model.revision,'download');return true;
       } catch (error) {status('Excel 저장 실패: '+error.message,'error');return false;}
       finally {button.disabled=false;}
@@ -546,11 +548,11 @@
       const button=$('ann-pdf');
       try {
         if (!pdfExporter || !win.pdfMake) throw new Error('오프라인 PDF 생성 모듈을 찾을 수 없습니다. 배포 패키지를 확인해 주세요.');
-        const model=exportModel();
+        const model=exportModel(), profile=exportProfile();
         button.disabled=true;
-        status('상급자 보고용 PDF를 생성하는 중입니다. 범위: '+model.scopeLabel,'pending');
-        const bytes=await pdfExporter.createPdfBytes(model,win.pdfMake);
-        download(new win.Blob([bytes],{type:'application/pdf'}),filename('_management_report.pdf'));
+        status((profile==='simple'?'간단':'상세')+' PDF 보고서를 생성하는 중입니다. 범위: '+model.scopeLabel,'pending');
+        const bytes=await pdfExporter.createPdfBytes(model,win.pdfMake,{profile});
+        download(new win.Blob([bytes],{type:'application/pdf'}),filename(profile==='simple'?'_acl_summary.pdf':'_management_report.pdf'));
         status('PDF 파일 다운로드를 요청했습니다. '+model.scopeLabel+' · Role '+model.roles.length+'개 · 규칙 '+model.rules.length+'개 · 작업 버전 '+model.revision,'download');
         return true;
       } catch (error) {

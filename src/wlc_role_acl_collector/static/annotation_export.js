@@ -74,7 +74,60 @@
     } while (start < text.length);
     return result;
   }
-  function createWorkbook(model, ExcelJS) {
+
+  // Compact is a presentation-only projection: source snapshots, rule IDs,
+  // duplicate occurrences and annotation records remain untouched.
+  function createCompactWorkbook(model, ExcelJS) {
+    if (!ExcelJS || typeof ExcelJS.Workbook !== 'function') throw new Error('로컬 ExcelJS 번들이 필요합니다.');
+    var book = new ExcelJS.Workbook();
+    book.creator = 'Aruba Wireless Policy Mapper';
+    book.subject = 'Compact ACL annotation report';
+    book.title = 'ACL 규칙 간단 보고서';
+    var sheet = book.addWorksheet('ACL 간단 보고', {
+      views:[{state:'frozen',ySplit:1}],
+      pageSetup:{paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}
+    });
+    var headers = ['컨트롤러','Role','ACL','순서','출발지','목적지','서비스','동작','행별 주석'];
+    // Hidden continuation columns retain 32,767-char-safe, lossless long notes.
+    sheet.columns = [24,26,26,12,30,30,24,14,65].map(function(width){return {width:width};})
+      .concat([{width:12,hidden:true},{width:14,hidden:true}]);
+    sheet.addRow(headers.concat(['_레코드 번호','_조각 / 전체']));
+    (model.rules || []).forEach(function(rule,index){
+      var values=[rule.controllerName,rule.roleName,rule.acl,rule.sequence || rule.ordinal,
+        rule.source,rule.destination,rule.service,rule.action,record(rule.annotation).text].map(str);
+      var parts=values.map(chunks), count=Math.max.apply(null,parts.map(function(p){return p.length;}));
+      for(var i=0;i<count;i++){
+        var visible=parts.map(function(p,j){
+          return p[i] || (i>0 && j!==8 && p.length===1 ? p[0] : '');
+        });
+        var row=sheet.addRow(visible.concat([str(index+1),str(i+1)+'/'+str(count)]));
+        row.eachCell({includeEmpty:true},function(cell){
+          // Never turn operator-entered notes into Excel formulas or hyperlinks.
+          cell.numFmt='@';
+          cell.alignment={vertical:'top',wrapText:true};
+          cell.font={name:'맑은 고딕',size:10,color:{argb:'FF172B4D'}};
+          cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:index%2?'FFF0F5FA':'FFFFFFFF'}};
+          cell.border={bottom:{style:'hair',color:{argb:'FFD7E0EA'}}};
+        });
+        row.height=Math.min(175,Math.max(28,15*Math.max.apply(null,visible.map(function(v){
+          return Math.ceil(str(v).length/50)+str(v).split('\n').length;
+        }))));
+      }
+    });
+    var header=sheet.getRow(1);
+    header.height=32;
+    header.font={name:'맑은 고딕',size:11,bold:true,color:{argb:'FFFFFFFF'}};
+    header.alignment={vertical:'middle',wrapText:true};
+    header.eachCell(function(cell){cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF173D64'}};});
+    sheet.getColumn(10).hidden=true;
+    sheet.getColumn(11).hidden=true;
+    sheet.autoFilter={from:{row:1,column:1},to:{row:Math.max(1,sheet.rowCount),column:headers.length}};
+    sheet.pageSetup.printTitlesRow='1:1';
+    sheet.headerFooter.oddFooter='&LACL 간단 보고&R&P / &N';
+    return book;
+  }
+  function createWorkbook(model, ExcelJS, options) {
+    if (options && options.profile === 'simple') return createCompactWorkbook(model, ExcelJS);
     if (!ExcelJS || typeof ExcelJS.Workbook !== 'function') throw new Error('로컬 ExcelJS 번들이 필요합니다.');
     var book = new ExcelJS.Workbook();
     book.creator = 'Aruba Wireless Policy Mapper';
@@ -108,8 +161,8 @@
     });
     return book;
   }
-  async function workbookBytes(model, ExcelJS) {
-    var bytes = await createWorkbook(model, ExcelJS).xlsx.writeBuffer();
+  async function workbookBytes(model, ExcelJS, options) {
+    var bytes = await createWorkbook(model, ExcelJS, options).xlsx.writeBuffer();
     return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   }
   function escape(value) { return str(value).replace(/[&<>"']/g, function (char) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]; }); }

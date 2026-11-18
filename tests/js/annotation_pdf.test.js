@@ -126,3 +126,38 @@ test('common ACL naming variants stay only in PDF shared-policy appendix',()=>{
   assert.ok(tech.includes('Role 전용 주석'),'independent custom ACL stays in Role appendix');
   assert.ok(shared.includes('공통 규칙 주석'),'shared policy appendix keeps full source note');
 });
+
+
+test('compact PDF uses grouped landscape ACL rows with no detailed appendix while preserving occurrences',()=>{
+  const p=fixture(),r=p.snapshot.rules[0];
+  p.snapshot.rules.push({...r,id:'another-rule',ordinal:2,sequence:'2',destination:'10.30.0.0/16'});
+  p.annotations.rules['another-rule']={...p.annotations.rules['rule-a'],text:'다른 ACL 행 주석'};
+  const m=model(p),doc=Pdf.documentDefinition(m,{profile:'simple'});
+  const output=allText(doc.content);
+  assert.equal(doc.pageSize,'A4');
+  assert.equal(doc.pageOrientation,'landscape');
+  assert.ok(output.includes('ACL 규칙 간단 보고서'));
+  for(const field of ['컨트롤러:','Role:','ACL:','출발지','목적지','서비스','동작','행별 주석','다른 ACL 행 주석']) {
+    assert.ok(output.includes(field),field);
+  }
+  for(const absent of ['Role별 정책 현황','Alias 상세','기술 부록','스냅샷','프로젝트 ID']) {
+    assert.ok(!output.includes(absent),absent);
+  }
+  const tables=doc.content.filter(x=>x.table);
+  assert.ok(tables.length);
+  assert.equal(tables[0].table.body.length,3,'all same-ACL occurrences retained');
+  assert.equal(tables[0].table.headerRows,1);
+  assert.ok(!output.includes(r.raw));
+  assert.equal(m.rules.length,2,'export data remains intact');
+});
+
+test('compact PDF warns on partial controller coverage without changing detailed PDF',()=>{
+  const p=fixture();
+  p.snapshot.controllers[0].coverage='partial';
+  const m=model(p);
+  const concise=allText(Pdf.documentDefinition(m,{profile:'simple'}).content);
+  const detailed=Pdf.documentDefinition(m,{profile:'detailed'});
+  assert.match(concise,/수집 미완료/);
+  assert.equal(detailed.pageOrientation,'portrait');
+  assert.match(allText(detailed.content),/Alias 상세/);
+});

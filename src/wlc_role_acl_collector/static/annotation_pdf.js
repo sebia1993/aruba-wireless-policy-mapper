@@ -63,7 +63,66 @@
     ];
   }
 
-  function documentDefinition(model) {
+
+  // Compact mode deliberately limits report content without modifying the
+  // immutable export model. Repeat groups only when consecutive occurrences
+  // share the exact WLC/Role/ACL identity: ACL evaluation order is not sorted.
+  function compactDocumentDefinition(model) {
+    validateModel(model);
+    const rules=model.rules||[], controllers=model.controllers||[];
+    const incomplete=controllers.some(c=>!c.identityKnown||c.coverage!=='completed'||(c.failedCommands||[]).length>0);
+    const content=[
+      {text:'ACL 규칙 간단 보고서',style:'reportTitle',margin:[0,0,0,7]},
+      para('보고 범위: '+nonempty(model.scopeLabel,'전체 정책')+'   |   수집: '+nonempty(model.collectedAt,'미확인')+
+        '   |   출력: '+nonempty(model.exportedAt,'미확인'))
+    ];
+    if(incomplete)content.push(para('주의: 수집 미완료 또는 확인되지 않은 컨트롤러가 포함되어 누락된 규칙이 있을 수 있습니다.',
+      {color:COLORS.alert,bold:true}));
+    content.push(para('출발지·목적지의 Alias 표기는 원본 그대로 유지됩니다. 공통 ACL도 보고 범위에 포함됩니다.'));
+    const groups=[];
+    for(const rule of rules){
+      const key=JSON.stringify([rule.controllerId,rule.roleId,rule.acl]);
+      let last=groups[groups.length-1];
+      if(!last || last.key!==key){last={key,rules:[]};groups.push(last);}
+      last.rules.push(rule);
+    }
+    if(!groups.length)content.push(para('선택한 보고 범위에 ACL 규칙이 없습니다.'));
+    for(const group of groups){
+      const first=group.rules[0];
+      content.push({text:'컨트롤러: '+nonempty(first.controllerName,'미확인')+
+        '   |   Role: '+nonempty(first.roleName,'미확인')+
+        '   |   ACL: '+nonempty(first.acl,'미확인'),
+        style:'groupHeading',margin:[0,11,0,4]});
+      content.push(rowsTable(['순서','출발지','목적지','서비스','동작','행별 주석'],
+        group.rules.map(rule=>[
+          bodyCell(nonempty(rule.sequence,nonempty(rule.ordinal,'?'))),
+          bodyCell(nonempty(rule.source,'미확인')),
+          bodyCell(nonempty(rule.destination,'미확인')),
+          bodyCell(nonempty(rule.service,'미확인')),
+          bodyCell(nonempty(rule.action,'미확인')),
+          bodyCell(note(rule))
+        ]),[42,124,124,112,55,'*']));
+    }
+    return {
+      pageSize:'A4',pageOrientation:'landscape',pageMargins:[26,42,26,39],
+      info:{title:'ACL 규칙 간단 보고서',subject:str(model.scopeLabel),creator:'Aruba Wireless Policy Mapper'},
+      defaultStyle:{font:'NanumGothic',fontSize:8.5,color:COLORS.navy,lineHeight:1.2},
+      styles:{
+        reportTitle:{fontSize:18,bold:true,color:COLORS.navy},
+        groupHeading:{fontSize:10.5,bold:true,color:COLORS.navy},
+        smallText:{fontSize:8,color:COLORS.muted},
+        tableHead:{fontSize:8,bold:true,color:COLORS.navy},
+        tableBody:{fontSize:8,lineHeight:1.22}
+      },
+      header:()=>({text:'ARUBA ACL POLICY  |  '+nonempty(model.scopeLabel,'전체 정책'),
+        font:'NanumGothic',fontSize:7,color:COLORS.muted,alignment:'right',margin:[26,17,26,0]}),
+      footer:(page,total)=>({text:page+' / '+total,font:'NanumGothic',fontSize:7,
+        color:COLORS.muted,alignment:'center',margin:[26,0,26,18]}),
+      content
+    };
+  }
+  function documentDefinition(model, options) {
+    if (options && options.profile === 'simple') return compactDocumentDefinition(model);
     validateModel(model);
     const controllers=model.controllers||[], roles=model.roles||[], rules=model.rules||[];
     const byController=new Map(controllers.map(c=>[c.id,c]));
@@ -203,7 +262,7 @@
     };
   }
 
-  async function createPdfBytes(model,pdfMake) {
+  async function createPdfBytes(model,pdfMake,options) {
     if(!pdfMake || typeof pdfMake.createPdf!=='function')throw new Error('오프라인 PDF 생성 라이브러리가 없습니다. 프로그램 설치 파일을 확인해 주세요.');
     if(!pdfMake.vfs || typeof pdfMake.vfs['NanumGothic-Regular.ttf']!=='string') {
       throw new Error('PDF 한글 글꼴 데이터가 없습니다. 배포 파일을 다시 확인해 주세요.');
@@ -214,7 +273,7 @@
     }};
     if(typeof pdfMake.addFonts==='function')pdfMake.addFonts(family);
     else pdfMake.fonts=Object.assign({},pdfMake.fonts||{},family);
-    const doc=documentDefinition(model);
+    const doc=documentDefinition(model,options);
     return new Promise((resolve,reject)=>{
       try {
         pdfMake.createPdf(doc).getBuffer(buffer=>{

@@ -692,7 +692,8 @@ test('role annotations from previous work keep MacBook through reuse and indepen
 
 test('PDF button requests an offline file without print dialogs, preserving report scope and project state',async()=>{
   const m=fixture();const before=structuredClone(m);let calls=0;
-  const pdfExporter={createPdfBytes:async (report,provider)=>{
+  const pdfExporter={createPdfBytes:async (report,provider,options)=>{
+    assert.equal(options.profile,'simple');
     calls++;
     assert.ok(provider);
     assert.equal(report.projectId,m.projectId);
@@ -707,7 +708,7 @@ test('PDF button requests an offline file without print dialogs, preserving repo
     assert.equal(await env.app.downloadPdf(),true);
     assert.equal(calls,1);
     assert.equal(env.downloads(),1);
-    assert.match(env.downloadName(),/_management_report\.pdf$/);
+    assert.match(env.downloadName(),/_acl_summary\.pdf$/);
     assert.equal(env.downloadedBlob().type,'application/pdf');
     assert.deepEqual(env.app.getProject(),before);
     assert.match(env.window.document.getElementById('ann-status').textContent,/다운로드를 요청/);
@@ -823,4 +824,26 @@ test('unchecking common ACL in B workspace also hides re-guard in advanced sourc
     assert.equal(button.getAttribute('aria-pressed'),'false');
     assert.equal(app.exportModel().rules.length,p.snapshot.rules.length);
   } finally {window.close();}
+});
+
+
+test('export layout defaults to compact and offers explicit detailed PDF without modifying policy notes',async()=>{
+  const m=fixture(),before=structuredClone(m),profiles=[];
+  const pdfExporter={createPdfBytes:async (_model,_make,options)=>{
+    profiles.push(options.profile);
+    return Uint8Array.from([37,80,68,70,45,49,46,55,10,1,2]);
+  }};
+  const env=mount(m,undefined,{pdfExporter,pdfMake:{createPdf(){}}}),doc=env.window.document;
+  try{
+    const select=doc.getElementById('ann-export-profile');
+    assert.equal(select.value,'simple');
+    assert.equal(select.querySelectorAll('option').length,2);
+    assert.equal(await env.app.downloadPdf(),true);
+    assert.match(env.downloadName(),/_acl_summary\.pdf$/);
+    select.value='detailed';
+    assert.equal(await env.app.downloadPdf(),true);
+    assert.match(env.downloadName(),/_management_report\.pdf$/);
+    assert.deepEqual(profiles,['simple','detailed']);
+    assert.deepEqual(env.app.getProject(),before);
+  }finally{env.close();}
 });
