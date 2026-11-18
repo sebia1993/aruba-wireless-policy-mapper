@@ -71,6 +71,72 @@ test('PDF model scope remains the authoritative source, no stale DOM or extra co
   assert.ok(output.includes('192.0.2.2'));
 });
 
+function aclTables(report,profile){
+  return Pdf.documentDefinition(report,{profile}).content
+    .map(item=>item.table)
+    .filter(table=>table && ['순서','ACL / 순서','Role / 적용 정보'].includes(table.body[0][0].text));
+}
+
+test('both PDF profiles omit empty ACL columns based on the selected scope and keep all rows',()=>{
+  const p=fixture(),base=p.snapshot.rules[0],annotation=p.annotations.rules['rule-a'];
+  p.snapshot.roles.push({...p.snapshot.roles[0],id:'selected',name:'GUEST'});
+  p.annotations.roles.selected={...annotation,text:'Role 설명만 작성'};
+  for(const [id,acl] of [['own','GUEST'],['common-1','global-sacl'],['common-2','global-sacl']]){
+    p.snapshot.rules.push({...base,id,roleId:'selected',acl});
+  }
+  p.annotations.rules.own={...annotation,status:'unreviewed',text:' \t\n '};
+  const report=model(p,{type:'selected',roleIds:['selected']});
+  for(const [profile,columns] of [['simple',5],['detailed',2]]){
+    const tables=aclTables(report,profile);
+    assert.deepEqual(tables.map(table=>table.body.length-1),[1,2]);
+    for(const table of tables){
+      assert.equal(table.widths.length,columns);
+      for(const row of table.body)assert.equal(row.length,columns);
+    }
+  }
+  const detailed=allText(Pdf.documentDefinition(report).content);
+  assert.match(detailed,/Role 설명만 작성/);
+  assert.doesNotMatch(detailed,/ACL 확인|주석 미작성|규칙 ID: rule-a/);
+});
+
+test('detailed PDF preserves explicit ACL statuses without adding a note column or empty placeholders',()=>{
+  const p=fixture(),base=p.snapshot.rules[0],annotation=p.annotations.rules['rule-a'];
+  Object.assign(annotation,{text:' ',status:'reviewed'});
+  for(const [id,status] of [['common-1','needs_review'],['common-2','reused']]){
+    p.snapshot.rules.push({...base,id,acl:'global-sacl'});
+    p.annotations.rules[id]={...annotation,status};
+  }
+  const report=model(p);
+  const tables=aclTables(report,'detailed');
+  assert.deepEqual(tables.map(table=>table.body[0].map(cell=>cell.text)),[
+    ['ACL / 순서','수집 규칙 원문'],['Role / 적용 정보','원문 정책']
+  ]);
+  assert.match(allText(tables[0].body[1]),/확인 상태: 확인 완료/);
+  assert.match(allText(tables[1].body[1]),/확인 상태: 재확인 필요/);
+  assert.match(allText(tables[1].body[2]),/확인 상태: 이전 주석 재사용/);
+  const followups=Pdf.documentDefinition(report).content.find(item=>item.table?.body[0][0].text==='유형').table;
+  assert.deepEqual(followups.body.slice(1).map(row=>allText(row[2]).trim()),['재확인 필요','이전 주석 재사용']);
+  for(const table of aclTables(report,'simple'))assert.equal(table.widths.length,5);
+});
+
+test('one common ACL note enables the note column across the report and preserves the exact text',()=>{
+  const p=fixture(),base=p.snapshot.rules[0],annotation=p.annotations.rules['rule-a'];
+  const original='  공통 ACL\n두 번째 줄  ';
+  Object.assign(annotation,{text:' \t ',status:'unreviewed'});
+  p.snapshot.rules.push({...base,id:'common',acl:'ra-guard'});
+  p.annotations.rules.common={...annotation,status:'reviewed',text:original};
+  const report=model(p);
+  for(const [profile,heading] of [['simple','행별 주석'],['detailed','주석 및 확인']]){
+    const [own,shared]=aclTables(report,profile);
+    for(const table of [own,shared]){
+      assert.equal(table.body[0].at(-1).text,heading);
+      assert.equal(table.widths.length,table.body[0].length);
+    }
+    assert.equal(own.body[1].at(-1).text,'');
+    assert.equal(shared.body[1].at(-1).text,profile==='simple'?original:'확인 완료\n'+original);
+  }
+});
+
 test('invalid source data and excessive text are rejected without partial PDF success',()=>{
   assert.throws(()=>Pdf.documentDefinition({roles:[],controllers:[]}),/모델/);
   const large=model();large.rules[0].annotation.text='x'.repeat(8*1024*1024);

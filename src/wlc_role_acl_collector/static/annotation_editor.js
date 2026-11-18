@@ -146,7 +146,7 @@
     const rulesOf = id => project.snapshot.rules.filter(r=>r.roleId===id);
     const emptyRecord = () => ({text:'',status:'unreviewed',updatedAt:project.updatedAt,confirmedAt:'',reasons:[],source:null});
     const record = (kind,id) => project.annotations[kind][id] || emptyRecord();
-    const pending = a => a.status==='needs_review' || a.status==='reused' || (a.status==='unreviewed' && a.text!=='');
+    const pending = a => a.status==='needs_review' || a.status==='reused' || (a.status==='unreviewed' && a.text.trim()!=='');
     const sourceAvailable = () => sourceMatches && $('source-report')?.dataset.sourceSnapshotId === project.snapshot.id;
 
     function status(message, state) {
@@ -250,7 +250,7 @@
 
     function summaryCounts() {
       const notes=Object.values(project.annotations.rules);
-      return {notes:notes.filter(n=>n.text!=='').length,review:notes.filter(pending).length+Object.values(project.annotations.roles).filter(pending).length,unresolved:project.unresolvedAnnotations.length};
+      return {notes:notes.filter(n=>n.text.trim()!=='').length,review:notes.filter(pending).length+Object.values(project.annotations.roles).filter(pending).length,unresolved:project.unresolvedAnnotations.length};
     }
 
     function updateCounts() {

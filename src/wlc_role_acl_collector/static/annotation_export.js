@@ -7,6 +7,7 @@
   'use strict';
   var LIMIT = 32767;
   function str(value) { return value === null || value === undefined ? '' : String(value); }
+  function hasNoteText(value) { return str(value).trim().length > 0; }
   function list(values) { return (values || []).map(str).join('\n'); }
   function record(value) { return value || {}; }
   // Preserve legacy PC unchanged and expand the two new codes for human reports.
@@ -48,7 +49,7 @@
     // Review rows retain the exact occurrence IDs alongside changes and unmatched notes.
     roles.concat(rules).forEach(function (x) {
       var a = record(x.annotation);
-      if (a.status === 'needs_review' || a.status === 'reused' || (a.status === 'unreviewed' && (str(a.text)||str(a.manualSsid)||str(a.deviceType)))) {
+      if (a.status === 'needs_review' || a.status === 'reused' || (a.status === 'unreviewed' && (hasNoteText(a.text)||str(a.manualSsid)||str(a.deviceType)))) {
         var isRule = Object.prototype.hasOwnProperty.call(x, 'roleId');
         changes.push(['확인 필요', x.id, isRule ? 'rule' : 'role', x.controllerId, x.controllerName, isRule ? x.roleId : x.id, isRule ? x.roleName : x.name, isRule ? x.id : '', x.acl, x.raw, list(a.reasons), '', '', '', ''].concat(annotationColumns(a)));
       }
@@ -101,18 +102,27 @@
       views:[{state:'frozen',ySplit:1}],
       pageSetup:{paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}
     });
-    var headers = ['컨트롤러','Role','ACL','순서','출발지','목적지','서비스','동작','행별 주석'];
-    // Hidden continuation columns retain 32,767-char-safe, lossless long notes.
-    sheet.columns = [24,26,26,12,30,30,24,14,65].map(function(width){return {width:width};})
+    var rules = model.rules || [];
+    var includeNotes = rules.some(function(rule){return hasNoteText(record(rule.annotation).text);});
+    var headers = ['컨트롤러','Role','ACL','순서','출발지','목적지','서비스','동작'];
+    var widths = [24,26,26,12,30,30,24,14];
+    var noteIndex = headers.length;
+    if (includeNotes) {
+      headers.push('행별 주석');
+      widths.push(65);
+    }
+    // Keep the continuation fields immediately after the visible report columns.
+    sheet.columns = widths.map(function(width){return {width:width};})
       .concat([{width:12,hidden:true},{width:14,hidden:true}]);
     sheet.addRow(headers.concat(['_레코드 번호','_조각 / 전체']));
-    (model.rules || []).forEach(function(rule,index){
+    rules.forEach(function(rule,index){
       var values=[compactControllerLabel(rule,byId,counts),rule.roleName,rule.acl,rule.sequence || rule.ordinal,
-        rule.source,rule.destination,rule.service,rule.action,record(rule.annotation).text].map(str);
+        rule.source,rule.destination,rule.service,rule.action];
+      if (includeNotes) values.push(record(rule.annotation).text);
       var parts=values.map(chunks), count=Math.max.apply(null,parts.map(function(p){return p.length;}));
       for(var i=0;i<count;i++){
         var visible=parts.map(function(p,j){
-          return p[i] || (i>0 && j!==8 && p.length===1 ? p[0] : '');
+          return p[i] || (i>0 && j!==noteIndex && p.length===1 ? p[0] : '');
         });
         var row=sheet.addRow(visible.concat([str(index+1),str(i+1)+'/'+str(count)]));
         row.eachCell({includeEmpty:true},function(cell){
@@ -133,8 +143,6 @@
     header.font={name:'맑은 고딕',size:11,bold:true,color:{argb:'FFFFFFFF'}};
     header.alignment={vertical:'middle',wrapText:true};
     header.eachCell(function(cell){cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF173D64'}};});
-    sheet.getColumn(10).hidden=true;
-    sheet.getColumn(11).hidden=true;
     sheet.autoFilter={from:{row:1,column:1},to:{row:Math.max(1,sheet.rowCount),column:headers.length}};
     sheet.pageSetup.printTitlesRow='1:1';
     sheet.headerFooter.oddFooter='&LACL 간단 보고&R&P / &N';
@@ -148,6 +156,12 @@
     book.subject = 'Offline annotation report';
     book.title = '무선 정책 주석 보고서';
     datasets(model).forEach(function (data) {
+      // These freshly built rows are private to this workbook. The print layout uses the full dataset.
+      var noteIndex = data.headers.indexOf('주석');
+      if (noteIndex >= 0 && !data.rows.some(function(row){return hasNoteText(row[noteIndex]);})) {
+        data.headers.splice(noteIndex, 1);
+        data.rows.forEach(function(row){row.splice(noteIndex, 1);});
+      }
       var sheet = book.addWorksheet(data.name, {views:[{state:'frozen',ySplit:1}],pageSetup:{paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}});
       sheet.columns = [{width:12},{width:12}].concat(data.headers.map(function (h) { return {width:/주석$|내용|원문|규칙$|사유/.test(h) ? 54 : /시각|ID/.test(h) ? 28 : 24}; }));
       sheet.addRow(['레코드 번호','조각 / 전체'].concat(data.headers));
