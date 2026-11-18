@@ -101,6 +101,49 @@ def test_rejected_first_key_never_pins_or_authenticates(monkeypatch, prepared_ap
     assert "pending_web_ssh_host_key" not in app.session_state
 
 
+@pytest.mark.parametrize(
+    ("problem", "severity", "message", "detail"),
+    [
+        (web_logic.RoleNetworkDefinitionError("Invalid workbook header"), "error", "입력값을 확인하세요.", "Invalid workbook header"),
+        (web_logic.WebCollectionBusyError("WLC already busy"), "warning", "WLC already busy", None),
+    ],
+)
+def test_approved_collection_error_survives_rerun_and_clears_on_retry(
+    monkeypatch, prepared_app, problem, severity, message, detail
+):
+    app, calls = prepared_app
+    collect_successfully = web_logic.run_web_collection
+
+    def fail_collection(*args, **kwargs):
+        calls.append("collect")
+        raise problem
+
+    monkeypatch.setattr(web_logic, "run_web_collection", fail_collection)
+    monkeypatch.setattr(web_ssh_hostkey, "inspect_ssh_host_key", lambda *args, **kwargs: _review())
+    monkeypatch.setattr(
+        web_ssh_hostkey, "approve_reviewed_ssh_host_key", lambda *args, **kwargs: calls.append("approve")
+    )
+    app.button[0].click().run()
+    app.checkbox(key="web_ssh_verified").set_value(True).run()
+    app.button(key="web_ssh_approve").click().run()
+
+    for _ in range(2):
+        assert not app.exception
+        assert "pending_web_ssh_host_key" not in app.session_state
+        assert any(message in item.value for item in app.get(severity))
+        if detail:
+            assert any(detail in item.value for item in app.code)
+        assert calls == ["approve", "collect"]
+        app.run()
+
+    monkeypatch.setattr(web_ssh_hostkey, "inspect_ssh_host_key", lambda *args, **kwargs: _review("trusted"))
+    monkeypatch.setattr(web_logic, "run_web_collection", collect_successfully)
+    app.button[0].click().run()
+    assert app.session_state["last_result"].success
+    assert not any(message in item.value for item in app.get(severity))
+    assert calls == ["approve", "collect", "collect"]
+
+
 def test_changed_key_is_blocked_without_approval(monkeypatch, prepared_app):
     app, calls = prepared_app
     monkeypatch.setattr(web_ssh_hostkey, "inspect_ssh_host_key", lambda *_args, **_kwargs: _review("changed"))

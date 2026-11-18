@@ -37,6 +37,16 @@ def main() -> None:
     if isinstance(review, web_ssh_hostkey.WebSSHHostKeyReview):
         _show_ssh_host_key_review(request, review)
 
+    issue = st.session_state.get("last_collection_issue")
+    if issue:
+        level, message, detail = issue
+        if level == "warning":
+            st.warning(message)
+        else:
+            st.error(message)
+        if detail:
+            st.code(detail, language="text")
+
     failed_result = st.session_state.get("last_failed_result")
     if isinstance(failed_result, WebCollectionResult):
         _render_result(failed_result)
@@ -135,6 +145,7 @@ def _render_input_form() -> tuple[bool, WebCollectionRequest]:
 
 def _submit_collection(request: WebCollectionRequest) -> None:
     """SSH must pass a credential-free server-key review before collection."""
+    st.session_state.pop("last_collection_issue", None)
     st.session_state.pop("pending_web_ssh_host_key", None)
     st.session_state.pop("web_ssh_verified", None)
     if request.protocol.strip().lower() != "ssh":
@@ -280,7 +291,6 @@ def _run_collection(request: WebCollectionRequest) -> None:
     try:
         with st.spinner("WLC 정보를 수집하고 보고서를 생성하는 중입니다."):
             result = run_web_collection(request, progress_callback=on_progress)
-        progress_bar.progress(100)
         if result.success or not preserve_previous:
             st.session_state["last_result"] = result
         else:
@@ -294,22 +304,15 @@ def _run_collection(request: WebCollectionRequest) -> None:
         else:
             status_box.error("수집에 실패했습니다. 오류 내용을 확인하세요.")
     except WebCollectionBusyError as exc:
-        progress_bar.progress(100)
-        status_box.warning(str(exc))
-        logs.append(str(exc))
-        log_box.code("\n".join(logs[-80:]), language="text")
+        st.session_state["last_collection_issue"] = ("warning", str(exc), "")
     except ValueError as exc:
-        progress_bar.progress(100)
-        status_box.error("입력값을 확인하세요.")
-        logs.append(str(exc))
-        log_box.code("\n".join(logs[-80:]), language="text")
+        st.session_state["last_collection_issue"] = ("error", "입력값을 확인하세요.", str(exc))
     except Exception as exc:
-        progress_bar.progress(100)
         failure = classify_error_message(str(exc))
-        status_box.error(failure.title)
-        logs.append(f"오류 코드: {failure.code}")
-        logs.append(failure.suggestion)
-        log_box.code("\n".join(logs[-80:]), language="text")
+        st.session_state["last_collection_issue"] = (
+            "error", failure.title, f"오류 코드: {failure.code}\n{failure.suggestion}"
+        )
+    progress_bar.progress(100)
 
 
 def _render_result(result: WebCollectionResult, *, previous: bool = False) -> None:

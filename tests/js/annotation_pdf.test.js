@@ -107,6 +107,34 @@ test('vendored pdfmake and Nanum font generate a real Korean PDF offline',async(
   assert.equal(String.fromCharCode(...bytes.slice(0,5)),'%PDF-');
 });
 
+for (const [profile, annotationHeader] of [['simple', '행별 주석'], ['detailed', '주석 및 확인']]) {
+  test(`vendored ${profile} PDF paginates a tall first ACL row with repeated headers`, async () => {
+    const pdfMake = require('../../src/wlc_role_acl_collector/static/pdfmake.min.js');
+    const vfs = require('../../src/wlc_role_acl_collector/static/pdfmake_nanum.vfs.js');
+    const font = 'NanumGothic-Regular.ttf';
+    const fonts = {NanumGothic: {normal: font, bold: font, italics: font, bolditalics: font}};
+    const project = fixture();
+    const first = project.snapshot.rules[0];
+    const lines = Array.from({length: 100}, (_, i) => 'NOTE' + String(i + 1).padStart(3, '0'));
+    const annotation = project.annotations.rules[first.id];
+    Object.assign(annotation, {status: 'reviewed', text: lines.join('\n')});
+    project.snapshot.rules.push({...first, id: 'second-rule', ordinal: 2, sequence: '2'});
+    project.annotations.rules['second-rule'] = {...annotation, text: 'NEXTROW'};
+
+    const definition = Pdf.documentDefinition(model(project), {profile});
+    const pdf = pdfMake.createPdf(definition, undefined, fonts, vfs);
+    // pdfmake returns its final rendered lines after it has flushed the PDF stream.
+    const pages = await new Promise(resolve => pdf._getPages({}, resolve));
+    const pageLines = pages.map(page => page.items
+      .filter(item => item.type === 'line')
+      .map(item => item.item.inlines.map(inline => inline.text).join('')));
+    const notePages = pageLines.filter(page => page.some(line => /^NOTE\d{3}$/.test(line)));
+    const rendered = pageLines.flat().filter(line => /^NOTE\d{3}$/.test(line) || line === 'NEXTROW');
+    assert.deepEqual(rendered, [...lines, 'NEXTROW']);
+    assert.ok(notePages.length >= 2, 'the first ACL row spans multiple pages');
+    for (const page of notePages) assert.ok(page.includes(annotationHeader), 'the column header repeats');
+  });
+}
 
 test('common ACL naming variants stay only in PDF shared-policy appendix',()=>{
   const p=fixture(),base=p.snapshot.rules[0];

@@ -30,7 +30,8 @@
   const bodyCell = (value,opts) => ({text:str(value),style:'tableBody',...(opts||{})});
   const headerCell = value => ({text:str(value),style:'tableHead',fillColor:COLORS.fill});
   const rowsTable = (headers,rows,widths) => ({
-    table:{headerRows:1,keepWithHeaderRows:1,widths:widths||headers.map(()=>'*'),
+    // Repeat the header alone so a first-row annotation can span several pages.
+    table:{headerRows:1,widths:widths||headers.map(()=>'*'),
       body:[headers.map(headerCell),...(rows.length?rows:[[headers.length===1?'해당 항목 없음':'대상 항목 없음',...headers.slice(1).map(()=>'')]].map(row=>row.map(value=>typeof value==='object'&&value!==null&&Object.hasOwn(value,'text')?value:bodyCell(value))))]},
     layout:{hLineColor:()=>COLORS.rule,vLineColor:()=>COLORS.rule,paddingTop:()=>5,paddingBottom:()=>5,paddingLeft:()=>6,paddingRight:()=>6},
     margin:[0,0,0,10]
