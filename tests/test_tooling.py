@@ -16,42 +16,44 @@ def _write_fixture_zip(path: Path, entries: list[str]) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-@pytest.mark.parametrize("exit_code,stderr", [(0, ""), (1, "missing Python runtime"), (2, "unrelated argument error")])
-def test_web_package_smoke_rejects_host_key_launcher_without_address_validation(tmp_path, monkeypatch, exit_code, stderr):
+@pytest.mark.parametrize(
+    "returncode,stdout,stderr",
+    [
+        (1, "", "missing Python runtime"),
+        (0, "unexpected output\n", ""),
+        (0, "STREAMLIT_PORTABLE_OK\n", "unexpected stderr"),
+    ],
+)
+def test_web_package_smoke_rejects_nonclean_startup(tmp_path, monkeypatch, returncode, stdout, stderr):
     script = Path(__file__).parents[1] / "tools" / "verify_streamlit_portable_package.py"
     namespace = runpy.run_path(str(script))
     zip_path = tmp_path / "web.zip"
-    _write_fixture_zip(zip_path, ["start_webapp.cmd", "trust_host_key.cmd"])
-
-    def run(command, **kwargs):
-        if command[2] == "start_webapp.cmd":
-            return subprocess.CompletedProcess(command, 0, "STREAMLIT_PORTABLE_OK\n", "")
-        return subprocess.CompletedProcess(command, exit_code, "", stderr)
+    _write_fixture_zip(zip_path, ["start_webapp.cmd"])
 
     monkeypatch.setattr(namespace["platform"], "system", lambda: "Windows")
-    monkeypatch.setattr(namespace["subprocess"], "run", run)
-    with pytest.raises(SystemExit, match="Host-key"):
+    monkeypatch.setattr(
+        namespace["subprocess"], "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, returncode, stdout, stderr),
+    )
+    with pytest.raises(SystemExit):
         namespace["_smoke_webapp"](zip_path, require=True)
 
 
-def test_web_package_smoke_exercises_host_key_validation_without_network(tmp_path, monkeypatch):
+def test_web_package_smoke_calls_only_web_launcher(tmp_path, monkeypatch):
     script = Path(__file__).parents[1] / "tools" / "verify_streamlit_portable_package.py"
     namespace = runpy.run_path(str(script))
     zip_path = tmp_path / "web.zip"
-    _write_fixture_zip(zip_path, ["start_webapp.cmd", "trust_host_key.cmd"])
+    _write_fixture_zip(zip_path, ["start_webapp.cmd"])
     commands = []
 
     def run(command, **kwargs):
         commands.append(command)
-        if command[2] == "start_webapp.cmd":
-            return subprocess.CompletedProcess(command, 0, "STREAMLIT_PORTABLE_OK\n", "")
-        assert command == ["cmd.exe", "/c", "trust_host_key.cmd", "invalid://host", "22"]
-        return subprocess.CompletedProcess(command, 2, "", "SSH 서버 키 승인 실패: WLC IP 또는 Host만 입력하세요. URL이나 경로는 사용할 수 없습니다.\n")
+        return subprocess.CompletedProcess(command, 0, "STREAMLIT_PORTABLE_OK\n", "")
 
     monkeypatch.setattr(namespace["platform"], "system", lambda: "Windows")
     monkeypatch.setattr(namespace["subprocess"], "run", run)
     namespace["_smoke_webapp"](zip_path, require=True)
-    assert len(commands) == 2
+    assert commands == [["cmd.exe", "/c", "start_webapp.cmd", "--smoke"]]
 
 
 def test_validate_script_runs_local_checks():
@@ -81,9 +83,7 @@ def test_release_zip_includes_guides():
 
     for expected in (
         "WlcRoleAclCollectorGUI",
-        "WlcRoleAclCollectorCLI",
         "--collect-data customtkinter",
-        ".\\cli_launcher.py",
         "tools\\generate_doc_html.py",
         "docs\\USER_GUIDE_KO.md",
         "docs\\USER_GUIDE_KO.html",
@@ -102,6 +102,8 @@ def test_release_zip_includes_guides():
     ):
         assert expected in text
 
+    assert "--console" not in text
+    assert ".\\cli_launcher.py" not in text
     assert "collect_data_files('customtkinter')" in spec_text
     assert "collect_data_files('wlc_role_acl_collector')" in spec_text
 
@@ -138,7 +140,6 @@ def test_streamlit_portable_build_contract():
 
     for expected in (
         "start_webapp.cmd",
-        "trust_host_key.cmd",
         "webapp_settings.cmd",
         "python/python.exe",
         "python/Lib/site-packages/streamlit/",
@@ -171,10 +172,11 @@ def test_streamlit_portable_build_contract():
     assert "Python을 별도로 설치하지 않고" in guide
     assert "첫 실행" in guide
     assert "start_webapp.cmd" in guide
+    assert "trust_host_key.cmd" not in build_script
+    assert "trust_host_key.cmd" not in verifier
 
     for batch_file in (
         repo_root / "packaging" / "streamlit_portable" / "start_webapp.cmd",
-        repo_root / "packaging" / "streamlit_portable" / "trust_host_key.cmd",
         repo_root / "packaging" / "streamlit_portable" / "webapp_settings.cmd",
     ):
         data = batch_file.read_bytes()
@@ -200,9 +202,7 @@ def test_combined_release_build_contract():
 
     for expected in (
         "gui/WlcRoleAclCollectorGUI.exe",
-        "gui/WlcRoleAclCollectorCLI.exe",
         "web/start_webapp.cmd",
-        "web/trust_host_key.cmd",
         "web/python/python.exe",
         "web/python/Lib/site-packages/streamlit/",
         "web/python/Lib/site-packages/wlc_role_acl_collector/",
@@ -212,6 +212,8 @@ def test_combined_release_build_contract():
         assert expected in verifier
 
     assert "Source code" in readme
+    assert "WlcRoleAclCollectorCLI.exe" not in verifier
+    assert "trust_host_key.cmd" not in verifier
     assert "gui\\WlcRoleAclCollectorGUI.exe" in readme
     assert "web\\start_webapp.cmd" in readme
 
@@ -222,7 +224,6 @@ def test_verify_release_package_checks_zip_contents_and_checksum(tmp_path):
     zip_path = tmp_path / "WlcRoleAclCollectorGUI_v0.1.0.zip"
     entries = [
         "WlcRoleAclCollectorGUI.exe",
-        "WlcRoleAclCollectorCLI.exe",
         "USER_GUIDE_KO.md",
         "USER_GUIDE_KO.html",
         "DEVELOPER_GUIDE_KO.md",
@@ -269,7 +270,6 @@ def test_verify_streamlit_portable_package_checks_zip_contents_and_checksum(tmp_
     zip_path = tmp_path / "WlcRoleAclCollectorWeb_v0.1.0.zip"
     entries = [
         "start_webapp.cmd",
-        "trust_host_key.cmd",
         "webapp_settings.cmd",
         "README_WEBAPP_KO.txt",
         "python/python.exe",
@@ -296,7 +296,6 @@ def test_verify_combined_release_package_checks_zip_contents_and_checksum(tmp_pa
     entries = [
         "README_START_HERE_KO.txt",
         "gui/WlcRoleAclCollectorGUI.exe",
-        "gui/WlcRoleAclCollectorCLI.exe",
         "gui/USER_GUIDE_KO.md",
         "gui/USER_GUIDE_KO.html",
         "gui/DEVELOPER_GUIDE_KO.md",
@@ -315,7 +314,6 @@ def test_verify_combined_release_package_checks_zip_contents_and_checksum(tmp_pa
         "gui/config/mock_scenarios/permission_denied.json",
         "gui/config/mock_scenarios/success_minimal.json",
         "web/start_webapp.cmd",
-        "web/trust_host_key.cmd",
         "web/webapp_settings.cmd",
         "web/README_WEBAPP_KO.txt",
         "web/python/python.exe",
@@ -349,9 +347,7 @@ def test_release_documentation_describes_current_package_contract():
     for text in (readme, release_notes):
         assert f"wlc-role-acl-collector_v{version}_windows.zip" in text
         assert "WlcRoleAclCollectorGUI.exe" in text
-        assert "WlcRoleAclCollectorCLI.exe" in text
         assert "start_webapp.cmd" in text
-        assert "trust_host_key.cmd" in text
         assert "README_START_HERE_KO.txt" in text
         assert "Source code (zip)" in text
 
@@ -364,7 +360,7 @@ def test_release_documentation_describes_current_package_contract():
     assert "DEVELOPMENT.md" in readme
     assert "VALIDATION_REPORT.md" in readme
     assert "config/mock_scenarios" in development
-    assert "python .\\tools\\verify_release_package.py --dist .\\dist --smoke-cli" in development
+    assert "python .\\tools\\verify_release_package.py --dist .\\dist" in development
     assert "python .\\tools\\verify_streamlit_portable_package.py --dist .\\dist --smoke" in development
     assert "python .\\tools\\verify_combined_release_package.py --dist .\\dist --smoke" in development
     assert "GitHub Actions" in development and "Windows" in development
@@ -379,6 +375,8 @@ def test_release_documentation_describes_current_package_contract():
     assert "--hash=sha256:" in web_lock
     assert "st.file_uploader" in app
     assert "st.download_button" in app
+    assert "WlcRoleAclCollectorCLI.exe" not in readme
+    assert "trust_host_key.cmd" not in readme
 
 
 def test_generate_doc_html_outputs_browser_files(tmp_path):
@@ -442,12 +440,13 @@ def test_github_actions_validate_main_and_publish_versioned_release():
     assert "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97" in pr_workflow
     assert validation_command in pr_workflow
     assert build_command in pr_workflow
-    assert "python .\\tools\\verify_release_package.py --dist .\\dist --smoke-cli" in pr_workflow
+    assert "python .\\tools\\verify_release_package.py --dist .\\dist" in pr_workflow
     assert web_build_command in pr_workflow
     assert web_verify_command in pr_workflow
     assert combined_build_command in pr_workflow
     assert combined_verify_command in pr_workflow
     assert "gh release" not in pr_workflow
+    assert "--smoke-cli" not in pr_workflow
 
     assert "workflow_dispatch:" in release_workflow
     assert "push:" not in release_workflow
@@ -464,7 +463,7 @@ def test_github_actions_validate_main_and_publish_versioned_release():
     assert build_command in release_workflow
     assert web_build_command in release_workflow
     assert combined_build_command in release_workflow
-    assert "python .\\tools\\verify_release_package.py --dist .\\dist --smoke-cli" in release_workflow
+    assert "python .\\tools\\verify_release_package.py --dist .\\dist" in release_workflow
     assert web_verify_command in release_workflow
     assert combined_verify_command in release_workflow
     assert "WlcRoleAclCollectorWindows_v${{ steps.metadata.outputs.version }}.zip" in release_workflow
@@ -477,6 +476,7 @@ def test_github_actions_validate_main_and_publish_versioned_release():
     assert "--verify-tag" in release_workflow
     assert 'git push origin ":refs/tags/' in release_workflow
 
+    assert "--smoke-cli" not in release_workflow
     assert "## 이번 릴리즈" in release_workflow
     assert "## 운영 영향" in release_workflow
     assert "## 검증 결과" in release_workflow
@@ -495,8 +495,24 @@ def test_runtime_dependencies_include_customtkinter():
 
     assert '"customtkinter>=5.2"' in pyproject
     assert '"streamlit>=1.36"' in pyproject
+    assert "wlc_role_acl_collector.cli" not in pyproject
     assert "[tool.setuptools.package-data]" in pyproject
     assert '"static/*.js"' in pyproject
     assert '"static/*.txt"' in pyproject
     assert renderer.stat().st_size > 190_000
     assert "Permission is hereby granted, free of charge" in license_file.read_text(encoding="utf-8")
+
+@pytest.mark.parametrize(
+    "verifier,forbidden",
+    [
+        ("verify_release_package.py", "WlcRoleAclCollectorCLI.exe"),
+        ("verify_streamlit_portable_package.py", "trust_host_key.cmd"),
+        ("verify_combined_release_package.py", "gui/WlcRoleAclCollectorCLI.exe"),
+        ("verify_combined_release_package.py", "web/trust_host_key.cmd"),
+    ],
+)
+def test_removed_console_artifacts_are_forbidden_in_packages(verifier, forbidden):
+    path = Path(__file__).parents[1] / "tools" / verifier
+    namespace = runpy.run_path(str(path))
+    with pytest.raises(SystemExit, match="Removed CLI"):
+        namespace["_verify_required_files"](set(namespace["REQUIRED_FILES"]) | {forbidden})
