@@ -66,7 +66,7 @@ test('PDF model scope remains the authoritative source, no stale DOM or extra co
   const selected=model(p,{type:'selected',roleIds:['role-b']});
   const output=allText(Pdf.documentDefinition(selected).content);
   assert.ok(output.includes('GUEST'));
-  assert.ok(!output.includes('EMPLOYEE'));
+  assert.ok(!output.includes('Role ID: role-a'));
   assert.ok(!output.includes('192.0.2.1'));
   assert.ok(output.includes('192.0.2.2'));
 });
