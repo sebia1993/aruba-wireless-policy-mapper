@@ -79,6 +79,20 @@ test('all, selected and review scopes use records and include default empty note
   const review=Core.buildExportModel(p,{type:'review'},time);assert.equal(review.rules.length,1);assert.equal(review.rules[0].id,'rule');assert.equal(review.exportedAt,time);
   assert.throws(()=>Core.buildExportModel(p,{type:'selected',roleIds:['missing']},time));
 });
+test('whitespace-only ACL notes are not counted as written or pending in reports', () => {
+  const p = project();
+  p.annotations.rules.rule = {...note(' \n\t '), status:'unreviewed', confirmedAt:''};
+  const all = Core.buildExportModel(p, {type:'all'}, time);
+  assert.equal(all.summary.annotatedRuleCount, 0);
+  assert.equal(all.summary.needsReviewCount, 0);
+  assert.equal(all.rules[0].annotation.text, ' \n\t ');
+  assert.equal(Core.buildExportModel(p, {type:'review'}, time).rules.length, 0);
+  p.annotations.rules.rule.status = 'needs_review';
+  const review = Core.buildExportModel(p, {type:'review'}, time);
+  assert.equal(review.summary.annotatedRuleCount, 0);
+  assert.equal(review.summary.needsReviewCount, 1);
+  assert.equal(review.rules.length, 1);
+});
 test('selected scope includes unresolved notes only for an unambiguous scoped role', () => {
   const p=project();p.unresolvedAnnotations=[{id:'orphan',kind:'rule',controllerId:'c',controllerName:'Controller',roleName:'Elsewhere',acl:'acl',raw:'raw',annotation:note(),reason:'missing',candidateIds:[],sourceProjectId:'old',sourceSnapshotId:'old-snapshot'}];
   assert.equal(Core.buildExportModel(p,{type:'all'},time).unresolvedAnnotations.length,1);assert.equal(Core.buildExportModel(p,{type:'selected',roleIds:['role']},time).unresolvedAnnotations.length,0);

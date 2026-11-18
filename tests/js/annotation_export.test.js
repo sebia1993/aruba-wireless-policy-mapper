@@ -170,3 +170,92 @@ test('compact Excel disambiguates controllers with the same display name by actu
   assert.ok(labels[1].includes('192.0.2.99'),labels[1]);
   assert.notEqual(labels[0],labels[1]);
 });
+
+test('compact XLSX omits blank notes and keeps continuation markers beside the eight visible columns', async () => {
+  const m=model();
+  m.rules[0].source=longNote;
+  m.rules[0].annotation.text=' \t\n\u00a0';
+  m.rules.push({...m.rules[0],id:'rule-b',source:'any',annotation:null});
+  const bytes=await exporter.workbookBytes(m,ExcelJS,{profile:'simple'});
+  const book=new ExcelJS.Workbook();
+  await book.xlsx.load(bytes);
+  const sheet=book.getWorksheet('ACL 간단 보고');
+  assert.deepEqual(sheet.getRow(1).values.slice(1),[
+    '컨트롤러','Role','ACL','순서','출발지','목적지','서비스','동작','_레코드 번호','_조각 / 전체'
+  ]);
+  assert.equal(sheet.autoFilter,'A1:H4');
+  assert.equal(sheet.getColumn(8).width,14);
+  assert.equal(sheet.getColumn(8).hidden,false);
+  assert.equal(sheet.getColumn(9).hidden,true);
+  assert.equal(sheet.getColumn(10).hidden,true);
+  assert.deepEqual(sheet.getColumn(9).values.slice(2),['1','1','2']);
+  assert.deepEqual(sheet.getColumn(10).values.slice(2),['1/2','2/2','1/1']);
+  assert.equal(sheet.getCell('E2').value+sheet.getCell('E3').value,longNote);
+  assert.equal(sheet.getCell('H3').value,'permit');
+});
+
+test('Excel note columns follow the selected and review scopes and keep original text in mixed scopes', () => {
+  const p=fixture(), note=p.annotations.rules['rule-a'];
+  const realNote='  =운영 메모\n둘째 줄  ', blankNote=' \t ';
+  note.text=realNote;
+  p.snapshot.roles.push({...p.snapshot.roles[0],id:'role-b',name:'GUEST'});
+  p.snapshot.rules.push({...p.snapshot.rules[0],id:'rule-b',roleId:'role-b'});
+  p.annotations.rules['rule-b']={...note,text:blankNote,status:'needs_review',reasons:['순서 변경']};
+  for(const [profile,sheetName,header] of [['simple','ACL 간단 보고','행별 주석'],['detailed','ACL 상세','주석']]){
+    const sheetFor=scope=>exporter.createWorkbook(Core.buildExportModel(p,scope),ExcelJS,{profile}).getWorksheet(sheetName);
+    for(const scope of [{type:'selected',roleIds:[]},{type:'selected',roleIds:['role-b']},{type:'review'}]){
+      assert.equal(sheetFor(scope).getRow(1).values.includes(header),false);
+    }
+    const all=sheetFor({type:'all'});
+    const column=all.getRow(1).values.indexOf(header);
+    assert.deepEqual(all.getColumn(column).values.slice(2),[realNote,blankNote]);
+  }
+});
+
+test('detailed XLSX decides each note column independently and retains review metadata under its header', async () => {
+  const m=model();
+  m.rules[0].annotation.text=' \t ';
+  async function detailBook(){
+    const bytes=await exporter.workbookBytes(m,ExcelJS,{profile:'detailed'});
+    const book=new ExcelJS.Workbook();
+    await book.xlsx.load(bytes);
+    return book;
+  }
+  function cellFor(sheet,rowNumber,header){
+    const index=sheet.getRow(1).values.indexOf(header);
+    assert.ok(index>0,header);
+    return sheet.getRow(rowNumber).getCell(index).value;
+  }
+  let book=await detailBook();
+  const acl=book.getWorksheet('ACL 상세');
+  assert.equal(acl.getRow(1).values.includes('주석'),false);
+  assert.equal(cellFor(acl,2,'확인 상태'),'needs_review');
+  assert.equal(cellFor(acl,2,'검토 사유'),'규칙 순서 변경');
+  assert.equal(cellFor(acl,2,'원본 주석 ID'),'old-rule');
+  assert.equal(cellFor(acl,2,'원본 확인 시각'),'2026-11-15T00:00:00Z');
+  assert.equal(cellFor(book.getWorksheet('Role 설명'),2,'주석'),'=1+1');
+  assert.equal(cellFor(book.getWorksheet('변경·확인 사항'),3,'주석'),'unmatched note');
+
+  m.roles[0].annotation.text='';
+  m.unresolvedAnnotations[0].annotation.text='\n';
+  book=await detailBook();
+  const roles=book.getWorksheet('Role 설명'), changes=book.getWorksheet('변경·확인 사항');
+  assert.equal(roles.getRow(1).values.includes('주석'),false);
+  assert.equal(cellFor(roles,2,'확인 상태'),'needs_review');
+  assert.equal(changes.getRow(1).values.includes('주석'),false);
+  assert.equal(cellFor(changes,2,'사유 / 변경 내용'),'순서 변경');
+  assert.equal(cellFor(changes,3,'원본 주석 ID'),'old-rule');
+});
+
+test('unreviewed whitespace alone adds no review row while manual role fields still require review', () => {
+  const report={
+    roles:[
+      {id:'manual-ssid',annotation:{status:'unreviewed',manualSsid:'기업망'}},
+      {id:'manual-device',annotation:{status:'unreviewed',deviceType:'PC'}}
+    ],
+    rules:[{id:'spaces-only',roleId:'manual-ssid',annotation:{status:'unreviewed',text:' \t\n'}}]
+  };
+  const changes=exporter.createWorkbook(report,ExcelJS).getWorksheet('변경·확인 사항');
+  const idColumn=changes.getRow(1).values.indexOf('레코드 ID');
+  assert.deepEqual(changes.getColumn(idColumn).values.slice(2),['manual-ssid','manual-device']);
+});
