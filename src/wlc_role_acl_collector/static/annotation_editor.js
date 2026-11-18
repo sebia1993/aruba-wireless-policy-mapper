@@ -192,7 +192,10 @@
     function syncSource() {
       if (sourceAvailable() && typeof win.syncSourceAnnotations === 'function') win.syncSourceAnnotations(project);
       syncSourceRole();
-      if($('source-report')) $('source-report').hidden=!(sourceAvailable() && view==='collection');
+      // The previous complete report is an opt-in advanced view, not a third tab.
+      // Never expose a previous snapshot in the current work file.
+      if ($('source-report')) $('source-report').hidden=!(sourceAvailable() && view==='policy' && $('ann-source-details')?.open);
+      if ($('ann-collection-message')) $('ann-collection-message').hidden=sourceAvailable();
     }
 
     function mountSourceSections() {
@@ -257,20 +260,22 @@
       }
       root.className='annotation-workspace';
       root.innerHTML=`
-        <div class="ann-top"><div><div class="ann-kicker">WIRELESS POLICY REVIEW</div><h1>무선 정책 통합 관리</h1><p>한 Role에서 원본 정책·주석·접근 판정·수집 상태를 확인합니다.</p></div></div>
+        <div class="ann-top"><div><div class="ann-kicker">WIRELESS POLICY REVIEW</div><h1>무선 정책 통합 관리</h1><p>Role별 ACL 원본과 주석을 한 표에서 확인하고, 필요한 수집 근거만 펼쳐보세요.</p></div></div>
         <div class="ann-toolbar"><div class="ann-file-actions"><button type="button" id="ann-open">작업 열기</button><button type="button" id="ann-save" class="ann-primary">작업 저장</button><button type="button" id="ann-reuse">이전 주석 가져오기</button><button type="button" id="ann-save-html">주석 포함 HTML 저장</button></div><div class="ann-export-actions"><label for="ann-export-scope">보고 범위</label><select id="ann-export-scope"><option value="all">전체 정책</option><option value="selected">선택한 Role</option><option value="review">변경·확인 필요 항목</option></select><button type="button" id="ann-pdf">PDF 저장</button><button type="button" id="ann-xlsx">Excel 저장</button></div></div>
         <input type="file" id="ann-file" accept=".json,.html,.htm,application/json,text/html" hidden>
         <div class="ann-status" id="ann-status" role="status" aria-live="polite"></div>
         <div id="ann-recovery" class="ann-recovery" ${pendingDraft?'':'hidden'}><div><strong>이 파일에서 이어서 작성한 임시작업이 있습니다.</strong><p>현재는 파일의 내용을 표시하고 있습니다. 복구하면 임시작업의 전체 주석 상태를 적용합니다.</p></div><button type="button" id="ann-restore">임시작업 복구</button><button type="button" id="ann-discard-draft">임시작업 버리기</button></div>
         <div id="ann-import-map" class="ann-import-map" hidden></div>
         <div id="ann-content"><div class="ann-overview"><div id="ann-counts" class="ann-counts"></div><div id="ann-metadata" class="ann-meta"></div><div id="ann-identifiers" class="ann-identifiers"></div></div>${noticeHtml()}
-        <div class="ann-layout"><aside class="ann-sidebar" aria-label="정책 Role 선택"><label for="ann-search">Role / 장비 / SSID 검색</label><input type="search" id="ann-search" placeholder="이름으로 찾기"><button type="button" id="ann-review-button" class="ann-wide">변경·확인 필요 항목 보기</button><div class="ann-selection"><button type="button" id="ann-select-visible">목록 전체 선택</button><button type="button" id="ann-clear-selection">선택 해제</button></div><p class="ann-help">체크한 Role은 ‘선택한 Role’ 보고 범위에 포함됩니다.</p><div id="ann-role-list"></div></aside><section class="ann-role-workspace"><div class="ann-role-tabs" role="tablist" aria-label="Role 내부 기능"><button type="button" id="ann-tab-btn-policy" data-unified-tab="policy" role="tab" aria-selected="true" aria-controls="ann-tab-policy">정책·주석</button><button type="button" id="ann-tab-btn-access" data-unified-tab="access" role="tab" aria-selected="false" aria-controls="ann-tab-access">ACL 접근 판정</button><button type="button" id="ann-tab-btn-collection" data-unified-tab="collection" role="tab" aria-selected="false" aria-controls="ann-tab-collection">수집 상세</button></div><div id="ann-tab-policy" class="ann-unified-panel" role="tabpanel"><section id="ann-role-detail" class="ann-role-detail" aria-label="정책 주석 편집"></section></div><div id="ann-tab-access" class="ann-unified-panel" role="tabpanel" hidden><p id="ann-access-message" class="ann-warning">원본 수집본을 확인하고 있습니다.</p><div id="ann-access-slot"></div></div><div id="ann-tab-collection" class="ann-unified-panel" role="tabpanel" hidden><p id="ann-collection-message" class="ann-warning" hidden>현재 작업과 원본 수집본이 다릅니다. 이전 원본을 현재 데이터로 표시하지 않습니다.</p><div id="ann-source-slot"></div></div></section></div>
+        <div class="ann-layout"><aside class="ann-sidebar" aria-label="정책 Role 선택"><label for="ann-search">Role / 장비 / SSID 검색</label><input type="search" id="ann-search" placeholder="이름으로 찾기"><button type="button" id="ann-review-button" class="ann-wide">변경·확인 필요 항목 보기</button><div class="ann-selection"><button type="button" id="ann-select-visible">목록 전체 선택</button><button type="button" id="ann-clear-selection">선택 해제</button></div><p class="ann-help">체크한 Role은 ‘선택한 Role’ 보고 범위에 포함됩니다.</p><div id="ann-role-list"></div></aside><section class="ann-role-workspace"><div class="ann-role-tabs" role="tablist" aria-label="Role 내부 기능"><button type="button" id="ann-tab-btn-policy" data-unified-tab="policy" role="tab" aria-selected="true" aria-controls="ann-tab-policy">통합 정책·주석</button><button type="button" id="ann-tab-btn-access" data-unified-tab="access" role="tab" aria-selected="false" aria-controls="ann-tab-access">ACL 접근 판정</button></div><div id="ann-tab-policy" class="ann-unified-panel" role="tabpanel"><section id="ann-role-detail" class="ann-role-detail" aria-label="ACL 수집 원본 및 주석 통합 편집"></section><details id="ann-source-details" class="ann-source-details"><summary>전체 수집 원본 · 진단 · 선택 Role PNG (고급)</summary><p class="ann-help">위 통합 ACL 표가 기본 작업 화면입니다. 이전 원본 보고서는 수집 근거 확인이 필요할 때만 펼쳐보세요.</p><p id="ann-collection-message" class="ann-warning" hidden>현재 작업과 원본 수집본이 다르거나 독립 HTML을 열었습니다. 오래된 원본은 표시하지 않습니다. 위 Role 수집 근거는 현재 작업 파일에 저장된 내용입니다.</p><div id="ann-source-slot"></div></details></div><div id="ann-tab-access" class="ann-unified-panel" role="tabpanel" hidden><p id="ann-access-message" class="ann-warning">원본 수집본을 확인하고 있습니다.</p><div id="ann-access-slot"></div></div></section></div>
         <section class="ann-audit"><div class="ann-section-title"><h2>변경·확인 사항</h2><span>수집본 비교 결과와 연결되지 않은 설명</span></div><div id="ann-changes"></div><div id="ann-unresolved"></div></section></div>`;
       // Replacing innerHTML keeps root listeners; remove/re-add ensures one handler.
       root.removeEventListener('click',onClick);root.addEventListener('click',onClick);
       root.removeEventListener('input',onInput);root.addEventListener('input',onInput);
       root.removeEventListener('change',onChange);root.addEventListener('change',onChange);
       root.removeEventListener('focusin',onFocus);root.addEventListener('focusin',onFocus);
+      // <details> toggle does not bubble; capture it for dynamically created rows.
+      root.removeEventListener('toggle',onToggle,true);root.addEventListener('toggle',onToggle,true);
       $('ann-search').value=search;
       mountSourceSections();metadata();updateCounts();renderRoleList();renderRole();renderChanges();syncSource();
       setView(view);
@@ -304,6 +309,48 @@
       return `<div class="ann-note"><label class="ann-sr-only" for="ann-note-${escapeHtml(id)}">${escapeHtml(label)}</label><textarea id="ann-note-${escapeHtml(id)}" data-note-kind="${kind}" data-note-id="${escapeHtml(id)}" maxlength="1000000" placeholder="정책 목적, 허용·차단 근거, 예외 또는 확인할 내용을 적으세요.">${escapeHtml(a.text)}</textarea><div class="ann-note-controls"><label>확인 상태 <select data-status-kind="${kind}" data-status-id="${escapeHtml(id)}" aria-label="${escapeHtml(label)} 확인 상태">${Object.entries(STATUS).map(([v,t])=>`<option value="${v}" ${a.status===v?'selected':''}>${t}</option>`).join('')}</select></label><button type="button" data-template-kind="${kind}" data-template-id="${escapeHtml(id)}">설명 틀 넣기</button></div><div class="ann-note-reasons">${a.reasons.map(escapeHtml).join('<br>')}${a.source?'<br>이전 작업: '+escapeHtml(a.source.projectId)+' · 이전 확인: '+escapeHtml(a.source.confirmedAt||'기록 없음'):''}</div></div>`;
     }
 
+
+    // Show raw data and controller-scoped Alias definitions only when the operator asks.
+    // Do not infer Alias members or use a stale source-report DOM when viewing saved work.
+    function renderRuleEvidence(detail) {
+      const body=detail.querySelector('[data-rule-evidence-body]');
+      if(!body) return;
+      const current=project.snapshot.rules.find(rule=>rule.id===detail.dataset.ruleEvidence && rule.roleId===activeRole);
+      if(!current){body.textContent='현재 Role에서 규칙 원본을 확인할 수 없습니다.';return;}
+      const targetRole=role(current.roleId), targetController=controller(current.controllerId);
+      const aliases=project.snapshot.aliases.filter(alias=>alias.controllerId===current.controllerId);
+      const aliasByName=new Map(aliases.map(alias=>[alias.name,alias]));
+      const references=[];
+      for(const [field,value] of [['출발지',current.source],['목적지',current.destination]]){
+        const match=/^alias\s+(?:"([^"]+)"|'([^']+)'|([^\s]+))$/i.exec(String(value||'').trim());
+        if(!match)continue;
+        const name=match[1]||match[2]||match[3];
+        if(!references.some(item=>item.name===name))references.push({field,name});
+      }
+      const aliasHtml=references.map(ref=>{
+        const alias=aliasByName.get(ref.name);
+        const entries=alias?.entries||[];
+        if(!alias)return '<div class="ann-evidence-alias ann-evidence-missing"><strong>'+escapeHtml(ref.field+' Alias '+ref.name)+'</strong><p>수집된 Alias 정의가 없습니다. 현재 규칙의 대상을 확정할 수 없습니다.</p></div>';
+        const listing=entries.length?'<ul>'+entries.map(entry=>'<li>'+escapeHtml([entry.type,entry.value].filter(Boolean).join(' '))+'</li>').join('')+'</ul>':'<p>수집된 Alias 구성원이 없습니다.</p>';
+        return '<div class="ann-evidence-alias"><strong>'+escapeHtml(ref.field+' Alias '+ref.name)+'</strong>'+listing+'</div>';
+      }).join('')||'<p class="ann-help">이 규칙의 출발지·목적지에 직접 참조된 Alias가 없습니다.</p>';
+      body.innerHTML=
+        '<div class="ann-evidence-facts"><span><strong>컨트롤러</strong>'+escapeHtml(targetController?.name||'미확인')+'</span>'+
+        '<span><strong>ACL</strong>'+escapeHtml(current.acl)+'</span><span><strong>시퀀스</strong>'+escapeHtml(current.sequence)+'</span>'+
+        '<span><strong>Role 내 순서</strong>'+escapeHtml(current.ordinal)+'</span></div>'+
+        '<strong class="ann-evidence-caption">수집 원문</strong><pre><code>'+escapeHtml(current.raw||'(수집 원문 없음)')+'</code></pre>'+
+        '<strong class="ann-evidence-caption">참조 Alias</strong>'+aliasHtml+
+        '<p class="ann-help">Role ACL 연결 순서: '+escapeHtml(targetRole?.aclOrder?.join(' → ')||'정보 없음')+
+        '. 수집 범위: '+escapeHtml(COVERAGE[targetController?.coverage]||'미확인')+
+        (!targetRole?.contextComplete?' · 역할 문맥이 불완전하므로 서비스·Alias 정의 확인이 필요합니다.':'')+'</p>';
+    }
+
+    function onToggle(event) {
+      const element=event.target;
+      if(element.id==='ann-source-details'){syncSource();return;}
+      if(element.matches?.('details[data-rule-evidence]') && element.open) renderRuleEvidence(element);
+    }
+
     function renderRole() {
       const r=role(activeRole), target=$('ann-role-detail');
       if (!r) {target.innerHTML='<div class="ann-empty"><h2>수집된 Role이 없습니다</h2><p>작업 파일을 열거나 수집 상태를 확인해 주세요. 미연결 주석은 아래에 보관됩니다.</p></div>';return;}
@@ -316,11 +363,12 @@
           <label for="ann-manual-ssid">SSID 명 <input type="text" id="ann-manual-ssid" data-manual-ssid="${escapeHtml(r.id)}" value="${escapeHtml(record('roles',r.id).manualSsid||'')}" maxlength="512" autocomplete="off" placeholder="직접 입력"></label>
           <label for="ann-device-type">단말 구분 <select id="ann-device-type" data-device-type="${escapeHtml(r.id)}" aria-label="${escapeHtml(r.name)} 단말 구분">${DEVICE_TYPES.map(([value,label])=>'<option value="'+value+'" '+((record('roles',r.id).deviceType||'')===value?'selected':'')+'>'+escapeHtml(label)+'</option>').join('')}</select></label>
         </div></div><p>수집 SSID: ${escapeHtml(r.ssids.join(', ')||'연결 정보 없음')} · 관측 사용자 ${r.observedUsers}명 · 전용 ${rows.length-commonAclRows.length}개 · 공통 ${commonAclRows.length}개 (전체 ${rows.length}개)</p></div><span class="ann-coverage ${c?.coverage==='completed'?'':'incomplete'}">${COVERAGE[c?.coverage]||'미확인'}</span></div>
+        <section class="ann-collection-strip" aria-label="선택 Role 수집 근거"><div class="ann-collection-summary"><span><strong>수집 상태</strong>${escapeHtml(COVERAGE[c?.coverage]||'미확인')}</span><span><strong>Role 문맥</strong>${r.contextComplete?'확인':'추가 확인 필요'}</span><span><strong>ACL 연결</strong>${r.aclOrder.length}개</span><span><strong>Alias</strong>${aliases.length}개 (장비 기준)</span><span><strong>실패 명령</strong>${(c?.failedCommands||[]).length}개</span></div><p class="ann-help">수집 완료는 정책 적절성이나 실제 통신 성공을 보증하지 않습니다. ${!sourceAvailable()?'현재 작업 파일 기준이며 연결된 원본 보고서가 없어 접근 판정이 제한됩니다.':''}</p>${(c?.failedCommands||[]).length?'<p class="ann-collection-attention">실패 명령: '+escapeHtml(c.failedCommands.join(', '))+'</p>':''}</section>
         <div class="ann-role-note"><h3>보고용 Role 설명</h3><p class="ann-help">업무 목적 · 대상 사용자 · 주요 접근 범위 · 예외 및 확인 사항을 정리하세요.</p>${noteEditor('roles',r.id,r.name+' Role 설명')}</div>
         ${networks.length?'<div class="ann-local"><strong>포함된 내부망 대역</strong><p>'+networks.map(n=>escapeHtml(n.network+' / '+n.subnetMask+' · '+n.status)).join('<br>')+'</p></div>':''}
-        <div class="ann-section-title"><h3>ACL 행별 주석</h3><label class="ann-common-toggle"><input type="checkbox" id="ann-show-common-acl" ${showCommonAcl?'checked':''}>공통 ACL 함께 보기 ${commonAclRows.length?'('+commonAclRows.length+')':''}</label></div><p class="ann-help">공통 ACL(global-sacl, re-guard, logon-control)은 이름이 정확히 일치할 때 기본 숨김입니다. 수집 원본·주석·ACL 적용 순서·보고서에는 모두 보존됩니다.${!showCommonAcl&&commonAclRows.length?' '+commonAclRows.length+'개 공통 규칙이 화면에서 숨겨졌습니다.':''}</p>
-        <div class="ann-table-scroll" tabindex="0" role="region" aria-label="${escapeHtml(r.name)} ACL 주석 표"><table class="ann-rules"><thead><tr><th>ACL / 순서</th><th>정책 내용</th><th>주석 · 확인 상태</th></tr></thead><tbody>${visibleRows.map(rule=>`<tr><td><strong>${escapeHtml(rule.acl)}</strong><span class="ann-sequence">#${escapeHtml(rule.sequence)} · Role 내 ${rule.ordinal}번째</span><span class="ann-action ${rule.action==='deny'?'deny':''}">${escapeHtml(rule.action||'미확인')}</span></td><td><dl class="ann-rule-fields"><dt>출발지</dt><dd>${escapeHtml(rule.source)}</dd><dt>목적지</dt><dd>${escapeHtml(rule.destination)}</dd><dt>서비스</dt><dd>${escapeHtml(rule.service)}</dd></dl><div class="ann-raw"><strong>원문</strong><code>${escapeHtml(rule.raw)}</code></div></td><td>${noteEditor('rules',rule.id,rule.acl+' '+rule.sequence+' 주석')}</td></tr>`).join('')||'<tr><td colspan="3">'+(rows.length && commonAclRows.length?'전용 ACL이 표시되지 않습니다. 공통 ACL '+commonAclRows.length+'개가 숨겨져 있습니다. 공통 ACL 함께 보기로 확인하세요.':'이 Role에 수집된 ACL 규칙이 없습니다.')+'</td></tr>'}</tbody></table></div>
-        <details class="ann-context"><summary>Alias · ACL 연결 순서 · 수집 확인 사항</summary><h3>ACL 연결 순서</h3><p>${escapeHtml(r.aclOrder.join(' → ')||'연결 정보 없음')}</p><pre>${escapeHtml(r.bindingRaw.join('\n'))}</pre><h3>이 장비의 Alias</h3>${aliases.map(a=>'<div class="ann-alias"><strong>'+escapeHtml(a.name)+'</strong><ul>'+a.entries.map(e=>'<li>'+escapeHtml(e.type+' '+e.value)+'</li>').join('')+'</ul></div>').join('')||'<p>수집된 Alias가 없습니다.</p>'}<h3>확인 사항</h3><ul>${project.snapshot.issues.filter(i=>i.controllerId===r.controllerId&&(!i.roleId||i.roleId===r.id)).map(i=>'<li>'+escapeHtml(i.message)+'</li>').join('')||'<li>추가 수집 확인 사항이 없습니다.</li>'}</ul></details>`;
+        <div class="ann-section-title"><h3>ACL 원본 · 주석 통합</h3><label class="ann-common-toggle"><input type="checkbox" id="ann-show-common-acl" ${showCommonAcl?'checked':''}>공통 ACL 함께 보기 ${commonAclRows.length?'('+commonAclRows.length+')':''}</label></div><p class="ann-help">공통 ACL(global-sacl, re-guard, logon-control)은 이름이 정확히 일치할 때 기본 숨김입니다. 수집 원본·주석·ACL 적용 순서·보고서에는 모두 보존됩니다.${!showCommonAcl&&commonAclRows.length?' '+commonAclRows.length+'개 공통 규칙이 화면에서 숨겨졌습니다.':''}</p>
+        <div class="ann-table-scroll" tabindex="0" role="region" aria-label="${escapeHtml(r.name)} ACL 원본 및 주석 표"><table class="ann-rules"><thead><tr><th>ACL / 순서</th><th>수집 정책 (Source / Destination / Service)</th><th>주석 · 확인 상태</th></tr></thead><tbody>${visibleRows.map(rule=>`<tr><td><strong>${escapeHtml(rule.acl)}</strong><span class="ann-sequence">#${escapeHtml(rule.sequence)} · Role 내 ${rule.ordinal}번째</span><span class="ann-action ${rule.action==='deny'?'deny':''}">${escapeHtml(rule.action||'미확인')}</span></td><td><dl class="ann-rule-fields"><dt>출발지</dt><dd>${escapeHtml(rule.source)}</dd><dt>목적지</dt><dd>${escapeHtml(rule.destination)}</dd><dt>서비스</dt><dd>${escapeHtml(rule.service)}</dd></dl><details class="ann-rule-evidence" data-rule-evidence="${escapeHtml(rule.id)}"><summary>ACL 원문 · Alias · 수집 근거</summary><div class="ann-rule-evidence-content" data-rule-evidence-body></div></details></td><td>${noteEditor('rules',rule.id,rule.acl+' '+rule.sequence+' 주석')}</td></tr>`).join('')||'<tr><td colspan="3">'+(rows.length && commonAclRows.length?'전용 ACL이 표시되지 않습니다. 공통 ACL '+commonAclRows.length+'개가 숨겨져 있습니다. 공통 ACL 함께 보기로 확인하세요.':'이 Role에 수집된 ACL 규칙이 없습니다.')+'</td></tr>'}</tbody></table></div>
+        <details class="ann-context"><summary>전체 ACL 연결 순서 · Alias 목록 · 수집 확인 사항</summary><h3>ACL 연결 순서</h3><p>${escapeHtml(r.aclOrder.join(' → ')||'연결 정보 없음')}</p><pre>${escapeHtml(r.bindingRaw.join('\n'))}</pre><h3>이 장비의 Alias</h3>${aliases.map(a=>'<div class="ann-alias"><strong>'+escapeHtml(a.name)+'</strong><ul>'+a.entries.map(e=>'<li>'+escapeHtml(e.type+' '+e.value)+'</li>').join('')+'</ul></div>').join('')||'<p>수집된 Alias가 없습니다.</p>'}<h3>확인 사항</h3><ul>${project.snapshot.issues.filter(i=>i.controllerId===r.controllerId&&(!i.roleId||i.roleId===r.id)).map(i=>'<li>'+escapeHtml(i.message)+'</li>').join('')||'<li>추가 수집 확인 사항이 없습니다.</li>'}</ul></details>`;
       // HTML parsing consumes an initial LF in textarea markup. The project is
       // authoritative, so assign DOM values explicitly after every render.
       for (const input of target.querySelectorAll('[data-note-id]')) input.value=record(input.dataset.noteKind,input.dataset.noteId).text;
@@ -359,14 +407,14 @@
     }
 
     function setView(next) {
-      view=['policy','access','collection'].includes(next)?next:'policy';
-      for(const name of ['policy','access','collection']){
+      view=['policy','access'].includes(next)?next:'policy';
+      for(const name of ['policy','access']){
         const panel=$('ann-tab-'+name), button=$('ann-tab-btn-'+name);
         if(panel) panel.hidden=name!==view;
         if(button) button.setAttribute('aria-selected',String(name===view));
       }
-      if($('source-report')) $('source-report').hidden=!(sourceAvailable() && view==='collection');
-      if($('ann-collection-message')) $('ann-collection-message').hidden=sourceAvailable();
+      if ($('source-report')) $('source-report').hidden=!(sourceAvailable() && view==='policy' && $('ann-source-details')?.open);
+      if ($('ann-collection-message')) $('ann-collection-message').hidden=sourceAvailable();
       if(view!=='policy') syncSourceRole();
     }
 
