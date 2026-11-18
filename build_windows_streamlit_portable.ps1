@@ -98,7 +98,6 @@ Invoke-External `
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "app.py") -Destination (Join-Path $releaseRoot "app\app.py") -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "config\role_networks.example.xlsx") -Destination (Join-Path $releaseRoot "config\role_networks.example.xlsx") -Force
 Copy-Item -LiteralPath (Join-Path $templateDir "start_webapp.cmd") -Destination (Join-Path $releaseRoot "start_webapp.cmd") -Force
-Copy-Item -LiteralPath (Join-Path $templateDir "trust_host_key.cmd") -Destination (Join-Path $releaseRoot "trust_host_key.cmd") -Force
 Copy-Item -LiteralPath (Join-Path $templateDir "webapp_settings.cmd") -Destination (Join-Path $releaseRoot "webapp_settings.cmd") -Force
 Copy-Item -LiteralPath (Join-Path $templateDir "README_WEBAPP_KO.txt") -Destination (Join-Path $releaseRoot "README_WEBAPP_KO.txt") -Force
 

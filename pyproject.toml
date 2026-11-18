@@ -30,7 +30,6 @@ web = [
 ]
 
 [project.scripts]
-wlc-role-acl-collector = "wlc_role_acl_collector.cli:main"
 wlc-role-acl-gui = "wlc_role_acl_collector.gui_app:main"
 
 [tool.setuptools.packages.find]

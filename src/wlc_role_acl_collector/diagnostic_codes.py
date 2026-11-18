@@ -275,7 +275,7 @@ def classify_message_to_code(message: str, *, command_id: str = "") -> Diagnosti
 
     if ("승인된 ssh 서버 키" in normalized and any(token in normalized for token in ("달라", "변경"))) or "host key mismatch" in normalized:
         return DIAGNOSTIC_CODES["WLC-SEC-003"]
-    if "미승인 ssh 서버 키" in normalized or "trust-host-key" in normalized:
+    if "미승인 ssh 서버 키" in normalized:
         return DIAGNOSTIC_CODES["WLC-SEC-002"]
     if "ssh 서버 키" in normalized or "ssh host key probe" in normalized:
         return DIAGNOSTIC_CODES["WLC-SEC-004"]

@@ -1,7 +1,7 @@
 WLC Role ACL Collector 실행 안내
 ================================
 
-이 ZIP 하나에 Windows GUI/CLI 실행 파일과 Python 설치 없는 Streamlit 웹앱이 함께 들어 있습니다.
+이 ZIP 하나에 Windows GUI 실행 파일과 Python 설치 없는 Streamlit 웹앱이 함께 들어 있습니다.
 일반 사용자는 GitHub Release에서 이 windows.zip 파일 하나만 다운로드하면 됩니다.
 
 GitHub 화면에 보이는 Source code (zip), Source code (tar.gz)는 GitHub가 자동으로 붙이는 소스 코드 파일입니다.
@@ -14,21 +14,18 @@ GitHub 화면에 보이는 Source code (zip), Source code (tar.gz)는 GitHub가 
 2) gui 폴더로 이동합니다.
 3) gui\WlcRoleAclCollectorGUI.exe 를 더블클릭합니다.
 
-CLI가 필요한 경우 gui\WlcRoleAclCollectorCLI.exe 를 사용합니다.
-
-SSH를 처음 사용할 때는 장비 계정을 입력하기 전에 서버 키 지문을 별도 관리 경로와 대조합니다.
-
-gui\WlcRoleAclCollectorCLI.exe trust-host-key --host 192.0.2.10 --port 22
+GUI에서 처음 접속하는 WLC는 SHA-256 서버 지문 확인창이 나타납니다.
+별도 관리 경로로 확인한 지문과 일치하는 경우에만 승인하고 수집을 시작하세요.
 
 2. 웹앱으로 실행하기
 -------------------
 
 1) ZIP 파일을 원하는 폴더에 압축 해제합니다.
 2) web 폴더로 이동합니다.
-3) SSH 최초 서버 키 승인이 필요하면 `web\trust_host_key.cmd 192.0.2.10 22`를 실행합니다.
-4) web\start_webapp.cmd 를 더블클릭합니다.
-5) 실행 창은 닫지 않습니다. 이 창을 닫으면 웹앱도 종료됩니다.
-6) 브라우저에서 아래 주소로 접속합니다.
+3) web\start_webapp.cmd 를 더블클릭합니다.
+4) 실행 창은 닫지 않습니다. 이 창을 닫으면 웹앱도 종료됩니다.
+5) 브라우저에서 아래 주소로 접속합니다.
+6) 신규 SSH 장비는 화면에 표시된 SHA-256 지문을 별도로 대조한 뒤 승인합니다.
 
 - 실행한 PC에서 접속: http://127.0.0.1:8763
 - 기본 설정에서는 다른 PC 접속 불가
