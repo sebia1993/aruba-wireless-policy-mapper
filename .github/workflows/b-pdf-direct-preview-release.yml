@@ -1,0 +1,236 @@
+name: B Offline PDF Direct Download Preview
+
+on:
+  push:
+    branches: [preview/b-pdf-direct-20261118]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: b-layout-pdf-direct-20261118
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish B layout PDF prerelease
+    if: github.ref == 'refs/heads/preview/b-pdf-direct-20261118' && github.repository == 'sebia1993/aruba-wireless-policy-mapper'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements-lock.txt
+            requirements-web-lock.txt
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --require-hashes -r requirements-lock.txt
+          if ($LASTEXITCODE -ne 0) { throw "Locked dependency installation failed." }
+          python -m pip install --no-deps --no-build-isolation -e .
+          if ($LASTEXITCODE -ne 0) { throw "Project installation failed." }
+
+      - name: Install locked JavaScript dependencies
+        shell: pwsh
+        run: |
+          npm ci --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw "Locked JavaScript dependency installation failed." }
+
+      - name: Create release metadata
+        id: metadata
+        shell: pwsh
+        run: |
+          $version = (python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])").Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+            throw "Project version is not valid SemVer: $version"
+          }
+          $tag = "b-layout-pdf-preview-20261118.1"
+          git fetch --force --tags origin
+          $existingTag = @(git tag --list $tag)
+          if ($LASTEXITCODE -ne 0) { throw "Unable to list existing Git tags." }
+          if ($existingTag -contains $tag) { throw "Tag already exists and will not be replaced: $tag" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "asset_name=ArubaWirelessPolicyMapper_${tag}_Windows.zip" >> $env:GITHUB_OUTPUT
+          "checksum_name=ArubaWirelessPolicyMapper_${tag}_Windows.zip.sha256" >> $env:GITHUB_OUTPUT
+          "sbom_name=ArubaWirelessPolicyMapper_${tag}_SBOM.cdx.json" >> $env:GITHUB_OUTPUT
+
+      - name: Run validation
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\validate.ps1
+
+      - name: Test offline annotation projects
+        shell: pwsh
+        run: |
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw "Offline annotation tests failed." }
+
+      - name: Build Windows GUI package
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_gui_exe.ps1
+
+      - name: Verify GUI-only package
+        shell: pwsh
+        run: python .\tools\verify_release_package.py --dist .\dist
+
+      - name: Build Streamlit portable package
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_streamlit_portable.ps1
+
+      - name: Verify Streamlit portable package
+        shell: pwsh
+        run: python .\tools\verify_streamlit_portable_package.py --dist .\dist --smoke
+
+      - name: Build combined Windows package
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_combined_release.ps1
+
+      - name: Verify combined Windows package
+        shell: pwsh
+        run: python .\tools\verify_combined_release_package.py --dist .\dist --smoke
+
+      - name: Prepare release assets and SBOM
+        id: assets
+        shell: pwsh
+        run: |
+          $assetDir = Join-Path $PWD "release_assets"
+          New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
+          $sourceZip = Join-Path $PWD "dist\WlcRoleAclCollectorWindows_v${{ steps.metadata.outputs.version }}.zip"
+          if (-not (Test-Path -LiteralPath $sourceZip -PathType Leaf)) {
+            throw "Combined Windows release ZIP was not generated: $sourceZip"
+          }
+
+          $assetPath = Join-Path $assetDir "${{ steps.metadata.outputs.asset_name }}"
+          $checksumPath = Join-Path $assetDir "${{ steps.metadata.outputs.checksum_name }}"
+          $sbomPath = Join-Path $assetDir "${{ steps.metadata.outputs.sbom_name }}"
+          Copy-Item -LiteralPath $sourceZip -Destination $assetPath -Force
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $assetPath).Hash.ToLowerInvariant()
+          "$hash  ${{ steps.metadata.outputs.asset_name }}" | Set-Content -LiteralPath $checksumPath -Encoding ASCII
+
+          cyclonedx-py requirements requirements-web-lock.txt --pyproject pyproject.toml --output-reproducible --output-format JSON --output-file $sbomPath
+          if ($LASTEXITCODE -ne 0) { throw "CycloneDX SBOM generation failed." }
+
+          "asset_path=$assetPath" >> $env:GITHUB_OUTPUT
+          "checksum_path=$checksumPath" >> $env:GITHUB_OUTPUT
+          "sbom_path=$sbomPath" >> $env:GITHUB_OUTPUT
+          "checksum=$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Verify final release asset
+        shell: pwsh
+        run: |
+          python .\tools\verify_combined_release_package.py `
+            --zip "${{ steps.assets.outputs.asset_path }}" `
+            --expected-sha256 "${{ steps.assets.outputs.checksum }}" `
+            --smoke
+
+      - name: Attest release assets
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release_assets/*
+
+      - name: Create Korean release notes
+        id: notes
+        shell: pwsh
+        run: |
+          $notesPath = Join-Path $PWD "release_notes.md"
+          $notes = @"
+          # Aruba Wireless Policy Mapper — 오프라인 한글 PDF 직접 다운로드 시험판
+
+          **main 미병합, 현장 검증용 Pre-release입니다. 기존 정식 v0.4.1 및 B안 시험판은 그대로 유지합니다.**
+
+          ## 이번 변경
+          - 주석 보고서의 인쇄 창/브라우저 인쇄 이벤트를 제거했습니다. PDF 다운로드를 누르면 한글 텍스트 PDF 파일이 직접 내려받기 요청됩니다.
+          - pdfmake 0.2.20 및 NanumGothic 한글 폰트를 Git blob 해시로 검증해 오프라인 번들에 포함했습니다. 사내 인터넷 연결 없이 사용합니다.
+          - A4 상급자 보고서에는 ① 핵심 요약 ② 컨트롤러 수집 신뢰도 ③ Role/SSID/단말 구분 ④ 변경·확인 필요 사항 ⑤ Role 전용 ACL ⑥ 공통 ACL 부록 ⑦ Alias 상세를 포함합니다.
+          - global-sacl, re-guard, logon-control을 별도 부록으로 구분하지만 컨트롤러·Role·규칙 ID 및 원본/주석은 보존합니다.
+          - Excel 및 JSON 작업 파일, 이전 주석 재사용, Role별 수기 SSID/윈도우 PC/맥북 구분과 기존 Access Check는 그대로 유지합니다.
+          - 원본 전체, 선택 Role, 변경·확인 필요 항목의 보고 범위 옵션을 유지합니다.
+          - 독립 주석 HTML에도 PDF 라이브러리와 한글 글꼴을 포함합니다. 외부 CDN, 프린터, 팝업 허용은 필요하지 않습니다.
+
+          ## 확인해야 할 제한
+          - PDF 생성 버튼은 파일 다운로드를 요청하며 사용자의 브라우저 설정에 따라 실제 저장 완료 여부는 다릅니다.
+          - PDF 생성에 너무 많은 규칙이나 데이터가 입력되면 오류를 안내합니다. 해당 경우 선택 Role 또는 Excel을 사용하세요.
+          - 실제 WLC에서의 통신 성공을 PDF나 Access Check가 자동으로 보증하지 않습니다.
+          - 회사 WLC·Windows 11·브라우저 PDF 뷰어의 현장 검증은 사용자가 수행합니다.
+          - 실행 파일 내부 버전은 v0.4.1이며 이번 배포 식별자는 b-layout-pdf-preview-20261118.1입니다.
+
+          ## 현장 검증 방법
+          1. 통합 ZIP을 다른 폴더에 압축 해제하고 gui/WlcRoleAclCollectorGUI.exe 또는 web/start_webapp.cmd를 실행하세요.
+          2. 수집 HTML에서 Role을 선택해 정책 주석을 작성하고, 보고 범위를 선택하세요.
+          3. PDF 다운로드 버튼을 누르세요. 인쇄창이 열리지 않아야 하며 .pdf 파일을 확인하세요.
+          4. PDF에서 한글 복사/검색, 여러 페이지 번호, Role/공통 ACL, 주석 및 Alias 분리를 검증하세요.
+          5. 주석 포함 HTML을 따로 저장·재열기 후 인터넷 없이 동일 PDF 저장을 시험해 주세요.
+          6. 검증 후 PR #36 병합 여부를 결정하세요. 이번 Pre-release는 main에 병합하지 않습니다.
+
+          ## 릴리스 무결성
+          - 개발 기준 커밋: 6a1a2756ad66b749bca6d4fb8364c1ad197b2072
+          - 릴리스 빌드 커밋: ${{ github.sha }}
+          - Python/JavaScript 자동 테스트 및 Windows GUI/Web/통합 ZIP build+smoke 검증
+          - Windows 통합 ZIP: ${{ steps.metadata.outputs.asset_name }}
+          - ZIP SHA-256: ${{ steps.assets.outputs.checksum }}
+          - 체크섬 파일: ${{ steps.metadata.outputs.checksum_name }}
+          - Python 의존성 SBOM: ${{ steps.metadata.outputs.sbom_name }}
+          - 라이브러리 MIT 및 글꼴 SIL OFL 라이선스를 번들에 포함했습니다. Authenticode 서명은 미제공입니다.
+          "@
+          $notes = $notes -replace "(?m)^          ", ""
+          $notes | Set-Content -LiteralPath $notesPath -Encoding UTF8
+          "notes_path=$notesPath" >> $env:GITHUB_OUTPUT
+
+      - name: Create annotated Git tag
+        id: tag
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.metadata.outputs.tag }}" "${{ github.sha }}" -m "Aruba Wireless Policy Mapper ${{ steps.metadata.outputs.tag }}"
+          git push origin "refs/tags/${{ steps.metadata.outputs.tag }}"
+          if ($LASTEXITCODE -ne 0) { throw "Release tag push failed." }
+          "created=true" >> $env:GITHUB_OUTPUT
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create "${{ steps.metadata.outputs.tag }}" `
+            "${{ steps.assets.outputs.asset_path }}#${{ steps.metadata.outputs.asset_name }}" `
+            "${{ steps.assets.outputs.checksum_path }}#${{ steps.metadata.outputs.checksum_name }}" `
+            "${{ steps.assets.outputs.sbom_path }}#${{ steps.metadata.outputs.sbom_name }}" `
+            --repo "${{ github.repository }}" `
+            --target "${{ github.sha }}" `
+            --title "Aruba Wireless Policy Mapper PDF 직접 다운로드 시험판 (${{ steps.metadata.outputs.tag }})" `
+            --notes-file "${{ steps.notes.outputs.notes_path }}" `
+            --verify-tag `
+            --prerelease
+
+      - name: Remove only this run's incomplete release and tag
+        if: failure() && steps.tag.outputs.created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release delete "${{ steps.metadata.outputs.tag }}" --repo "${{ github.repository }}" --yes
+          $global:LASTEXITCODE = 0
+          git push origin ":refs/tags/${{ steps.metadata.outputs.tag }}"
+          $global:LASTEXITCODE = 0
