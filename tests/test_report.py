@@ -197,7 +197,7 @@ def test_write_excel_and_html_report(tmp_path):
     assert 'data-role="guest-logon" data-panel-id="role-panel-1"' in html
     assert 'id="role-panel-1" data-role="guest-logon"' in html
     assert 'aria-selected="true"' in html
-    assert "afterprint" in html
+    assert "afterprint" not in html
     assert html.index('<span class="role-tab-name">guest-logon</span>') < html.index(
         '<span class="role-tab-name">corp-employee</span>'
     )
