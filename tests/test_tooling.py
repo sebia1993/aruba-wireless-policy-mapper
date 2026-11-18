@@ -370,8 +370,7 @@ def test_release_documentation_describes_current_package_contract():
     assert "실제 운영 환경 검증" in validation_report
     assert "ClearPass/RADIUS 서버의 동적 Role 직접 조회" in changelog
     assert "코드서명 / installer / MSIX" in changelog
-    assert "--require-hashes" in requirements
-    assert "-r requirements-lock.txt" in requirements
+    assert requirements.splitlines() == ["--require-hashes", "-r requirements-lock.txt"]
     assert "--hash=sha256:" in requirements_lock
     assert "--hash=sha256:" in web_lock
     assert "st.file_uploader" in app
@@ -434,7 +433,7 @@ def test_github_actions_validate_main_and_publish_versioned_release():
 
     assert "pull_request:" in pr_workflow
     assert "push:" in pr_workflow
-    assert "branches: [main]" in pr_workflow
+    assert "branches: [main, portfolio-demo-mode]" in pr_workflow
     assert "contents: read" in pr_workflow
     assert "--require-hashes -r requirements-lock.txt" in pr_workflow
     assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in pr_workflow

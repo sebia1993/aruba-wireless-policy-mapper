@@ -150,7 +150,7 @@
       <li>네트워크 장비 설정 안의 secret/community 계열 값</li>
       <li>진단 command ID와 <code>show rights</code>/<code>show netdestination</code> 오류에 포함된 실제 Role/Alias 이름</li>
     </ul>
-    <h2>웹앱 접속 정책</h2>
+    <h2>로컬 운영 웹앱 접속 정책</h2>
     <ul>
       <li>Streamlit portable 주소는 <code>127.0.0.1</code>로 고정하며 실행 PC에서만 접속합니다.</li>
       <li><code>0.0.0.0</code> 등 외부 인터페이스 바인딩은 인증·TLS가 없어 실행 단계와 앱 단계에서 차단합니다.</li>
@@ -158,6 +158,8 @@
       <li>같은 WLC에 대한 웹 수집은 한 번에 하나만 실행합니다.</li>
       <li>브라우저에는 Python traceback을 직접 표시하지 않습니다.</li>
     </ul>
+    <h2>공개 데모 접속 정책</h2>
+    <p><code>portfolio_demo/app.py</code>는 실행마다 <code>127.0.0.1</code>의 임시 포트에 Mock WLC를 열고 수집이 끝나면 닫습니다. 방문자는 저장소에 포함된 합성 시나리오를 선택할 수 있습니다. 수집에 사용하는 접속 주소, 포트와 계정은 서버가 지정합니다. 로컬 운영 앱의 SSH 지문 승인 기능은 <code>app.py</code>에서 제공합니다.</p>
     <h2>장비 접속 정책</h2>
     <ul>
       <li>SSH는 앱 전용 <code>known_hosts</code>에 승인된 서버 키만 허용합니다.</li>
