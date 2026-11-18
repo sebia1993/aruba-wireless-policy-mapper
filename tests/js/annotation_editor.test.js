@@ -784,3 +784,43 @@ test('common ACL detection remains scoped to ACL names, not raw data or role nam
     assert.equal(env.app.exportModel().rules.length,2);
   } finally {env.close();}
 });
+
+
+test('unchecking common ACL in B workspace also hides re-guard in advanced source table',()=>{
+  const p=fixture();
+  const documentHtml=[
+    '<!doctype html><div id="annotation-workspace"></div>',
+    '<div id="source-report" data-source-snapshot-id="snapshot-a"><main>',
+    '<button class="role-tab" data-panel-id="original-role">EMPLOYEE</button>',
+    '<section class="role-panel" id="original-role" data-controller-id="controller-a" data-role="EMPLOYEE" data-role-key="EMPLOYEE">',
+    '<button type="button" class="toggle-other-acls" aria-pressed="false">Show other ACLs</button>',
+    '<table><tbody><tr class="acl-rule-row other-acl-rule" data-other-acl="true" hidden><td>re-guard</td></tr></tbody></table>',
+    '</section><section class="access-check"></section></main></div>',
+    '<script id="annotation-project-data" type="application/json"></script>'
+  ].join('');
+  const dom=new JSDOM(documentHtml,{url:'https://offline.test/report.html'});
+  const {window}=dom,doc=window.document;
+  doc.getElementById('annotation-project-data').textContent=JSON.stringify(p);
+  const button=doc.querySelector('.toggle-other-acls');
+  const legacyRow=doc.querySelector('.other-acl-rule');
+  button.addEventListener('click',()=>{
+    const visible=button.getAttribute('aria-pressed')!=='true';
+    button.setAttribute('aria-pressed',String(visible));
+    legacyRow.hidden=!visible;
+  });
+  const app=Editor.init({document:doc,window,core:Core,importer:Importer});
+  try {
+    const details=doc.getElementById('ann-source-details');
+    details.open=true;details.dispatchEvent(new window.Event('toggle'));
+    assert.equal(doc.getElementById('source-report').hidden,false);
+    let control=doc.getElementById('ann-show-common-acl');
+    assert.equal(control.checked,false);
+    control.checked=true;control.dispatchEvent(new window.Event('change',{bubbles:true}));
+    assert.equal(legacyRow.hidden,false,'advanced source follows common ACL checkbox ON');
+    control=doc.getElementById('ann-show-common-acl');
+    control.checked=false;control.dispatchEvent(new window.Event('change',{bubbles:true}));
+    assert.equal(legacyRow.hidden,true,'advanced source follows common ACL checkbox OFF');
+    assert.equal(button.getAttribute('aria-pressed'),'false');
+    assert.equal(app.exportModel().rules.length,p.snapshot.rules.length);
+  } finally {window.close();}
+});
