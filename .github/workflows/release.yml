@@ -85,13 +85,13 @@ jobs:
           npm test
           if ($LASTEXITCODE -ne 0) { throw "Offline annotation tests failed." }
 
-      - name: Build Windows GUI and CLI package
+      - name: Build Windows GUI package
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_gui_exe.ps1
 
-      - name: Verify GUI and CLI package
+      - name: Verify GUI-only package
         shell: pwsh
-        run: python .\tools\verify_release_package.py --dist .\dist --smoke-cli
+        run: python .\tools\verify_release_package.py --dist .\dist
 
       - name: Build Streamlit portable package
         shell: pwsh
@@ -160,7 +160,7 @@ jobs:
 
           ## 이번 릴리즈
           - Windows GUI에서 수집 시작 또는 안전 진단을 누르면 계정 인증 전에 SSH 서버 키를 자동 조회합니다. 처음 보는 키는 SHA-256 지문 확인 후 명시적으로 승인하며 기존 키와 달라지면 자동 승인 없이 차단합니다.
-          - SSH 키 미승인·변경·확인 실패를 별도 진단 코드(WLC-SEC-002/003/004)로 안내합니다. Web·CLI의 기존 수동 승인 방식은 유지합니다.
+          - SSH 키 미승인·변경·확인 실패를 별도 진단 코드(WLC-SEC-002/003/004)로 안내합니다. 로컬 Web 역시 최초 연결 시 확인창에서 지문을 승인합니다.
           - HTML 주석 화면에서 Role마다 SSID 명을 직접 입력하고 단말 구분(PC / mobile / ETC)을 별도로 선택할 수 있습니다.
           - 수기 SSID·단말 값은 기존 수집 SSID와 분리하여 JSON 작업 파일, 주석 포함 HTML, 이전 주석 재사용 및 Excel/PDF의 Role 설명에 보존합니다. 예전 작업 파일도 계속 읽습니다.
           - 장비 명령 거부·권한 오류를 성공과 구분하고 원문 근거를 보존합니다. 필수 오류는 실패, 선택 오류는 부분 완료로 표시합니다.
@@ -175,7 +175,7 @@ jobs:
           - 작업을 이어갈 때는 JSON 작업 파일을 사용합니다. 브라우저 임시저장은 사용자가 선택하는 복구 수단이며 Excel/PDF는 보고용 출력입니다.
           - 이전 브라우저에만 남아 있는 주석은 업그레이드 전에 기존 화면에서 주석 HTML로 저장하십시오. 장비 주소가 없는 기존 HTML은 가져올 때 직접 장비를 연결해야 합니다.
           - 독립 주석 HTML에는 원본 수집 보고서와 Access Check가 포함되지 않습니다. PDF 저장은 열린 인쇄 화면에서 브라우저의 PDF 저장 기능을 사용합니다.
-          - SSH 최초 접속 전 web\trust_host_key.cmd로 SHA-256 서버 키 지문을 확인해야 합니다.
+          - GUI와 Web에서는 최초 SSH 접속 시 지문 확인창에서 명시적으로 승인해야 합니다.
           - 코드서명은 아직 제공하지 않으므로 SHA-256, Python 의존성 SBOM, GitHub build provenance를 함께 확인하십시오.
 
           ## 검증 결과
@@ -183,7 +183,7 @@ jobs:
           - Windows pytest·compileall 및 Node 22 오프라인 주석 회귀 테스트 통과
           - 합성 명령 거부·지연 출력·취소·저장 리비전 복구·진단 상태/마스킹·동명 장비 영향 범위 회귀 통과
           - 잠금 Python 의존성 감사 통과: 미처리 취약점 0건, 기존 CVE-2026-44405 보완 통제 예외 1건
-          - GUI/CLI, Streamlit portable, 통합 ZIP build 및 smoke 검증과 호스트 키 실행 파일의 오프라인 주소 검증
+          - GUI, Streamlit portable, 통합 ZIP build 및 smoke 검증과 웹 최초 호스트 키 승인 흐름 회귀
           - 잠금 Python 의존성의 CycloneDX SBOM, SHA-256 sidecar, GitHub build provenance 생성
 
           ## 다운로드

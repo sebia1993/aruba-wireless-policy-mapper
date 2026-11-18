@@ -17,14 +17,13 @@ Write-Host "Generating HTML guide documents..."
 
 $version = & $PythonExe -c "from wlc_role_acl_collector import __version__; print(__version__)"
 $guiExeName = "WlcRoleAclCollectorGUI"
-$cliExeName = "WlcRoleAclCollectorCLI"
 $distDir = Join-Path $PSScriptRoot "dist"
 $buildRoot = Join-Path $PSScriptRoot ".pyinstaller_build"
 $buildDir = Join-Path $buildRoot ([DateTime]::Now.ToString("yyyyMMdd_HHmmss"))
 $specDir = Join-Path $buildDir "spec"
 $releaseRoot = Join-Path $buildDir "release"
 $distGuiExe = Join-Path $distDir "$guiExeName.exe"
-$distCliExe = Join-Path $distDir "$cliExeName.exe"
+$deprecatedCliExe = Join-Path $distDir "WlcRoleAclCollectorCLI.exe"
 $releaseZip = Join-Path $distDir "${guiExeName}_v${version}.zip"
 $roleNetworkTemplate = Join-Path $PSScriptRoot "config\role_networks.example.xlsx"
 $userGuide = Join-Path $PSScriptRoot "docs\USER_GUIDE_KO.md"
@@ -48,8 +47,9 @@ $mockScenarioDir = Join-Path $PSScriptRoot "config\mock_scenarios"
 if (Test-Path -LiteralPath $distGuiExe) {
     Remove-Item -LiteralPath $distGuiExe -Force
 }
-if (Test-Path -LiteralPath $distCliExe) {
-    Remove-Item -LiteralPath $distCliExe -Force
+# Remove an executable left behind by an older CLI-enabled build.
+if (Test-Path -LiteralPath $deprecatedCliExe) {
+    Remove-Item -LiteralPath $deprecatedCliExe -Force
 }
 if (Test-Path -LiteralPath $releaseZip) {
     Remove-Item -LiteralPath $releaseZip -Force
@@ -74,27 +74,8 @@ if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed with exit code $LASTEXITCODE"
 }
 
-Write-Host "Building Windows CLI executable..."
-& $PythonExe -m PyInstaller `
-    --noconfirm `
-    --clean `
-    --onefile `
-    --console `
-    --name $cliExeName `
-    --distpath $distDir `
-    --workpath $buildDir `
-    --specpath $specDir `
-    --collect-data wlc_role_acl_collector `
-    --paths ".\src" `
-    ".\cli_launcher.py"
-
-if ($LASTEXITCODE -ne 0) {
-    throw "PyInstaller CLI build failed with exit code $LASTEXITCODE"
-}
-
 Write-Host "Creating release zip..."
 Copy-ReadableFileWithRetry -LiteralPath $distGuiExe -Destination $releaseRoot
-Copy-ReadableFileWithRetry -LiteralPath $distCliExe -Destination $releaseRoot
 Copy-Item -LiteralPath $userGuide -Destination (Join-Path $releaseRoot "USER_GUIDE_KO.md") -Force
 Copy-Item -LiteralPath $userGuideHtml -Destination (Join-Path $releaseRoot "USER_GUIDE_KO.html") -Force
 Copy-Item -LiteralPath $developerGuide -Destination (Join-Path $releaseRoot "DEVELOPER_GUIDE_KO.md") -Force
@@ -119,5 +100,4 @@ Write-Host ""
 Write-Host "Build completed."
 Write-Host "Build work directory: $buildDir"
 Write-Host "GUI executable: $distGuiExe"
-Write-Host "CLI executable: $distCliExe"
 Write-Host "Release zip: $releaseZip"

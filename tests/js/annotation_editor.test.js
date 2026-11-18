@@ -7,19 +7,22 @@ const Importer = require('../../src/wlc_role_acl_collector/static/annotation_imp
 const Editor = require('../../src/wlc_role_acl_collector/static/annotation_editor.js');
 const fixture = require('./editor_fixture.js');
 
-function mount(project = fixture(), storage) {
+function mount(project = fixture(), storage, overrides = {}) {
   const dom = new JSDOM('<!doctype html><div id="annotation-workspace"></div><div id="source-report" data-source-snapshot-id="snapshot-a">ORIGINAL_SOURCE_SECRET</div><script id="annotation-project-data" type="application/json"></script>', {url:'https://offline.test/report.html'});
   const {window} = dom;
   window.document.getElementById('annotation-project-data').textContent = JSON.stringify(project);
   window.confirm = () => true;
-  let downloads = 0, downloadedBlob;
+  let downloads = 0, downloadedBlob, lastDownloadName;
   window.URL.createObjectURL = blob => {downloadedBlob=blob;return 'blob:test';};
   window.URL.revokeObjectURL = () => {};
-  window.HTMLAnchorElement.prototype.click = () => { downloads++; };
+  window.HTMLAnchorElement.prototype.click = function () { downloads++; lastDownloadName=this.download; };
   if (storage) Object.defineProperty(window, 'localStorage', {value:storage});
+  if (overrides.pdfMake) window.pdfMake=overrides.pdfMake;
+  window.open=()=>{ throw new Error('PDF export must not open a print window'); };
+  window.print=()=>{ throw new Error('PDF export must not invoke browser print'); };
   window.addEventListener('error', event=>{throw event.error;});
-  const app = Editor.init({document:window.document,window,core:Core,importer:Importer});
-  return {window,app,downloads:()=>downloads,close:()=>window.close(),downloadedText:()=>new Promise((resolve,reject)=>{
+  const app = Editor.init({document:window.document,window,core:Core,importer:Importer,pdfExporter:overrides.pdfExporter});
+  return {window,app,downloads:()=>downloads,downloadName:()=>lastDownloadName,downloadedBlob:()=>downloadedBlob,close:()=>window.close(),downloadedText:()=>new Promise((resolve,reject)=>{
     const reader=new window.FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error);reader.readAsText(downloadedBlob);
   })};
 }
@@ -119,7 +122,10 @@ test('a reused snapshot ID cannot expose a mismatched original source view or re
   Editor.saveRecovery(storage,base,edited);
   assert.equal(Editor.readRecovery(storage,base,Core),null);
   const env=mount();env.app.openText(JSON.stringify(edited));
-  assert.equal(env.window.document.getElementById('ann-source-mode').hidden,true);
+  env.window.document.getElementById('ann-tab-btn-access').click();
+  assert.equal(env.window.document.getElementById('ann-tab-access').hidden,false);
+  assert.match(env.window.document.getElementById('ann-access-message').textContent,/수집본.*다르/);
+  assert.equal(env.window.document.getElementById('source-report').hidden,true);
   env.close();
 });
 test('restoring a different draft at the same revision invalidates the review filter cache', () => {
@@ -454,4 +460,390 @@ test('discarding the pending draft permits current branch recovery after a downl
     env.window.document.getElementById('ann-discard-draft').click();editRule(env,'continued chosen branch');
     for(const anchor of [original,saved]) assert.equal(Editor.readRecovery(storage,anchor,Core)?.annotations.rules['rule-a'].text,'continued chosen branch');
   } finally {env.close();}
+});
+
+test('B layout replaces separate collection tab with in-place source evidence', () => {
+  const env=mount(),doc=env.window.document;
+  try {
+    const ids=['policy','access'];
+    assert.deepEqual(Array.from(doc.querySelectorAll('[data-unified-tab]')).map(el=>el.dataset.unifiedTab),ids);
+    assert.equal(doc.getElementById('ann-source-mode'),null);
+    assert.equal(doc.getElementById('ann-editor-mode'),null);
+    assert.equal(doc.getElementById('ann-tab-btn-collection'),null);
+    assert.equal(doc.getElementById('ann-tab-collection'),null);
+    assert.equal(doc.getElementById('ann-tab-policy').hidden,false);
+    assert.equal(doc.querySelectorAll('.ann-rules').length,1);
+    const fullReport=doc.querySelector('#ann-source-details #ann-source-slot #source-report');
+    assert.ok(fullReport,'original report remains available as optional advanced evidence');
+    assert.equal(doc.getElementById('ann-source-details').open,false);
+    assert.equal(fullReport.hidden,true);
+    for(const name of ids){
+      doc.getElementById('ann-tab-btn-'+name).click();
+      for(const other of ids) assert.equal(doc.getElementById('ann-tab-'+other).hidden,other!==name);
+      assert.equal(doc.getElementById('ann-tab-btn-'+name).getAttribute('aria-selected'),'true');
+    }
+    doc.getElementById('ann-tab-btn-policy').click();
+    const details=doc.getElementById('ann-source-details');
+    details.open=true;details.dispatchEvent(new env.window.Event('toggle'));
+    assert.equal(fullReport.hidden,false);
+    details.open=false;details.dispatchEvent(new env.window.Event('toggle'));
+    assert.equal(fullReport.hidden,true);
+  } finally {env.close();}
+});
+
+test('B layout shows controller collection confidence beside the single ACL and annotation table', () => {
+  const p=fixture();
+  p.snapshot.controllers[0].coverage='partial';
+  p.snapshot.controllers[0].failedCommands=['show rights'];
+  p.snapshot.roles[0].contextComplete=false;
+  const env=mount(p),doc=env.window.document;
+  try {
+    const summary=doc.querySelector('.ann-collection-strip');
+    assert.ok(summary);
+    assert.match(summary.textContent,/일부 수집/);
+    assert.match(summary.textContent,/추가 확인 필요/);
+    assert.match(summary.textContent,/show rights/);
+    assert.equal(doc.querySelectorAll('.ann-rules').length,1);
+    assert.ok(doc.querySelector('[data-note-id="rule-a"]'));
+    assert.equal(doc.querySelectorAll('.ann-rule-evidence').length,1);
+    assert.equal(doc.querySelector('[data-rule-evidence="rule-a"]').open,false);
+  } finally {env.close();}
+});
+
+test('per-rule evidence expands collected raw, controller-scoped Alias and unresolved references safely', () => {
+  const p=fixture();
+  p.snapshot.aliases.push({id:'a',controllerId:'controller-a',name:'Office',entries:[
+    {type:'host',value:'10.0.0.4',raw:'host 10.0.0.4'},
+    {type:'host',value:'<script>alert(1)</script>',raw:'host <script>alert(1)</script>'}
+  ]});
+  p.snapshot.controllers.push({...p.snapshot.controllers[0],id:'controller-b',name:'Different WLC',host:'192.0.2.2'});
+  p.snapshot.aliases.push({id:'b',controllerId:'controller-b',name:'Office',entries:[{type:'host',value:'198.51.100.10',raw:'host 198.51.100.10'}]});
+  p.snapshot.rules[0].source='alias Office';
+  p.snapshot.rules[0].destination='alias NotCollected';
+  p.snapshot.rules[0].raw='<img src=x onerror="alert(2)"> alias Office any permit';
+  const env=mount(p),doc=env.window.document;
+  try {
+    const evidence=doc.querySelector('[data-rule-evidence="rule-a"]');
+    const body=evidence.querySelector('[data-rule-evidence-body]');
+    assert.equal(body.textContent,'','Alias data is lazily rendered');
+    evidence.open=true;evidence.dispatchEvent(new env.window.Event('toggle'));
+    assert.match(body.textContent,/10\.0\.0\.4/);
+    assert.doesNotMatch(body.textContent,/198\.51\.100\.10/);
+    assert.match(body.textContent,/NotCollected/);
+    assert.match(body.textContent,/수집된 Alias 정의가 없습니다/);
+    assert.match(body.textContent,/<script>alert\(1\)<\/script>/);
+    assert.match(body.textContent,/<img src=x onerror="alert\(2\)">/);
+    assert.equal(body.querySelector('script'),null);
+    assert.equal(body.querySelector('img'),null);
+    assert.equal(env.app.exportModel().rules.length,1);
+    assert.equal(env.app.getProject().snapshot.rules[0].raw,p.snapshot.rules[0].raw);
+    assert.equal(env.app.getProject().annotations.rules['rule-a'].text,p.annotations.rules['rule-a'].text);
+  } finally {env.close();}
+});
+
+test('optional old source cannot become visible after loading a mismatched work file', () => {
+  const env=mount(),doc=env.window.document;
+  try {
+    const other=fixture();other.snapshot.rules[0].raw+=' altered';
+    assert.equal(env.app.openText(JSON.stringify(other)),true);
+    const details=doc.getElementById('ann-source-details');
+    details.open=true;details.dispatchEvent(new env.window.Event('toggle'));
+    assert.equal(doc.getElementById('source-report').hidden,true);
+    assert.equal(doc.getElementById('ann-collection-message').hidden,false);
+    assert.match(doc.getElementById('ann-collection-message').textContent,/원본 수집본이 다르/);
+    const evidence=doc.getElementById('ann-role-detail');
+    assert.ok(evidence.querySelector('[data-rule-evidence="rule-a"]'));
+    assert.match(evidence.querySelector('.ann-collection-strip').textContent,/수집 완료/);
+    doc.getElementById('ann-tab-btn-access').click();
+    assert.equal(doc.querySelector('#ann-access-message').hidden,false);
+  } finally {env.close();}
+});
+
+test('exact-name common ACLs are hidden by default, reversible, and preserved in snapshots and export', () => {
+  const p=fixture(), original=p.snapshot.rules[0];
+  const names=['global-sacl','re-guard','logon-control','Re-Guard','LOGON-CONTROL','re-guardian','logon-control-v2','custom-global-sacl','role-specific'];
+  names.forEach((acl,i)=>{
+    const rule={...original,id:'test-rule-'+i,acl,ordinal:i+2,raw:'policy '+acl};
+    p.snapshot.rules.push(rule);
+    p.annotations.rules[rule.id]={text:'주석 '+acl,status:'reviewed',updatedAt:p.updatedAt,confirmedAt:p.updatedAt,reasons:[],source:null};
+  });
+  const env=mount(p),doc=env.window.document;
+  try {
+    const count=()=>doc.querySelectorAll('.ann-rules tbody tr').length;
+    assert.equal(count(),5);
+    assert.equal(doc.getElementById('ann-show-common-acl').checked,false);
+    assert.match(doc.querySelector('.ann-role-header').textContent,/전용 5개.*공통 5개/);
+    assert.match(doc.getElementById('ann-role-list').textContent,/5 전용 규칙.*5 공통 규칙/);
+    const text=doc.querySelector('.ann-rules').textContent;
+    for(const name of ['re-guardian','logon-control-v2','custom-global-sacl','role-specific']) assert.ok(text.includes(name),name);
+    for(const name of ['global-sacl','re-guard','logon-control']) {
+      assert.ok(!Array.from(doc.querySelectorAll('.ann-rules tbody tr > td:first-child > strong')).some(x=>x.textContent.toLowerCase()===name),name);
+    }
+    assert.equal(env.app.exportModel().rules.length,10);
+    for(const name of names) assert.ok(env.app.exportModel().rules.some(x=>x.acl===name));
+    const control=doc.getElementById('ann-show-common-acl');
+    control.checked=true;control.dispatchEvent(new env.window.Event('change',{bubbles:true}));
+    assert.equal(count(),10);
+    assert.deepEqual(Array.from(doc.querySelectorAll('.ann-rules tbody tr > td:first-child > strong')).map(x=>x.textContent),[original.acl,...names]);
+    assert.equal(env.app.getProject().revision,p.revision);
+    const reset=doc.getElementById('ann-show-common-acl');
+    reset.checked=false;reset.dispatchEvent(new env.window.Event('change',{bubbles:true}));
+    assert.equal(count(),5);
+    for(let i=0;i<names.length;i++) assert.equal(env.app.getProject().annotations.rules['test-rule-'+i].text,'주석 '+names[i]);
+  } finally {env.close();}
+});
+
+test('Role with only common ACLs does not claim no ACL policy was collected', () => {
+  const p=fixture();
+  p.snapshot.rules=p.snapshot.rules.map(r=>({...r,acl:'logon-control'}));
+  const env=mount(p),doc=env.window.document;
+  try {
+    assert.match(doc.querySelector('.ann-rules').textContent,/전용 ACL이 표시되지 않습니다/);
+    assert.match(doc.querySelector('.ann-rules').textContent,/공통 ACL 1개가 숨겨져 있습니다/);
+    assert.doesNotMatch(doc.querySelector('.ann-rules').textContent,/수집된 ACL 규칙이 없습니다/);
+    assert.equal(env.app.exportModel().rules.length,p.snapshot.rules.length);
+    const check=doc.getElementById('ann-show-common-acl');
+    check.checked=true;check.dispatchEvent(new env.window.Event('change',{bubbles:true}));
+    assert.match(doc.querySelector('.ann-rules').textContent,/logon-control/);
+  } finally {env.close();}
+});
+
+test('moving original Access Check preserves listeners and disables stale sources', () => {
+  const p=fixture(),docHtml=`<!doctype html><div id="annotation-workspace"></div>
+    <div id="source-report" data-source-snapshot-id="snapshot-a">
+      <main><section class="role-panel" id="original-role" data-controller-id="controller-a" data-role="EMPLOYEE" data-role-key="EMPLOYEE"></section>
+      <button class="role-tab" data-panel-id="original-role"></button>
+      <section class="access-check"><button id="test-check">Run</button></section></main></div>
+    <script id="annotation-project-data" type="application/json"></script>`;
+  const dom=new JSDOM(docHtml,{url:'https://offline.test/report.html'});
+  const {window}=dom,doc=window.document;
+  doc.getElementById('annotation-project-data').textContent=JSON.stringify(p);
+  let clicks=0;
+  doc.getElementById('test-check').addEventListener('click',()=>clicks++);
+  const app=Editor.init({document:doc,window,core:Core,importer:Importer});
+  try {
+    doc.getElementById('ann-tab-btn-access').click();
+    assert.equal(doc.querySelector('#ann-access-slot #test-check')!==null,true);
+    doc.getElementById('test-check').click();
+    assert.equal(clicks,1);
+    const modified=fixture();modified.snapshot.rules[0].raw+=' modified';
+    assert.equal(app.openText(JSON.stringify(modified)),true);
+    doc.getElementById('ann-tab-btn-access').click();
+    assert.equal(doc.querySelector('#ann-access-slot .access-check').hidden,true);
+    assert.equal(doc.querySelector('#source-report').hidden,true);
+  } finally {window.close();}
+});
+
+test('device category selector supports Windows PC and MacBook; saved files retain values and legacy PC', async () => {
+  const p=fixture(), record={...p.annotations.rules['rule-a'],deviceType:'PC',manualSsid:'corp'};
+  p.annotations.roles['role-a']=record;
+  const env=mount(p),doc=env.window.document;
+  try {
+    let select=doc.getElementById('ann-device-type');
+    assert.equal(select.value,'PC');
+    const options=Array.from(select.options).map(o=>[o.value,o.textContent]);
+    assert.ok(options.some(([value,label])=>value==='windows_pc'&&label==='윈도우 PC'));
+    assert.ok(options.some(([value,label])=>value==='macbook'&&label==='맥북'));
+    assert.ok(options.some(([value,label])=>value==='PC'&&label==='PC (기존 분류)'));
+    assert.match(doc.getElementById('ann-role-list').textContent,/PC \(기존 분류\)/);
+    select.value='windows_pc';select.dispatchEvent(new env.window.Event('change',{bubbles:true}));
+    assert.equal(env.app.getProject().annotations.roles['role-a'].deviceType,'windows_pc');
+    assert.equal(env.app.getProject().annotations.roles['role-a'].status,'unreviewed');
+    assert.match(doc.getElementById('ann-role-list').textContent,/윈도우 PC/);
+    assert.equal(env.app.getProject().snapshot.roles[0].ssids[0],'corp');
+    select=doc.getElementById('ann-device-type');
+    select.value='macbook';select.dispatchEvent(new env.window.Event('change',{bubbles:true}));
+    assert.equal(env.app.getProject().annotations.roles['role-a'].deviceType,'macbook');
+    assert.match(doc.getElementById('ann-role-list').textContent,/맥북/);
+    const search=doc.getElementById('ann-search');
+    search.value='맥북';search.dispatchEvent(new env.window.Event('input',{bubbles:true}));
+    assert.equal(doc.querySelectorAll('[data-open-role]').length,1);
+    assert.match(doc.getElementById('ann-role-list').textContent,/맥북/);
+    search.value='';search.dispatchEvent(new env.window.Event('input',{bubbles:true}));
+    assert.equal(env.app.saveProject(),true);
+    const json=await env.downloadedText();
+    const saved=Core.parseProject(json);
+    assert.equal(saved.annotations.roles['role-a'].deviceType,'macbook');
+    const reopened=mount(saved);
+    try {
+      assert.equal(reopened.window.document.getElementById('ann-device-type').value,'macbook');
+      assert.match(reopened.window.document.getElementById('ann-role-list').textContent,/맥북/);
+    } finally {reopened.close();}
+  } finally {env.close();}
+});
+
+test('role annotations from previous work keep MacBook through reuse and independent HTML', () => {
+  const earlier=fixture();
+  earlier.annotations.roles['role-a']={...earlier.annotations.rules['rule-a'],deviceType:'macbook'};
+  const current=fixture();current.annotations.roles={};
+  const env=mount(current);
+  try {
+    assert.equal(env.app.reuseText(JSON.stringify(earlier)),true);
+    assert.equal(env.app.getProject().annotations.roles['role-a'].deviceType,'macbook');
+    assert.equal(env.window.document.getElementById('ann-device-type').value,'macbook');
+    const html=Editor.standaloneHtml(env.app.getProject(),env.window.document);
+    const dom=new JSDOM(html);
+    try {
+      assert.equal(Core.parseProject(dom.window.document.getElementById('annotation-project-data').textContent).annotations.roles['role-a'].deviceType,'macbook');
+    } finally {dom.window.close();}
+  } finally {env.close();}
+});
+
+
+test('PDF button requests an offline file without print dialogs, preserving report scope and project state',async()=>{
+  const m=fixture();const before=structuredClone(m);let calls=0;
+  const pdfExporter={createPdfBytes:async (report,provider,options)=>{
+    assert.equal(options.profile,'simple');
+    calls++;
+    assert.ok(provider);
+    assert.equal(report.projectId,m.projectId);
+    assert.equal(report.rules.length,m.snapshot.rules.length);
+    return Uint8Array.from([37,80,68,70,45,49,46,55,10,0,1]);
+  }};
+  const env=mount(m,undefined,{pdfExporter,pdfMake:{createPdf(){}}});
+  try {
+    assert.equal(env.window.document.getElementById('ann-pdf').textContent,'PDF 다운로드');
+    assert.equal(env.window.document.getElementById('print-pdf'),null);
+    assert.equal(typeof env.app.printPdf,'undefined');
+    assert.equal(await env.app.downloadPdf(),true);
+    assert.equal(calls,1);
+    assert.equal(env.downloads(),1);
+    assert.match(env.downloadName(),/_acl_summary\.pdf$/);
+    assert.equal(env.downloadedBlob().type,'application/pdf');
+    assert.deepEqual(env.app.getProject(),before);
+    assert.match(env.window.document.getElementById('ann-status').textContent,/다운로드를 요청/);
+  } finally {env.close();}
+});
+
+test('PDF export failures are explicit and do not lose notes or report a completed download',async()=>{
+  const env=mount();
+  try {
+    assert.equal(await env.app.downloadPdf(),false);
+    assert.equal(env.downloads(),0);
+    assert.match(env.window.document.getElementById('ann-status').textContent,/PDF 생성 실패/);
+    assert.deepEqual(env.app.getProject(),fixture());
+    assert.equal(env.window.document.getElementById('ann-pdf').disabled,false);
+  } finally {env.close();}
+});
+
+test('saved standalone HTML embeds PDFMake, font bundle and direct PDF exporter scripts',()=>{
+  const env=mount();
+  try {
+    const doc=env.window.document;
+    for(const id of ['annotation-pdfmake-script','annotation-pdf-font-script','annotation-pdf-export-script']){
+      const s=doc.createElement('script');s.id=id;s.textContent='/* '+id+' self-contained offline asset */';doc.body.appendChild(s);
+    }
+    const html=Editor.standaloneHtml(fixture(),doc);
+    for(const id of ['annotation-pdfmake-script','annotation-pdf-font-script','annotation-pdf-export-script']){
+      assert.ok(html.includes('id="'+id+'"'));
+      assert.ok(html.includes('/* '+id+' self-contained offline asset */'));
+    }
+    assert.ok(!html.includes('id="print-pdf"'));
+  } finally {env.close();}
+});
+
+
+test('quoted, visually identical Unicode common ACLs remain hidden after explicit checkbox OFF', () => {
+  const p=fixture(), base=p.snapshot.rules[0];
+  const commonNames=[
+    '"re-guard"', "'re-guard'", '“re‑guard”', 're–guard',
+    '\u200Bre-guard\u200B', 'ＲＥ－ＧＵＡＲＤ',
+    'global‐sacl', 'LOGON－CONTROL', '“logon-control”'
+  ];
+  const distinctNames=['re-guard-custom','re-guardian','pre-re-guard'];
+  for(const [i,acl] of [...commonNames,...distinctNames].entries()){
+    const rule={...base,id:'unicode-common-'+i,acl,raw:'rule '+acl,ordinal:i+2};
+    p.snapshot.rules.push(rule);
+    p.annotations.rules[rule.id]={...p.annotations.rules['rule-a'],text:'분리 점검 '+i};
+  }
+  const env=mount(p),doc=env.window.document;
+  try {
+    const names=()=>Array.from(doc.querySelectorAll('.ann-rules tbody tr > td:first-child > strong')).map(el=>el.textContent);
+    assert.equal(doc.getElementById('ann-show-common-acl').checked,false);
+    assert.deepEqual(names(),[base.acl,...distinctNames]);
+    assert.match(doc.querySelector('.ann-role-header').textContent,/전용 4개.*공통 9개/);
+    let toggle=doc.getElementById('ann-show-common-acl');
+    toggle.checked=true;toggle.dispatchEvent(new env.window.Event('change',{bubbles:true}));
+    assert.equal(names().length,1+commonNames.length+distinctNames.length);
+    toggle=doc.getElementById('ann-show-common-acl');
+    toggle.checked=false;toggle.dispatchEvent(new env.window.Event('change',{bubbles:true}));
+    assert.deepEqual(names(),[base.acl,...distinctNames]);
+    assert.equal(env.app.exportModel().rules.length,p.snapshot.rules.length);
+    for(let i=0;i<commonNames.length;i++){
+      assert.equal(env.app.getProject().annotations.rules['unicode-common-'+i].text,'분리 점검 '+i);
+    }
+  } finally {env.close();}
+});
+
+test('common ACL detection remains scoped to ACL names, not raw data or role name',()=>{
+  const p=fixture(),base=p.snapshot.rules[0];
+  p.snapshot.rules[0].raw='any alias re-guard any permit';
+  p.snapshot.rules.push({...base,id:'quoted-common',acl:' "re‐guard" ',raw:'any any permit',ordinal:2});
+  const env=mount(p),doc=env.window.document;
+  try {
+    assert.deepEqual(Array.from(doc.querySelectorAll('.ann-rules tbody tr > td:first-child > strong'),el=>el.textContent),['EMPLOYEE']);
+    assert.equal(env.app.exportModel().rules.length,2);
+  } finally {env.close();}
+});
+
+
+test('unchecking common ACL in B workspace also hides re-guard in advanced source table',()=>{
+  const p=fixture();
+  const documentHtml=[
+    '<!doctype html><div id="annotation-workspace"></div>',
+    '<div id="source-report" data-source-snapshot-id="snapshot-a"><main>',
+    '<button class="role-tab" data-panel-id="original-role">EMPLOYEE</button>',
+    '<section class="role-panel" id="original-role" data-controller-id="controller-a" data-role="EMPLOYEE" data-role-key="EMPLOYEE">',
+    '<button type="button" class="toggle-other-acls" aria-pressed="false">Show other ACLs</button>',
+    '<table><tbody><tr class="acl-rule-row other-acl-rule" data-other-acl="true" hidden><td>re-guard</td></tr></tbody></table>',
+    '</section><section class="access-check"></section></main></div>',
+    '<script id="annotation-project-data" type="application/json"></script>'
+  ].join('');
+  const dom=new JSDOM(documentHtml,{url:'https://offline.test/report.html'});
+  const {window}=dom,doc=window.document;
+  doc.getElementById('annotation-project-data').textContent=JSON.stringify(p);
+  const button=doc.querySelector('.toggle-other-acls');
+  const legacyRow=doc.querySelector('.other-acl-rule');
+  button.addEventListener('click',()=>{
+    const visible=button.getAttribute('aria-pressed')!=='true';
+    button.setAttribute('aria-pressed',String(visible));
+    legacyRow.hidden=!visible;
+  });
+  const app=Editor.init({document:doc,window,core:Core,importer:Importer});
+  try {
+    const details=doc.getElementById('ann-source-details');
+    details.open=true;details.dispatchEvent(new window.Event('toggle'));
+    assert.equal(doc.getElementById('source-report').hidden,false);
+    let control=doc.getElementById('ann-show-common-acl');
+    assert.equal(control.checked,false);
+    control.checked=true;control.dispatchEvent(new window.Event('change',{bubbles:true}));
+    assert.equal(legacyRow.hidden,false,'advanced source follows common ACL checkbox ON');
+    control=doc.getElementById('ann-show-common-acl');
+    control.checked=false;control.dispatchEvent(new window.Event('change',{bubbles:true}));
+    assert.equal(legacyRow.hidden,true,'advanced source follows common ACL checkbox OFF');
+    assert.equal(button.getAttribute('aria-pressed'),'false');
+    assert.equal(app.exportModel().rules.length,p.snapshot.rules.length);
+  } finally {window.close();}
+});
+
+
+test('export layout defaults to compact and offers explicit detailed PDF without modifying policy notes',async()=>{
+  const m=fixture(),before=structuredClone(m),profiles=[];
+  const pdfExporter={createPdfBytes:async (_model,_make,options)=>{
+    profiles.push(options.profile);
+    return Uint8Array.from([37,80,68,70,45,49,46,55,10,1,2]);
+  }};
+  const env=mount(m,undefined,{pdfExporter,pdfMake:{createPdf(){}}}),doc=env.window.document;
+  try{
+    const select=doc.getElementById('ann-export-profile');
+    assert.equal(select.value,'simple');
+    assert.equal(select.querySelectorAll('option').length,2);
+    assert.equal(await env.app.downloadPdf(),true);
+    assert.match(env.downloadName(),/_acl_summary\.pdf$/);
+    select.value='detailed';
+    assert.equal(await env.app.downloadPdf(),true);
+    assert.match(env.downloadName(),/_management_report\.pdf$/);
+    assert.deepEqual(profiles,['simple','detailed']);
+    assert.deepEqual(env.app.getProject(),before);
+  }finally{env.close();}
 });

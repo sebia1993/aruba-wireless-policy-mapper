@@ -96,3 +96,72 @@ test('browser UMD works offline from the supplied model without consulting docum
   assert.equal(sandbox.AnnotationExport.createWorkbook(model(),ExcelJS).getWorksheet('Role 설명').rowCount,2);
 });
 module.exports={model,longNote};
+
+test('Excel and print-ready PDF source show readable Windows PC and MacBook labels', () => {
+  for(const [deviceType,label] of [['windows_pc','윈도우 PC'],['macbook','맥북'],['PC','PC']]) {
+    const p=fixture(),roleNote={...p.annotations.rules['rule-a'],deviceType,manualSsid:'test-ssid'};
+    p.annotations.roles['role-a']=roleNote;
+    const report=Core.buildExportModel(p,{type:'all'},'2026-11-18T00:00:00Z');
+    const sheet=exporter.createWorkbook(report,ExcelJS).getWorksheet('Role 설명');
+    const headers=sheet.getRow(1).values,column=headers.indexOf('단말 구분');
+    assert.ok(column>0);
+    assert.equal(sheet.getRow(2).getCell(column).value,label);
+    const pdfHtml=exporter.printHtml(report);
+    assert.ok(pdfHtml.includes('단말 구분: '+label),deviceType);
+  }
+});
+
+
+test('compact ACL workbook defaults to nine visible reporting fields and preserves every annotation chunk', async () => {
+  const m=model(), book=exporter.createWorkbook(m,ExcelJS,{profile:'simple'});
+  assert.deepEqual(book.worksheets.map(s=>s.name),['ACL 간단 보고']);
+  const sheet=book.getWorksheet('ACL 간단 보고');
+  const headers=sheet.getRow(1).values.slice(1,10);
+  assert.deepEqual(headers,['컨트롤러','Role','ACL','순서','출발지','목적지','서비스','동작','행별 주석']);
+  assert.ok(sheet.getColumn(10).hidden);
+  assert.ok(sheet.getColumn(11).hidden);
+  assert.deepEqual(sheet.autoFilter.from,{row:1,column:1});
+  assert.deepEqual(sheet.autoFilter.to,{row:sheet.rowCount,column:9});
+  assert.ok(sheet.getRow(2).getCell(1).value.includes('<controller>'));
+  assert.equal(sheet.getRow(2).getCell(3).value,'acl-a');
+  assert.equal(sheet.getRow(2).getCell(8).value,'permit');
+  const chunks=[];
+  sheet.eachRow((row,n)=>{if(n>1){chunks.push(row.getCell(9).value||'');
+    row.eachCell(cell=>{assert.notEqual(cell.type,ExcelJS.ValueType.Formula);});}});
+  assert.equal(chunks.join(''),longNote);
+  assert.equal(sheet.getRow(2).getCell(10).value,'1');
+  const bytes=await exporter.workbookBytes(m,ExcelJS,{profile:'simple'});
+  const roundtrip=new ExcelJS.Workbook(); await roundtrip.xlsx.load(bytes);
+  assert.equal(roundtrip.getWorksheet('ACL 간단 보고').getRow(2).getCell(3).value,'acl-a');
+  assert.equal(roundtrip.getWorksheet('Role 설명'),undefined);
+});
+
+test('compact ACL output keeps duplicate rule occurrences and scope filtering without leaking internal IDs',()=>{
+  const p=fixture(), rule=p.snapshot.rules[0];
+  p.snapshot.rules.push({...rule,id:'duplicate-rule',ordinal:2,sequence:'2'});
+  p.annotations.rules['duplicate-rule']={...p.annotations.rules['rule-a'],text:'별도 규칙 설명'};
+  const m=Core.buildExportModel(p,{type:'all'});
+  const sheet=exporter.createWorkbook(m,ExcelJS,{profile:'simple'}).getWorksheet('ACL 간단 보고');
+  assert.equal(sheet.rowCount,3);
+  assert.equal(sheet.getRow(2).getCell(9).value,p.annotations.rules['rule-a'].text);
+  assert.equal(sheet.getRow(3).getCell(9).value,'별도 규칙 설명');
+  const headers=sheet.getRow(1).values.join('|');
+  assert.ok(!headers.includes('규칙 ID'));
+  assert.ok(!headers.includes('수집본'));
+  const empty=Core.buildExportModel(p,{type:'selected',roleIds:[]});
+  assert.equal(exporter.createWorkbook(empty,ExcelJS,{profile:'simple'}).getWorksheet('ACL 간단 보고').rowCount,1);
+});
+
+
+test('compact Excel disambiguates controllers with the same display name by actual endpoint',()=>{
+  const p=fixture(),c=p.snapshot.controllers[0],r=p.snapshot.roles[0],rule=p.snapshot.rules[0];
+  p.snapshot.controllers.push({...c,id:'controller-b',host:'192.0.2.99'});
+  p.snapshot.roles.push({...r,id:'role-b',controllerId:'controller-b'});
+  p.snapshot.rules.push({...rule,id:'rule-b',controllerId:'controller-b',roleId:'role-b'});
+  const model=Core.buildExportModel(p,{type:'all'});
+  const sheet=exporter.createWorkbook(model,ExcelJS,{profile:'simple'}).getWorksheet('ACL 간단 보고');
+  const labels=[sheet.getRow(2).getCell(1).value,sheet.getRow(3).getCell(1).value];
+  assert.ok(labels[0].includes('192.0.2.1'),labels[0]);
+  assert.ok(labels[1].includes('192.0.2.99'),labels[1]);
+  assert.notEqual(labels[0],labels[1]);
+});

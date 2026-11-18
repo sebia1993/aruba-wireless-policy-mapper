@@ -197,7 +197,7 @@ def test_write_excel_and_html_report(tmp_path):
     assert 'data-role="guest-logon" data-panel-id="role-panel-1"' in html
     assert 'id="role-panel-1" data-role="guest-logon"' in html
     assert 'aria-selected="true"' in html
-    assert "afterprint" in html
+    assert "afterprint" not in html
     assert html.index('<span class="role-tab-name">guest-logon</span>') < html.index(
         '<span class="role-tab-name">corp-employee</span>'
     )
@@ -224,8 +224,14 @@ def test_write_excel_and_html_report(tmp_path):
     assert 'id="annotation-workspace"' in html
     assert "저장됨" in html
     assert "주석 포함 HTML 저장" in html
-    assert "PDF 저장/인쇄" in html
-    assert "AnnotationEditorApp?.printPdf()" in html
+    assert "PDF 다운로드" in html
+    assert "PDF 저장/인쇄" not in html
+    assert "AnnotationEditorApp?.printPdf()" not in html
+    assert "target.print()" not in html
+    assert 'id="print-pdf"' not in html
+    assert 'id="annotation-pdfmake-script"' in html
+    assert 'id="annotation-pdf-font-script"' in html
+    assert 'id="annotation-pdf-export-script"' in html
     assert "window.addEventListener('beforeprint', preparePrint)" not in html
     assert "@media print" in html
     assert 'class="report-actions no-print"' in html
@@ -585,7 +591,7 @@ def test_large_html_report_keeps_role_order_visibility_and_unique_ids(tmp_path):
     html = html_path.read_text(encoding="utf-8")
 
     assert elapsed < 10
-    assert html.count('role="tab"') == 60
+    assert len(re.findall(r'<button class="role-tab(?: |")', html)) == 60  # Ignore unified tabs and role-label spans.
     assert html.count('class="acl-section role-panel') == 60
     assert html.index('data-role="branch/a"') < html.index('data-role="branch a"')
     assert html.index('data-role="branch a"') < html.index('data-role="role-000"')
@@ -710,3 +716,42 @@ def _acl_row(role: str, acl: str, sequence: int) -> dict[str, object]:
         "access_flags": "",
         "raw_rule": "",
     }
+
+
+def test_common_infrastructure_acls_are_not_role_related_by_name():
+    from wlc_role_acl_collector.report import _is_role_related_acl
+
+    for role in ("employee", "re-guard", "logon-control"):
+        for common in ("global-sacl", "re-guard", "logon-control", "RE-GUARD", " LOGON-CONTROL "):
+            assert not _is_role_related_acl(role, common)
+    for role, acl in (("re-guard", "re-guard-custom"), ("logon-control", "logon-control-v2"), ("re-guard", "employee-re-guard")):
+        assert _is_role_related_acl(role, acl)
+    assert _is_role_related_acl("employee", "employee-policy")
+
+
+def test_common_acl_unicode_and_quoted_names_default_to_other_acl_not_role_specific():
+    from wlc_role_acl_collector.report import _is_role_related_acl, _acl_rows_html
+
+    names = [
+        '"re-guard"',
+        "'re-guard'",
+        "“re‑guard”",
+        "re–guard",
+        "\u200bre-guard\u200b",
+        "ＲＥ－ＧＵＡＲＤ",
+        "global‐sacl",
+        "LOGON－CONTROL",
+    ]
+    for acl in names:
+        assert not _is_role_related_acl("re-guard", acl), repr(acl)
+        html = _acl_rows_html(
+            "re-guard",
+            [{"acl": acl, "sequence": "1", "action": "permit",
+              "raw_rule": "any any any permit", "source": "any",
+              "destination": "any", "service": "any"}],
+            {},
+        )
+        assert 'class="acl-rule-row other-acl-rule" data-other-acl="true" hidden' in html, repr(acl)
+
+    for acl in ["re-guard-custom", "re-guardian", "employee-role-policy"]:
+        assert _is_role_related_acl("re-guard", acl) == ("re-guard" in acl)

@@ -8,19 +8,19 @@ ZIP 안에 내장 Python, 앱 코드, 실행에 필요한 라이브러리가 함
 -----------
 
 1) GitHub Release에서 아래 파일을 다운로드합니다.
-   - wlc-role-acl-collector_v0.3.0_windows.zip 안의 web 폴더
+   - wlc-role-acl-collector_v0.4.1_windows.zip 안의 web 폴더
 
 2) ZIP 파일을 원하는 폴더에 압축 해제합니다.
    예: C:\Tools\wlc-role-acl-collector-web
 
-3) SSH를 사용할 WLC는 최초 1회 아래 명령으로 서버 키 지문을 확인·승인합니다.
-   trust_host_key.cmd 192.0.2.10 22
+3) 압축을 푼 폴더에서 start_webapp.cmd 를 더블클릭합니다.
 
-4) 압축을 푼 폴더에서 start_webapp.cmd 를 더블클릭합니다.
-
-5) 브라우저에서 아래 주소로 접속합니다.
+4) 브라우저에서 아래 주소로 접속합니다.
    - 실행한 PC에서 접속: http://127.0.0.1:8763
    - 기본 설정에서는 다른 PC 접속 불가
+
+5) 처음 연결하는 SSH 장비는 웹 확인창에서 SHA-256 지문을 별도로 대조하고 승인합니다.
+   승인된 지문과 현재 서버 키가 다르면 접속이 차단되며 자동 갱신되지 않습니다.
 
 첫 실행은 내장 Python과 Streamlit 초기화 때문에 기존 GUI 실행보다 느릴 수 있습니다.
 ZIP 내부에서 직접 실행하지 말고 압축을 완전히 푼 뒤 실행하세요.

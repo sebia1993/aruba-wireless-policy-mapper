@@ -12,7 +12,7 @@ GitHub Actions의 `Release` workflow를 수동 실행하며, 다음과 같이 �
 - SSID / AAA / Role / ACL / Alias 관계 해석 변경
 - Access Check 판정 로직 변경
 - Excel / CSV / HTML 결과 의미 또는 구조 변경
-- GUI / Web / CLI 실행 방식 변경
+- GUI / Web 실행 방식 변경
 - Windows 패키지 또는 통합 ZIP 구조 변경
 - 운영상 중요한 오류 수정
 - 호환성에 영향을 줄 수 있는 의존성 변경
@@ -37,7 +37,6 @@ GitHub가 자동 표시하는 `Source code (zip)`과 `Source code (tar.gz)`는 �
 README_START_HERE_KO.txt
 gui/
   WlcRoleAclCollectorGUI.exe
-  WlcRoleAclCollectorCLI.exe
   USER_GUIDE_KO.md
   USER_GUIDE_KO.html
   DEVELOPER_GUIDE_KO.md
@@ -53,7 +52,6 @@ gui/
   config/
 web/
   start_webapp.cmd
-  trust_host_key.cmd
   webapp_settings.cmd
   README_WEBAPP_KO.txt
   python/
@@ -89,11 +87,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\validate.ps1
 npm test
 ```
 
-Windows GUI / CLI:
+Windows GUI:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_gui_exe.ps1
-python .\tools\verify_release_package.py --dist .\dist --smoke-cli
+python .\tools\verify_release_package.py --dist .\dist
 ```
 
 Streamlit portable:

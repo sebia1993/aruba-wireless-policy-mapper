@@ -29,7 +29,7 @@ $webZip = $packages.Web
 [System.IO.Directory]::CreateDirectory((Join-Path $releaseRoot "gui")) | Out-Null
 [System.IO.Directory]::CreateDirectory((Join-Path $releaseRoot "web")) | Out-Null
 
-Write-Host "Extracting GUI/CLI ZIP: $guiZip"
+Write-Host "Extracting GUI-only ZIP: $guiZip"
 Expand-LiteralArchive -LiteralPath $guiZip -DestinationPath $guiExtractDir
 
 Write-Host "Extracting Streamlit portable ZIP: $webZip"

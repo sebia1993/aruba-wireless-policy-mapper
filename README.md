@@ -13,7 +13,7 @@
 | 채용 관점 | 내용 |
 |---|---|
 | 해결한 문제 | 여러 WLC CLI 화면을 따라가며 확인하던 SSID 접근 정책을 하나의 관계도와 보고서로 연결 |
-| 담당 범위 | 문제 정의, SSH/Telnet 수집, Parser, ACL 평가, GUI·로컬 Web·CLI, Windows 패키징과 CI/CD |
+| 담당 범위 | 문제 정의, SSH/Telnet 수집, Parser, ACL 평가, GUI·로컬 Web, Windows 패키징과 CI/CD |
 | 핵심 판단 | 수집하지 못한 정책은 임의 추정하지 않고 `부분 완료/판정 불가`로 구분하며, 동적 CLI 인자는 전송 전에 차단 검증 |
 | 보안 경계 | SSH 서버 키 고정, 변경 키 차단, Streamlit loopback 강제, Telnet 평문 위험과 비자동 전환 명시 |
 | 검증 증거 | Mock/fixture, 대량 Role·ACL 회귀, Windows GUI·Web 통합 ZIP과 smoke 자동 검증 |
@@ -42,7 +42,7 @@
 | 장비 변경 | **없음 — 조회 중심 수집, 설정 변경 명령 사용 안 함** |
 | 결과 | Excel, HTML, 생성 상태 JSON |
 | 추가 분석 | Role별 ACL 상세, Access Check, Role 대역 비교, VLAN/사용자 관측 정보 |
-| 실행 방식 | Windows GUI / 로컬 Streamlit 웹앱 / CLI |
+| 실행 방식 | Windows GUI / 로컬 Streamlit 웹앱 |
 | 오프라인 운영 | Windows 통합 ZIP 제공, Python 별도 설치 불필요 |
 | 검증 | Mock/fixture, 대량 데이터 회귀, Windows 패키지/통합 ZIP CI 검증 |
 
@@ -160,25 +160,26 @@ SSID → Role → ACL 상세와 Access Check의 이전 HTML 예시는 [2026-06-3
 - 관리자 요약
 - SSID / Role 관계
 - Role별 ACL 상세
-- 기본 `주석·보고서` 화면에서 Role 설명·ACL 주석·확인 상태 편집
-- Role 옆 `SSID 명` 직접 입력 및 `단말 구분`(PC / mobile / ETC) 선택, 작업 파일·이전 주석·PDF·Excel에 보관
+- **B안 원본·주석 통합 테이블:** 선택한 Role 안에서 `통합 정책·주석` / `ACL 접근 판정` 두 탭을 사용합니다. Source/Destination/Service/Action과 주석을 같은 ACL 행에 보여주고, 원문·관련 Alias·수집 근거는 각 규칙에서 필요할 때만 펼칩니다. 중복된 `수집 상세` 탭은 제거합니다
+- Role 옆 `SSID 명` 직접 입력 및 `단말 구분`(윈도우 PC / 맥북 / mobile / ETC, 기존 파일의 PC 분류 유지) 선택. 수집된 SSID와 분리하여 JSON·주석 HTML·이전 주석 재사용·Excel/PDF 보고 내용에 보관. 과거 작업 파일은 새 버전에서도 열리지만, 새 기기 분류를 저장한 작업 파일은 이를 지원하지 않는 구버전에서 열리지 않을 수 있습니다
 - JSON 작업 저장·열기, 이전 주석 재사용과 미연결 설명 보존
-- 전체/선택 Role/변경·확인 범위의 실제 XLSX와 브라우저 인쇄를 통한 PDF 저장
+- 전체/선택 Role/변경·확인 범위의 실제 XLSX 및 **인쇄 창 없는 오프라인 한글 텍스트 PDF 직접 다운로드**. 상급자 보고서는 핵심 요약→Role 현황→확인 필요→전용·공통 ACL·Alias 부록 순서로 구성
 - 현재 작업을 담은 독립 HTML 편집기 저장
-- 원본 `수집 결과·통신 확인`의 선택 Role PNG 저장
+- `통합 정책·주석`의 수집 신뢰도·원본 근거 요약, 고급 접힘 영역에서 원본 전체 보고서·선택 Role PNG 저장(원본 수집본이 일치할 때만 사용 가능)
+- `global-sacl`, `re-guard`, `logon-control` 공통 ACL 3종은 Role의 주석 화면에서 기본 숨김, `공통 ACL 함께 보기`로 복원. 정확한 ACL 이름만 분류하며 원본·저장·보고 데이터는 변하지 않습니다.
 - Access Check
 - 부분 수집 시 영향 Role/SSID와 권장 조치
 
-작업을 이어 갈 기준은 수집본·설명·확인 이력을 함께 보관하는 JSON 파일입니다. `작업 열기`는 작업 전체를 바꾸고, `이전 주석 가져오기`는 현재 수집본에 설명을 대조합니다. 다운로드는 디스크의 기존 파일을 자동 덮어쓰지 않으며 Excel/PDF는 보고용입니다. 자세한 절차는 [주석 작업·저장·보고 범위](docs/USER_GUIDE_KO.md#8-작업-저장재사용보고서-내보내기)를 참고하십시오. 이번 주석 기능의 실제 회사 장비·Windows·인쇄 환경 수동 검증은 별도 사용자 범위입니다.
+작업을 이어 갈 기준은 수집본·설명·확인 이력을 함께 보관하는 JSON 파일입니다. `작업 열기`는 작업 전체를 바꾸고, `이전 주석 가져오기`는 현재 수집본에 설명을 대조합니다. 다운로드는 디스크의 기존 파일을 자동 덮어쓰지 않으며 Excel/PDF는 보고용입니다. 자세한 절차는 [주석 작업·저장·보고 범위](docs/USER_GUIDE_KO.md#8-작업-저장재사용보고서-내보내기)를 참고하십시오. 이번 주석 기능의 실제 회사 장비·Windows·PDF 뷰어 환경 수동 검증은 별도 사용자 범위입니다.
 
 ## 안전 및 운영 원칙
 
 - 장비 계정과 비밀번호를 코드에 저장하지 않습니다.
-- SSH는 자격 증명 입력 전에 SHA-256 서버 키 지문을 검토하고 앱 전용 `known_hosts`에 고정합니다.
+- SSH는 자격 증명을 장비로 전송하기 전에 SHA-256 서버 키 지문을 검토하고 앱 전용 `known_hosts`에 고정합니다.
 - 승인되지 않은 SSH 키와 변경된 키는 차단하며, SSH 실패를 Telnet으로 자동 전환하지 않습니다.
 - Telnet은 계정과 장비 출력이 암호화되지 않으므로 격리된 관리망에서 위험을 승인한 경우에만 직접 선택합니다.
 - Streamlit은 `127.0.0.1` 등 loopback 주소에서만 실행되고 외부 인터페이스 바인딩은 차단됩니다.
-- GUI/Web/CLI에서 실제 WLC 수집과 테스트 fixture를 분리합니다.
+- GUI/Web에서 실제 WLC 수집과 테스트 fixture를 분리합니다.
 - Raw 장비 출력과 내부 Role 대역표는 공개 저장소에 포함하지 않습니다.
 - 안전 진단 결과는 주소·계정·Role/ACL 원문 등 운영 정보를 마스킹합니다.
 - GUI 작업 취소와 종료 시 장비 세션을 정리하도록 설계했습니다.
@@ -194,10 +195,10 @@ SSID → Role → ACL 상세와 Access Check의 이전 HTML 예시는 [2026-06-3
 |---|---|
 | Parser / ACL 평가 단위 테스트 | ✅ 자동 검증 |
 | Mock WLC / fixture 기반 수집 | ✅ 자동 검증 |
-| GUI / CLI / Web 공통 상태 모델 | ✅ 자동 검증 |
+| GUI / Web 공통 상태 모델 | ✅ 자동 검증 |
 | 60 Role / 1,200 ACL 회귀 | ✅ 자동 검증 |
 | 100 Role / 4,000 ACL HTML 렌더링 경로 | ✅ 검증 항목 포함 |
-| Windows GUI/CLI 패키지 | ✅ GitHub Actions |
+| Windows GUI 패키지 | ✅ GitHub Actions |
 | Streamlit portable 패키지 | ✅ GitHub Actions |
 | GUI + Web 통합 ZIP | ✅ GitHub Actions |
 | 실제 운영 환경 결과 | 공개 자료에서는 민감정보를 제거한 검증 요약만 관리 |
@@ -220,10 +221,8 @@ wlc-role-acl-collector_v0.4.1_windows.zip
 README_START_HERE_KO.txt
 gui/
   WlcRoleAclCollectorGUI.exe
-  WlcRoleAclCollectorCLI.exe
 web/
   start_webapp.cmd
-  trust_host_key.cmd
   webapp_settings.cmd
 ```
 
@@ -243,7 +242,7 @@ gui\WlcRoleAclCollectorGUI.exe
 4. `정상 완료 / 부분 완료 / 수집 실패` 상태를 확인합니다.
 5. HTML/Excel 결과에서 SSID → Role → ACL 관계를 확인합니다.
 
-명령행(CLI) 또는 웹앱에서는 기존대로 서버 키를 별도 승인합니다. 예: `WlcRoleAclCollectorCLI.exe trust-host-key --host 192.0.2.10 --port 22`.
+로컬 웹앱은 신규 SSH 장비 접속 시 SHA-256 지문 승인창을 표시합니다. 별도 확인 후 체크박스를 선택하고 승인해야 수집이 시작됩니다.
 
 ### 로컬 웹앱
 
@@ -257,7 +256,7 @@ web\start_webapp.cmd
 http://127.0.0.1:8763
 ```
 
-웹앱은 실행한 PC의 loopback 주소에서만 동작합니다. 서버 또는 원격 공용 서비스로 배포하지 마십시오.
+웹앱은 실행한 PC의 loopback 주소에서만 동작합니다. 최초 SSH 접속 시 지문을 보여 주는 승인창이 열리며, 이미 승인한 키는 창 없이 확인합니다. 저장된 키와 달라진 경우에는 연결을 차단하고 자동으로 갱신하지 않습니다. 서버 또는 원격 공용 서비스로 배포하지 마십시오.
 
 더 자세한 실행 절차는 [사용자 가이드](docs/USER_GUIDE_KO.md)를 참고하십시오.
 

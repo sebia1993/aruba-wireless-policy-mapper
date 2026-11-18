@@ -76,4 +76,57 @@ body { margin:0; background:#eef2f6; color:#172033; font-family:"Segoe UI","Malg
 #source-report[hidden] { display:none!important; }
 @media(max-width:1000px) { .annotation-workspace {padding:16px;}.ann-layout {grid-template-columns:205px minmax(0,1fr);gap:12px;}.ann-role-detail {padding:16px;}.ann-top {align-items:flex-start;}.ann-mode {max-width:190px;} }
 @media(max-width:720px) { .annotation-workspace {padding:12px;}.ann-top {display:block;}.ann-mode {max-width:none;margin-top:14px;}.ann-layout {display:block;}.ann-sidebar {position:static;max-height:280px;margin-bottom:14px;}.ann-role-header {flex-wrap:wrap;}.ann-toolbar {padding:10px;}.ann-export-actions {border-top:1px solid #dfe6ef;padding-top:10px;width:100%;}.ann-top h1 {font-size:25px;} }
-@media print { .annotation-workspace {display:none;} #source-report {display:none!important;} body::after {content:"PDF 저장 버튼을 눌러 보고 범위를 선택한 인쇄용 보고서를 열어 주세요.";display:block;padding:30px;font-size:18px;} }
+/* PDF is generated as a downloadable file. No browser print dialog is used. */
+
+/* Unified Role tabs: policy editing, original ACL check and collection evidence. */
+.ann-role-workspace{min-width:0;background:#fff;border:1px solid #d6dde7;border-radius:10px;overflow:hidden}
+.ann-role-tabs{display:flex;flex-wrap:wrap;gap:4px;padding:10px 12px 0;border-bottom:1px solid #d6dde7;background:#f4f7fb}
+.ann-role-tabs button{border:0;border-radius:8px 8px 0 0;padding:11px 16px;background:transparent;color:#415571;font-weight:650}
+.ann-role-tabs button[aria-selected="true"]{background:#fff;color:#144b82;box-shadow:inset 0 3px #2971ba}
+.ann-unified-panel{padding:12px;min-width:0}
+.ann-unified-panel[hidden]{display:none!important}
+.ann-unified-panel .ann-role-detail{border:0;box-shadow:none;padding:10px}
+.ann-common-toggle{display:inline-flex;gap:7px;align-items:center;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+.ann-common-toggle input{accent-color:#205fa4;width:16px;height:16px}
+#ann-access-slot .access-check{margin:0;max-width:none}
+#ann-source-slot #source-report>header{display:none}
+#ann-source-slot #source-report>main{max-width:none;padding:8px;box-shadow:none}
+#ann-source-slot #source-report .role-tabs{display:none}
+#ann-source-slot #source-report .report-actions #save-commented-html{display:none}
+#ann-source-slot #source-report[hidden]{display:none!important}
+@media(max-width:720px){.ann-role-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0}.ann-role-tabs button{padding:12px 5px;font-size:12px}.ann-unified-panel{padding:6px}}
+
+/* B option: collected ACL and editable annotations share one table.
+   Raw/Alias evidence is revealed per ACL, rather than duplicating it on a third tab. */
+.ann-collection-strip{margin:0 0 22px;padding:13px 15px;border:1px solid #d4e4f3;border-radius:9px;background:#f5f9fd}
+.ann-collection-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:8px}
+.ann-collection-summary span{background:#fff;border:1px solid #e0e8f2;padding:9px 11px;border-radius:7px;font-size:12px;overflow-wrap:anywhere}
+.ann-collection-summary strong{display:block;font-size:10px;color:#667085;margin-bottom:5px}
+.ann-collection-strip .ann-help{margin-top:10px!important}
+.ann-collection-attention{font-size:12px;color:#9a3412;overflow-wrap:anywhere;margin:8px 0 0}
+.ann-rule-evidence{border:1px solid #dbe5f0;border-radius:7px;background:#f8fafc;margin-top:12px}
+.ann-rule-evidence summary{font-size:11px;font-weight:650;color:#1c5a8f;padding:10px 11px;cursor:pointer;list-style-position:inside}
+.ann-rule-evidence[open] summary{border-bottom:1px solid #dbe5f0}
+.ann-rule-evidence-content{padding:12px;color:#34455b}
+.ann-evidence-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(115px,1fr));gap:7px;margin-bottom:12px}
+.ann-evidence-facts span{display:block;overflow-wrap:anywhere;font-size:11px}
+.ann-evidence-facts strong,.ann-evidence-caption{display:block;font-size:10px;color:#65758b;margin-bottom:5px}
+.ann-rule-evidence-content pre{margin:0 0 15px;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;background:#eaf0f8;border-radius:5px;max-width:100%}
+.ann-rule-evidence-content pre code{font-size:11px;font-family:Consolas,monospace;overflow-wrap:anywhere}
+.ann-evidence-alias{border:1px solid #d9e6ef;background:#fff;border-radius:6px;padding:10px;margin:9px 0}
+.ann-evidence-alias strong{color:#284563;font-size:11px}
+.ann-evidence-alias ul{margin:7px 0 0 17px;padding:0}
+.ann-evidence-alias li,.ann-evidence-alias p{overflow-wrap:anywhere;font-size:11px;margin:5px 0}
+.ann-evidence-missing{border-color:#e7c48b;background:#fffbef;color:#8b4b0a}
+.ann-source-details{margin:10px 12px 16px;padding:12px 15px;border:1px solid #d3deea;border-radius:9px;background:#f8fafc}
+.ann-source-details>summary{font-size:12px;font-weight:650;color:#1e4b74;cursor:pointer}
+.ann-source-details>.ann-help{margin:12px 0!important}
+.ann-source-details #ann-source-slot{min-width:0;overflow:hidden}
+@media(max-width:720px){
+  .ann-role-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ann-collection-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ann-source-details{margin:10px 6px 14px;padding:12px}
+}
+
+/* Advanced legacy source uses the same common ACL visibility as the Role editor. */
+#ann-source-slot #source-report .toggle-other-acls{display:none!important}

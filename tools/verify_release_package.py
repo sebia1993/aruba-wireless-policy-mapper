@@ -1,23 +1,19 @@
 """Validate the Windows release ZIP produced by GitHub Actions.
 
 The checks stay intentionally offline: they inspect the package layout, optional
-SHA256 sidecar, and a safe CLI help command without contacting any WLC.
+SHA256 sidecar, and GUI-only contents without contacting any WLC.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
-import platform
-import subprocess
-import tempfile
 import zipfile
 from pathlib import Path
 
 
 REQUIRED_FILES = {
     "WlcRoleAclCollectorGUI.exe",
-    "WlcRoleAclCollectorCLI.exe",
     "USER_GUIDE_KO.md",
     "USER_GUIDE_KO.html",
     "DEVELOPER_GUIDE_KO.md",
@@ -46,12 +42,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--zip", dest="zip_path", type=Path, help="release ZIP path")
     parser.add_argument("--dist", type=Path, default=Path("dist"), help="directory containing a release ZIP")
     parser.add_argument("--sha256", type=Path, help="SHA256 sidecar file to verify")
-    parser.add_argument("--smoke-cli", action="store_true", help="run WlcRoleAclCollectorCLI.exe --help on Windows")
-    parser.add_argument(
-        "--require-cli-smoke",
-        action="store_true",
-        help="fail if --smoke-cli is requested on a non-Windows host",
-    )
     args = parser.parse_args(argv)
 
     zip_path = args.zip_path or _find_latest_zip(args.dist)
@@ -66,9 +56,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.sha256:
         _verify_sha256(zip_path, args.sha256)
 
-    if args.smoke_cli:
-        _smoke_cli_help(zip_path, require=args.require_cli_smoke)
-
     print(f"Verified release package: {zip_path}")
     return 0
 
@@ -80,7 +67,7 @@ def _find_latest_zip(dist_dir: Path) -> Path:
         reverse=True,
     )
     if not candidates:
-        raise SystemExit(f"No GUI/CLI release ZIP was found in {dist_dir}")
+        raise SystemExit(f"No GUI release ZIP was found in {dist_dir}")
     return candidates[0]
 
 
@@ -99,6 +86,8 @@ def _verify_required_files(names: set[str]) -> None:
     missing = sorted((REQUIRED_FILES | REQUIRED_MOCK_SCENARIOS) - names)
     if missing:
         raise SystemExit("Release ZIP is missing required files:\n" + "\n".join(f"- {item}" for item in missing))
+    if "WlcRoleAclCollectorCLI.exe" in names:
+        raise SystemExit("Removed CLI executable must not be included in the GUI ZIP.")
 
 
 def _verify_sha256(zip_path: Path, checksum_path: Path) -> None:
@@ -119,38 +108,6 @@ def _verify_sha256(zip_path: Path, checksum_path: Path) -> None:
     actual_hash = hashlib.sha256(zip_path.read_bytes()).hexdigest()
     if actual_hash != expected_hash:
         raise SystemExit(f"SHA256 mismatch for {zip_path.name}: expected {expected_hash}, got {actual_hash}")
-
-
-def _smoke_cli_help(zip_path: Path, *, require: bool) -> None:
-    if platform.system() != "Windows":
-        if require:
-            raise SystemExit("CLI smoke test requires Windows.")
-        print("Skipping CLI smoke test on non-Windows host.")
-        return
-
-    with tempfile.TemporaryDirectory(prefix="wlc_release_smoke_") as temp_dir:
-        extract_dir = Path(temp_dir)
-        with zipfile.ZipFile(zip_path) as archive:
-            archive.extractall(extract_dir)
-
-        cli_exe = extract_dir / "WlcRoleAclCollectorCLI.exe"
-        if not cli_exe.exists():
-            raise SystemExit(f"CLI executable was not found after extraction: {cli_exe}")
-
-        completed = subprocess.run(
-            [str(cli_exe), "--help"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-        output = f"{completed.stdout}\n{completed.stderr}"
-        if completed.returncode != 0:
-            raise SystemExit(
-                f"CLI smoke command failed with exit code {completed.returncode}:\n{output.strip()}"
-            )
-        if "collect" not in output or "diagnose" not in output:
-            raise SystemExit("CLI help output did not include expected commands: collect, diagnose")
 
 
 if __name__ == "__main__":

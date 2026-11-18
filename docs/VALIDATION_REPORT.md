@@ -10,11 +10,11 @@
 |---|---|---|
 | Parser / ACL 평가 단위 테스트 | ✅ | `tests/` 및 PR Validation |
 | Mock WLC / fixture 수집 | ✅ | `config/mock_scenarios/`, 테스트 코드 |
-| GUI / CLI / Web 공통 수집 상태 | ✅ | 자동 회귀 테스트 |
+| GUI / Web 공통 수집 상태 | ✅ | 자동 회귀 테스트 |
 | 부분 완료 / 영향 Role·SSID 계산 | ✅ | 자동 회귀 테스트 |
 | 60 Role / 1,200 ACL 보고서 | ✅ | 대량 데이터 회귀 테스트 |
 | 100 Role / 4,000 ACL HTML 경로 | ✅ | 렌더링 검증 경로 |
-| Windows GUI / CLI 패키지 | ✅ | GitHub Actions Windows runner |
+| Windows GUI 패키지 | ✅ | GitHub Actions Windows runner |
 | Streamlit portable 패키지 | ✅ | GitHub Actions Windows runner |
 | GUI + Web 통합 ZIP | ✅ | GitHub Actions Windows runner |
 | 오프라인 주석 작업 저장·복구·재사용 | ✅ 자동·합성 검증 | `tests/js/annotation_core.test.js`, `annotation_editor.test.js`, `annotation_import.test.js` |
@@ -69,9 +69,9 @@
 ### v0.3.2 오류 판정·복구 회귀 범위
 
 - `tests/test_command_responses.py`: 실제 Netmiko BaseConnection/ArubaOsSSH와 합성 채널로 지연된 응답, 정확한 프롬프트 경계, 자동완성 echo, 명령 거부·권한 오류, 불완전 응답 후 후속 명령 중단, 필수 조회 중 취소와 GUI 종료 상태를 확인합니다.
-- `tests/test_offline_command_rejections.py`: 다섯 오프라인 원본 입력 경로의 명령 거부를 필수 실패·선택 부분 완료와 진단 오류로 반영하는지 확인합니다. 실제 수집·진단 CLI의 종료값·보고서, 원문 근거 보존, 정상 설명문과 기존 누락 파일 처리도 검사합니다.
+- `tests/test_offline_command_rejections.py`: 다섯 오프라인 원본 입력 경로의 명령 거부를 필수 실패·선택 부분 완료와 진단 오류로 반영하는지 확인합니다. 원문 근거 보존, 정상 설명문과 기존 누락 파일 처리도 검사합니다.
 - `tests/js/annotation_editor.test.js`: 실제 JSON·HTML Blob 다운로드 후 재편집·다시 열기, 원래 파일과 저장 리비전의 복구, 같은 리비전의 분기 충돌, 복구 대기·다른 탭의 임시작업 보존, 저장 공간·크기 제한 실패를 확인합니다. 복구 기준의 이력은 같은 편집 세션 범위이며 파일을 다시 연 뒤 이전 모든 파일의 임시작업을 갱신한다고 주장하지 않습니다.
-- `tests/test_diagnostic_failure_truth.py`, `tests/test_diagnostic_response_integration.py`, `tests/test_diagnostic_report.py`: 최종 선택 명령·세션 종료 실패, 콜백 누락·중복, 필수 명령 오류 우선순위, CLI 종료값과 JSON·HTML·로그의 오류 코드 보존/민감정보 마스킹을 확인합니다.
+- `tests/test_diagnostic_failure_truth.py`, `tests/test_diagnostic_response_integration.py`, `tests/test_diagnostic_report.py`: 최종 선택 명령·세션 종료 실패, 콜백 누락·중복, 필수 명령 오류 우선순위, JSON·HTML·로그의 오류 코드 보존/민감정보 마스킹을 확인합니다.
 - `tests/test_collection_health.py`: 동명 장비·Role·SSID를 안정적인 식별자로 분리하고, 모호한 이전 자료를 임의로 연결하지 않는지 확인합니다.
 - `tests/test_windows_packaging.py`: Windows CMD에서 배포용 호스트 키 실행 파일을 실제 Python과 잘못된 주소로 실행합니다. `tools/verify_streamlit_portable_package.py --smoke`도 압축 해제한 내장 Python 배포본으로 같은 오류 경로를 확인합니다. 네트워크 접속 전 주소 검증에서 종료되어야 합니다.
 - Linux의 Windows 전용 검사는 제외되며 PR/Release Windows runner에서 실행합니다. 실제 회사 WLC·사용자 PC·인쇄 환경 수동 검증은 포함하지 않습니다.
@@ -109,7 +109,7 @@ PR Validation에서는 Windows runner에서 다음까지 확인합니다.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_gui_exe.ps1
-python .\tools\verify_release_package.py --dist .\dist --smoke-cli
+python .\tools\verify_release_package.py --dist .\dist
 
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_streamlit_portable.ps1
 python .\tools\verify_streamlit_portable_package.py --dist .\dist --smoke

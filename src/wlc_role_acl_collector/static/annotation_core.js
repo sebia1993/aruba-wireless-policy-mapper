@@ -16,6 +16,24 @@
   const STATUSES = ['unreviewed', 'reviewed', 'reused', 'needs_review'];
   // No controller service-object definitions are collected in this schema.
   const KNOWN_SERVICES = new Set(['any', 'ip']);
+  // Visual classification only: keep collected names, notes and ACL order unchanged.
+  const COMMON_ACL_NAMES = new Set(['global-sacl', 're-guard', 'logon-control']);
+  function normalizedAclName(value) {
+    let name=String(value==null?'':value)
+      .normalize('NFKC')
+      .replace(/[\u200B-\u200D\uFEFF]/g,'')
+      .replace(/[\u2010-\u2015\u2212\uFE63\uFF0D]/g,'-')
+      .trim().toLowerCase();
+    for(let i=0;i<3&&name.length>=2;i++){
+      const first=name[0],last=name[name.length-1];
+      if((first==='"'&&last==='"')||(first==="'"&&last==="'")||
+         (first==='“'&&last==='”')||(first==='‘'&&last==='’')){
+        name=name.slice(1,-1).trim();
+      } else break;
+    }
+    return name;
+  }
+  function isCommonAclName(acl){return COMMON_ACL_NAMES.has(normalizedAclName(acl));}
   function fail(path, message) { throw new Error('Invalid annotation project at ' + path + ': ' + message); }
   function safeCopy(value) {
     const active = new Set();
@@ -89,7 +107,7 @@
     if(v.source!==null){obj(v.source,path+'.source',['projectId','snapshotId','recordId','confirmedAt']);id(v.source.projectId,path+'.source.projectId');id(v.source.snapshotId,path+'.source.snapshotId');id(v.source.recordId,path+'.source.recordId');timestamp(v.source.confirmedAt,path+'.source.confirmedAt',true);}
     if(isRole) {
       if(Object.hasOwn(v,'manualSsid'))str(v.manualSsid,path+'.manualSsid',true,512);
-      if(Object.hasOwn(v,'deviceType'))choice(v.deviceType,['','PC','mobile','ETC'],path+'.deviceType');
+      if(Object.hasOwn(v,'deviceType'))choice(v.deviceType,['','PC','windows_pc','macbook','mobile','ETC'],path+'.deviceType');
     }
   }
   function indexed(rows, path) {
@@ -264,5 +282,5 @@
     const exportedRules=rules.map(r=>({...r,controllerName:controllerMap.get(r.controllerId).name,roleName:byId.get(r.roleId).name,annotation:p.annotations.rules[r.id]||emptyRecord(p.updatedAt)}));
     return {projectId:p.projectId,snapshotId:p.snapshot.id,revision:p.revision,collectedAt:p.snapshot.collectedAt,updatedAt:p.updatedAt,exportedAt,scopeLabel:scope.type==='all'?'전체 정책':scope.type==='review'?'변경 및 검토 항목':'선택한 역할 ('+roles.length+')',controllers:p.snapshot.controllers.filter(c=>controllerIds.has(c.id)),roles:exportedRoles,rules:exportedRules,aliases:p.snapshot.aliases.filter(a=>controllerIds.has(a.controllerId)),localNetworks:p.snapshot.localNetworks.filter(n=>roleIds.has(n.roleId)),changes,unresolvedAnnotations:unresolved,issues:p.snapshot.issues.filter(i=>roleIds.has(i.roleId)||(!i.roleId&&controllerIds.has(i.controllerId))),summary:{controllerCount:controllerIds.size,roleCount:roles.length,ruleCount:rules.length,annotatedRuleCount:exportedRules.filter(r=>r.annotation.text!=='').length,needsReviewCount:exportedRoles.filter(r=>pending(r.annotation)).length+exportedRules.filter(r=>pending(r.annotation)).length+unresolved.length}};
   }
-  return Object.freeze({parseProject,validateProject,reconcileProjects,buildExportModel});
+  return Object.freeze({parseProject,validateProject,reconcileProjects,buildExportModel,isCommonAclName});
 }));

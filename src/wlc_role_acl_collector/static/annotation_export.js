@@ -9,6 +9,11 @@
   function str(value) { return value === null || value === undefined ? '' : String(value); }
   function list(values) { return (values || []).map(str).join('\n'); }
   function record(value) { return value || {}; }
+  // Preserve legacy PC unchanged and expand the two new codes for human reports.
+  function deviceLabel(value) {
+    var labels = {windows_pc:'윈도우 PC', macbook:'맥북'};
+    return Object.prototype.hasOwnProperty.call(labels, value) ? labels[value] : str(value);
+  }
   function json(value) { return value === null || value === undefined ? '' : JSON.stringify(value); }
   function annotationColumns(annotation) {
     var a = record(annotation), s = record(a.source);
@@ -38,7 +43,7 @@
       return ['변경', '', x.type, x.controllerId, controller?controller.name:'', x.roleId, role?role.name:'', x.ruleId, rule?rule.acl:'', rule?rule.raw:'', x.message, x.previousRaw, '', '', '', '', '', '', '', '', '', '', '', ''];
     });
     (m.unresolvedAnnotations || []).forEach(function (x) {
-      changes.push(['미연결 주석', x.id, x.kind, x.controllerId, x.controllerName, '', x.roleName, '', x.acl, x.raw, x.reason+(x.kind==='role'&&x.annotation.manualSsid?'\n직접 입력 SSID: '+x.annotation.manualSsid:'')+(x.kind==='role'&&x.annotation.deviceType?'\n단말: '+x.annotation.deviceType:''), '', list(x.candidateIds), x.sourceProjectId, x.sourceSnapshotId].concat(annotationColumns(x.annotation)));
+      changes.push(['미연결 주석', x.id, x.kind, x.controllerId, x.controllerName, '', x.roleName, '', x.acl, x.raw, x.reason+(x.kind==='role'&&x.annotation.manualSsid?'\n직접 입력 SSID: '+x.annotation.manualSsid:'')+(x.kind==='role'&&x.annotation.deviceType?'\n단말: '+deviceLabel(x.annotation.deviceType):''), '', list(x.candidateIds), x.sourceProjectId, x.sourceSnapshotId].concat(annotationColumns(x.annotation)));
     });
     // Review rows retain the exact occurrence IDs alongside changes and unmatched notes.
     roles.concat(rules).forEach(function (x) {
@@ -50,7 +55,7 @@
     });
     return [
       {name:'보고 요약', headers:['분류', '항목 / 식별자', '내용'], rows:summary},
-      {name:'Role 설명', headers:['Role ID','컨트롤러 ID','컨트롤러','Role','수집 SSID','Role 유형','ACL 바인딩 순서','원문 바인딩','문맥 수집 완료','관측 사용자 수','SSID 명 (직접 입력)','단말 구분'].concat(annotationHeaders), rows:roles.map(function (x) { return [x.id,x.controllerId,x.controllerName,x.name,list(x.ssids),list(x.roleTypes),list(x.aclOrder),list(x.bindingRaw),x.contextComplete,x.observedUsers,str(record(x.annotation).manualSsid),str(record(x.annotation).deviceType)].concat(annotationColumns(x.annotation)); })},
+      {name:'Role 설명', headers:['Role ID','컨트롤러 ID','컨트롤러','Role','수집 SSID','Role 유형','ACL 바인딩 순서','원문 바인딩','문맥 수집 완료','관측 사용자 수','SSID 명 (직접 입력)','단말 구분'].concat(annotationHeaders), rows:roles.map(function (x) { return [x.id,x.controllerId,x.controllerName,x.name,list(x.ssids),list(x.roleTypes),list(x.aclOrder),list(x.bindingRaw),x.contextComplete,x.observedUsers,str(record(x.annotation).manualSsid),deviceLabel(record(x.annotation).deviceType)].concat(annotationColumns(x.annotation)); })},
       {name:'ACL 상세', headers:['규칙 ID','컨트롤러 ID','컨트롤러','Role ID','Role','ACL','시퀀스','발생 순번','원문 규칙','출발지','목적지','서비스','동작','출발지 해석','목적지 해석'].concat(annotationHeaders), rows:rules.map(function (x) { return [x.id,x.controllerId,x.controllerName,x.roleId,x.roleName,x.acl,x.sequence,x.ordinal,x.raw,x.source,x.destination,x.service,x.action,json(x.sourceInterpretation),json(x.destinationInterpretation)].concat(annotationColumns(x.annotation)); })},
       {name:'변경·확인 사항', headers:['구분','레코드 ID','유형','컨트롤러 ID','컨트롤러','Role ID','Role','규칙 ID','ACL','원문 규칙','사유 / 변경 내용','이전 규칙','후보 ID','가져온 프로젝트 ID','가져온 스냅샷 ID'].concat(annotationHeaders), rows:changes},
       {name:'Alias 상세', headers:['Alias ID','컨트롤러 ID','컨트롤러','Alias','항목 순번','유형','값','원문'], rows:aliases.flatMap(function (x) {
@@ -69,7 +74,74 @@
     } while (start < text.length);
     return result;
   }
-  function createWorkbook(model, ExcelJS) {
+
+
+  function compactControllerLabel(rule, byId, counts) {
+    var controller=byId.get(rule.controllerId);
+    var name=str(rule.controllerName || (controller && controller.name));
+    if((counts.get(name)||0)<2) return name;
+    var endpoint=controller && controller.host
+      ? controller.host+(controller.port?':'+controller.port:'')
+      : 'ID '+str(rule.controllerId);
+    return name+' ('+endpoint+')';
+  }
+
+  // Compact is a presentation-only projection: source snapshots, rule IDs,
+  // duplicate occurrences and annotation records remain untouched.
+  function createCompactWorkbook(model, ExcelJS) {
+    if (!ExcelJS || typeof ExcelJS.Workbook !== 'function') throw new Error('로컬 ExcelJS 번들이 필요합니다.');
+    var book = new ExcelJS.Workbook();
+    book.creator = 'Aruba Wireless Policy Mapper';
+    book.subject = 'Compact ACL annotation report';
+    book.title = 'ACL 규칙 간단 보고서';
+    var byId=new Map((model.controllers||[]).map(function(c){return [c.id,c];}));
+    var counts=new Map();
+    (model.controllers||[]).forEach(function(c){var n=str(c.name);counts.set(n,(counts.get(n)||0)+1);});
+    var sheet = book.addWorksheet('ACL 간단 보고', {
+      views:[{state:'frozen',ySplit:1}],
+      pageSetup:{paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}
+    });
+    var headers = ['컨트롤러','Role','ACL','순서','출발지','목적지','서비스','동작','행별 주석'];
+    // Hidden continuation columns retain 32,767-char-safe, lossless long notes.
+    sheet.columns = [24,26,26,12,30,30,24,14,65].map(function(width){return {width:width};})
+      .concat([{width:12,hidden:true},{width:14,hidden:true}]);
+    sheet.addRow(headers.concat(['_레코드 번호','_조각 / 전체']));
+    (model.rules || []).forEach(function(rule,index){
+      var values=[compactControllerLabel(rule,byId,counts),rule.roleName,rule.acl,rule.sequence || rule.ordinal,
+        rule.source,rule.destination,rule.service,rule.action,record(rule.annotation).text].map(str);
+      var parts=values.map(chunks), count=Math.max.apply(null,parts.map(function(p){return p.length;}));
+      for(var i=0;i<count;i++){
+        var visible=parts.map(function(p,j){
+          return p[i] || (i>0 && j!==8 && p.length===1 ? p[0] : '');
+        });
+        var row=sheet.addRow(visible.concat([str(index+1),str(i+1)+'/'+str(count)]));
+        row.eachCell({includeEmpty:true},function(cell){
+          // Never turn operator-entered notes into Excel formulas or hyperlinks.
+          cell.numFmt='@';
+          cell.alignment={vertical:'top',wrapText:true};
+          cell.font={name:'맑은 고딕',size:10,color:{argb:'FF172B4D'}};
+          cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:index%2?'FFF0F5FA':'FFFFFFFF'}};
+          cell.border={bottom:{style:'hair',color:{argb:'FFD7E0EA'}}};
+        });
+        row.height=Math.min(175,Math.max(28,15*Math.max.apply(null,visible.map(function(v){
+          return Math.ceil(str(v).length/50)+str(v).split('\n').length;
+        }))));
+      }
+    });
+    var header=sheet.getRow(1);
+    header.height=32;
+    header.font={name:'맑은 고딕',size:11,bold:true,color:{argb:'FFFFFFFF'}};
+    header.alignment={vertical:'middle',wrapText:true};
+    header.eachCell(function(cell){cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF173D64'}};});
+    sheet.getColumn(10).hidden=true;
+    sheet.getColumn(11).hidden=true;
+    sheet.autoFilter={from:{row:1,column:1},to:{row:Math.max(1,sheet.rowCount),column:headers.length}};
+    sheet.pageSetup.printTitlesRow='1:1';
+    sheet.headerFooter.oddFooter='&LACL 간단 보고&R&P / &N';
+    return book;
+  }
+  function createWorkbook(model, ExcelJS, options) {
+    if (options && options.profile === 'simple') return createCompactWorkbook(model, ExcelJS);
     if (!ExcelJS || typeof ExcelJS.Workbook !== 'function') throw new Error('로컬 ExcelJS 번들이 필요합니다.');
     var book = new ExcelJS.Workbook();
     book.creator = 'Aruba Wireless Policy Mapper';
@@ -103,8 +175,8 @@
     });
     return book;
   }
-  async function workbookBytes(model, ExcelJS) {
-    var bytes = await createWorkbook(model, ExcelJS).xlsx.writeBuffer();
+  async function workbookBytes(model, ExcelJS, options) {
+    var bytes = await createWorkbook(model, ExcelJS, options).xlsx.writeBuffer();
     return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   }
   function escape(value) { return str(value).replace(/[&<>"']/g, function (char) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]; }); }

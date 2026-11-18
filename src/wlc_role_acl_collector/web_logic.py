@@ -220,6 +220,11 @@ def _target_collection_slot(host: str):
             _ACTIVE_TARGETS.discard(target_key)
 
 
+def validate_web_request(request: WebCollectionRequest) -> None:
+    """Validate Web inputs before any SSH network probe or authentication."""
+    _validate_request(request)
+
+
 def _validate_request(request: WebCollectionRequest) -> None:
     protocol = request.protocol.strip().lower()
     validate_wlc_address(request.host)

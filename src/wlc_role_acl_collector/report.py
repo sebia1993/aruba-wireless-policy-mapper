@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 import uuid
 from datetime import datetime
 from functools import lru_cache
@@ -669,7 +670,11 @@ def _write_html(
 ) -> None:
     annotation_project = annotation_project if annotation_project is not None else build_annotation_project(frames)
     annotation_project_json = _json_for_html(annotation_project)
-    annotation_license = _annotation_asset_source("exceljs.LICENSE.txt")
+    annotation_license = "\n\n".join([
+        _annotation_asset_source("exceljs.LICENSE.txt"),
+        _annotation_asset_source("pdfmake.LICENSE.txt"),
+        _annotation_asset_source("NanumGothic.OFL.txt"),
+    ])
     annotation_snapshot_id = str(annotation_project["snapshot"]["id"])
     annotation_editor_css = _annotation_asset_source("annotation_editor.css", tag="style")
     annotation_scripts = "\n".join(
@@ -679,6 +684,9 @@ def _write_html(
             ("annotation-export-script", "annotation_export.js"),
             ("annotation-import-script", "annotation_import.js"),
             ("annotation-exceljs-script", "exceljs.min.js"),
+            ("annotation-pdfmake-script", "pdfmake.min.js"),
+            ("annotation-pdf-font-script", "pdfmake_nanum.vfs.js"),
+            ("annotation-pdf-export-script", "annotation_pdf.js"),
             ("annotation-editor-script", "annotation_editor.js"),
         ]
     )
@@ -1520,7 +1528,6 @@ def _write_html(
     <div class="report-actions no-print">
       <button id="save-commented-html" class="report-action" type="button">주석 포함 HTML 저장</button>
       <button id="save-role-png" class="report-action" type="button">선택 Role PNG 저장</button>
-      <button id="print-pdf" class="report-action secondary" type="button">PDF 저장/인쇄</button>
       <button id="toggle-raw" class="report-action secondary" type="button" aria-pressed="false">Raw 보기</button>
       <span id="role-image-status" class="role-image-status" aria-live="polite"></span>
     </div>
@@ -1769,7 +1776,6 @@ def _source_annotation_bridge_script() -> str:
       syncRoleDescriptionDomValues();
     };
     document.querySelector('#save-commented-html')?.addEventListener('click', () => window.AnnotationEditorApp?.saveHtml());
-    document.querySelector('#print-pdf')?.addEventListener('click', () => window.AnnotationEditorApp?.printPdf());
     """
 
 
@@ -3410,9 +3416,27 @@ def _other_acl_row_count(role: str, rows: list[dict[str, Any]]) -> int:
     return sum(1 for row in rows if not _is_role_related_acl(role, str(row.get("acl", ""))))
 
 
+def _common_acl_name(value: str) -> str:
+    """Normalize only for display classification, never the stored ACL."""
+    name = unicodedata.normalize("NFKC", value)
+    name = re.sub(r"[\u200B-\u200D\uFEFF]", "", name)
+    name = re.sub(r"[\u2010-\u2015\u2212\uFE63\uFF0D]", "-", name).strip().casefold()
+    for _ in range(3):
+        if len(name) < 2:
+            break
+        if (name[0], name[-1]) in {('"', '"'), ("'", "'"), ("“", "”"), ("‘", "’")}:
+            name = name[1:-1].strip()
+        else:
+            break
+    return name
+
+
 def _is_role_related_acl(role: str, acl_name: str) -> bool:
     role_name = role.strip().casefold()
     acl = acl_name.strip().casefold()
+    # Keep collected ACLs and evaluation order; hide known shared names only.
+    if _common_acl_name(acl_name) in {"global-sacl", "re-guard", "logon-control"}:
+        return False
     if not role_name or not acl:
         return False
     return acl == role_name or acl.startswith(role_name) or role_name in acl

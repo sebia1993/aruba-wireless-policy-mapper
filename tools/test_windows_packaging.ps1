@@ -184,7 +184,7 @@ try {
     [System.IO.File]::WriteAllText((Join-Path $fixtureRepo "config\role_networks.example.xlsx"), "synthetic template")
     [System.IO.File]::WriteAllText((Join-Path $fixtureRepo "config\mock_scenarios\sample.json"), "{}")
     [System.IO.File]::WriteAllText((Join-Path $fixtureRepo "app.py"), "# synthetic app")
-    foreach ($template in @("trust_host_key.cmd", "webapp_settings.cmd", "README_WEBAPP_KO.txt")) {
+    foreach ($template in @("webapp_settings.cmd", "README_WEBAPP_KO.txt")) {
         [System.IO.File]::WriteAllText((Join-Path $fixtureRepo "packaging\streamlit_portable\$template"), "synthetic template")
     }
     [System.IO.File]::WriteAllText((Join-Path $fixtureRepo "packaging\streamlit_portable\start_webapp.cmd"), "@echo off`r`necho STREAMLIT_PORTABLE_OK`r`n")
@@ -209,7 +209,7 @@ try {
     }
     & (Join-Path $fixtureRepo "build_windows_gui_exe.ps1") -PythonExe "Invoke-FixturePython"
     Remove-Item Function:\Copy-Item
-    Assert-True ($testState.ExeCopyAttempts -eq 3) "GUI builder retries the initial copy then copies CLI"
+    Assert-True ($testState.ExeCopyAttempts -eq 2) "GUI builder retries the initial copy once"
     $builtGuiZip = Join-Path $fixtureRepo "dist\WlcRoleAclCollectorGUI_v$version.zip"
     Assert-True ((Read-ZipEntry $builtGuiZip "WlcRoleAclCollectorGUI.exe") -eq "synthetic executable") "GUI root layout preserved"
     Assert-True ((Read-ZipEntry $builtGuiZip "config/mock_scenarios/sample.json") -eq "{}") "GUI nested config preserved"
