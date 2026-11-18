@@ -5,6 +5,7 @@ from __future__ import annotations
 import socket
 import socketserver
 import threading
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -76,25 +77,28 @@ class MockWlcServer:
         class Handler(socketserver.BaseRequestHandler):
             def handle(handler_self) -> None:
                 # 실제 인증 검증이 목적이 아니라 collector가 기대하는 로그인 프롬프트 흐름을 흉내 냅니다.
+                lines = _telnet_lines(handler_self.request)
                 _send(handler_self.request, scenario.username_prompt)
-                _read_line(handler_self.request)
+                if not next((line for line in lines if line), None):
+                    return
                 _send(handler_self.request, scenario.password_prompt)
-                _read_line(handler_self.request)
+                if next(lines, None) is None:
+                    return
                 if scenario.login.casefold() != "success":
                     _send(handler_self.request, "Authentication failed\n")
                     return
                 _send(handler_self.request, f"\n{scenario.prompt}")
-                while True:
-                    command = _read_line(handler_self.request)
+                for command in lines:
                     if not command:
-                        return
+                        _send(handler_self.request, f"\n{scenario.prompt}")
+                        continue
                     if command.casefold() in {"exit", "quit", "logout"}:
                         _send(handler_self.request, "logout\n")
                         return
                     response = scenario.response_for(command)
                     if response == "__MOCK_CLOSE__":
                         return
-                    _send(handler_self.request, f"\n{response}\n{scenario.prompt}")
+                    _send(handler_self.request, f"{command}\n{response}\n{scenario.prompt}")
 
         server = _ThreadingTcpServer((self.host, self.port), Handler)
         self._server = server
@@ -250,18 +254,18 @@ def _send(sock: socket.socket, text: str) -> None:
     sock.sendall(text.encode("utf-8"))
 
 
-def _read_line(sock: socket.socket) -> str:
-    chunks: list[bytes] = []
-    while True:
-        data = sock.recv(1)
-        if not data:
-            return b"".join(chunks).decode("utf-8", errors="ignore").strip()
-        if data in {b"\n", b"\r"}:
-            # Telnet clients commonly terminate a line with CRLF. If the
-            # previous call consumed CR, the next call can see the leftover
-            # LF first. Ignore leading newline bytes so username/password and
-            # command reads stay aligned for both LF and CRLF clients.
-            if not chunks:
+def _telnet_lines(sock: socket.socket) -> Iterator[str]:
+    """Accept CR, LF and CRLF, preserving blank lines used to probe the prompt."""
+    line = bytearray()
+    previous_cr = False
+    while chunk := sock.recv(1024):
+        for byte in chunk:
+            if byte == 10 and previous_cr:
+                previous_cr = False
                 continue
-            return b"".join(chunks).decode("utf-8", errors="ignore").strip()
-        chunks.append(data)
+            previous_cr = byte == 13
+            if previous_cr or byte == 10:
+                yield line.decode("utf-8", errors="ignore").strip()
+                line.clear()
+            else:
+                line.append(byte)

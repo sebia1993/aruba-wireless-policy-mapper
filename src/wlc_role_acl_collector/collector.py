@@ -577,7 +577,17 @@ def _open_connection(
             )
         from netmiko import ConnectHandler
 
-        return ConnectHandler(**params)
+        connection = ConnectHandler(**params)
+        if params["device_type"] == "generic_telnet":
+            # Netmiko's terminal-server driver leaves login and prompt discovery
+            # to its caller. Complete both before reporting a connected WLC.
+            try:
+                connection.std_login()
+                connection.set_base_prompt()
+            except Exception:
+                connection.disconnect()
+                raise
+        return connection
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("netmiko와 paramiko가 live WLC 수집에 필요합니다.") from exc
 

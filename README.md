@@ -27,9 +27,9 @@
 
 ### 공개 Mock WLC 데모와 소스
 
-[브라우저에서 공개 데모 체험](https://sebia1993-wireless-policy-demo.streamlit.app/) · [데모 소스 (`portfolio-demo-mode` 브랜치)](https://github.com/sebia1993/aruba-wireless-policy-mapper/tree/portfolio-demo-mode/portfolio_demo) · [데모 추가 Draft PR #10](https://github.com/sebia1993/aruba-wireless-policy-mapper/pull/10)
+[브라우저에서 공개 데모 체험](https://sebia1993-wireless-policy-demo.streamlit.app/) · [데모 소스](portfolio_demo/app.py)
 
-공개 데모는 `main`의 로컬 운영 앱과 분리한 `portfolio-demo-mode` 브랜치의 `portfolio_demo/app.py`로 제공합니다. 실제 장비 접속과 계정 입력은 비활성화되어 있으며, loopback Mock WLC의 비식별 합성 응답을 원 프로젝트의 조회 수집 → Parser → 분석 → HTML/Excel/CSV 보고서 생성 코드로 처리합니다. 운영 장비를 조회하거나 변경하지 않으며, 실제 운영망 성과·호환성의 증거가 아닙니다. 정상 수집, 부분 수집 실패, 인증 실패, 설정 수집 실패 시나리오를 체험할 수 있습니다.
+공개 데모는 `portfolio_demo/app.py`에서 실행합니다. 접속 대상은 서버가 시작한 loopback Mock WLC로 고정되어 있고 자격 증명은 합성 데이터만 사용합니다. 정상 수집, 부분 수집 실패, 인증 실패, 설정 수집 실패를 선택해 수집 기록과 결과를 확인할 수 있습니다. 로컬 운영 앱(`app.py`)과 같은 Parser·분석·보고서 생성 코드를 사용합니다.
 
 ### 로컬 운영 앱
 

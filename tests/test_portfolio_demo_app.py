@@ -13,7 +13,10 @@ def _new_app() -> AppTest:
     app = AppTest.from_file(str(APP_PATH)).run(timeout=30)
     assert not app.exception
     assert app.text_input(key="demo_host").value == "192.0.2.10"
+    assert app.text_input(key="demo_host").disabled
     assert app.text_input(key="demo_username").disabled
+    assert app.text_input(key="demo_password").disabled
+    assert app.get("file_uploader")[0].proto.disabled
     assert app.button(key="demo_run")
     return app
 
@@ -34,6 +37,7 @@ def test_portfolio_demo_runs_real_collection_and_report_pipeline():
     result = app.session_state["demo_last_result"]
     assert result.success
     assert result.summary["collection_status"] == "completed"
+    assert result.summary["host"] == "127.0.0.1"
     assert result.artifacts["html"].data
     assert result.artifacts["xlsx"].data
     assert result.artifacts["csv"].data
@@ -77,7 +81,8 @@ def test_portfolio_demo_auth_failure_uses_real_collector_failure_path():
     result = app.session_state["demo_last_result"]
     assert not result.success
     assert result.summary["collection_status"] == "failed"
-    assert result.summary["failure_stage"]
+    assert result.summary["failure_stage"] == "authentication"
+    assert not any("CONNECT OK" in line for line in app.session_state["demo_last_logs"])
     assert any("RUN FAILED" in line for line in app.session_state["demo_last_logs"])
 
 

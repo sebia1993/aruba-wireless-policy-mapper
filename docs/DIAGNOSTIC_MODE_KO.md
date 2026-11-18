@@ -12,16 +12,10 @@ GUI에서 실행:
 4. `안전 진단` 클릭. SSH 최초 접속은 지문 확인창이 나타나며, 별도 경로로 SHA-256 지문을 검증한 뒤에만 승인합니다. 기존 승인 키는 자동 검사하고 변경 키는 차단합니다.
 5. 완료 후 `HTML 보고서 열기` 또는 `결과 폴더 열기` 클릭
 
-CLI에서 실행:
+Python 소스 환경에서는 의존성을 설치한 후 저장소 루트에서 같은 GUI를 엽니다.
 
 ```powershell
-WlcRoleAclCollectorCLI.exe diagnose --controllers config\controllers.example.csv --output-dir outputs
-```
-
-Python 소스 환경에서 실행:
-
-```powershell
-python -m wlc_role_acl_collector diagnose --controllers config\controllers.example.csv --output-dir outputs
+python gui_launcher.py
 ```
 
 ## 산출물
@@ -60,12 +54,10 @@ outputs\<timestamp>\
 
 ## Mock 서버 사용
 
-실제 장비 없이 개발 PC에서 테스트할 때:
+개발 PC에서 테스트 의존성을 설치한 후 저장소 루트에서 다음 명령을 실행합니다.
 
 ```powershell
-WlcRoleAclCollectorCLI.exe mock-server --protocol telnet --scenario config\mock_scenarios\success_minimal.json
+python -m pytest -q tests/test_mock_server.py tests/test_diagnostic_mode.py
 ```
 
-다른 터미널에서 해당 로컬 포트를 대상으로 수집 또는 진단을 실행합니다.
-
-같은 `MockWlcServer` 객체를 중복 시작할 수 없으며, 종료 시 listener와 worker thread를 정리합니다. 반복 테스트에서는 `start()`와 `stop()`을 한 쌍으로 사용하십시오.
+Mock 서버 테스트는 loopback의 임시 포트를 열어 합성 SSH·Telnet 응답을 읽고 서버를 닫습니다. 진단 테스트는 합성 결과로 진단 단계와 산출물을 확인합니다.
