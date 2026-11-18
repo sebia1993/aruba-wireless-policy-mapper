@@ -459,19 +459,100 @@ test('discarding the pending draft permits current branch recovery after a downl
   } finally {env.close();}
 });
 
-test('C layout has one Role workspace with three internal tabs and no legacy mode buttons', () => {
-  const env=mount(); const doc=env.window.document;
+test('B layout replaces separate collection tab with in-place source evidence', () => {
+  const env=mount(),doc=env.window.document;
   try {
-    const ids=['policy','access','collection'];
+    const ids=['policy','access'];
     assert.deepEqual(Array.from(doc.querySelectorAll('[data-unified-tab]')).map(el=>el.dataset.unifiedTab),ids);
     assert.equal(doc.getElementById('ann-source-mode'),null);
     assert.equal(doc.getElementById('ann-editor-mode'),null);
+    assert.equal(doc.getElementById('ann-tab-btn-collection'),null);
+    assert.equal(doc.getElementById('ann-tab-collection'),null);
     assert.equal(doc.getElementById('ann-tab-policy').hidden,false);
+    assert.equal(doc.querySelectorAll('.ann-rules').length,1);
+    const fullReport=doc.querySelector('#ann-source-details #ann-source-slot #source-report');
+    assert.ok(fullReport,'original report remains available as optional advanced evidence');
+    assert.equal(doc.getElementById('ann-source-details').open,false);
+    assert.equal(fullReport.hidden,true);
     for(const name of ids){
       doc.getElementById('ann-tab-btn-'+name).click();
       for(const other of ids) assert.equal(doc.getElementById('ann-tab-'+other).hidden,other!==name);
       assert.equal(doc.getElementById('ann-tab-btn-'+name).getAttribute('aria-selected'),'true');
     }
+    doc.getElementById('ann-tab-btn-policy').click();
+    const details=doc.getElementById('ann-source-details');
+    details.open=true;details.dispatchEvent(new env.window.Event('toggle'));
+    assert.equal(fullReport.hidden,false);
+    details.open=false;details.dispatchEvent(new env.window.Event('toggle'));
+    assert.equal(fullReport.hidden,true);
+  } finally {env.close();}
+});
+
+test('B layout shows controller collection confidence beside the single ACL and annotation table', () => {
+  const p=fixture();
+  p.snapshot.controllers[0].coverage='partial';
+  p.snapshot.controllers[0].failedCommands=['show rights'];
+  p.snapshot.roles[0].contextComplete=false;
+  const env=mount(p),doc=env.window.document;
+  try {
+    const summary=doc.querySelector('.ann-collection-strip');
+    assert.ok(summary);
+    assert.match(summary.textContent,/일부 수집/);
+    assert.match(summary.textContent,/추가 확인 필요/);
+    assert.match(summary.textContent,/show rights/);
+    assert.equal(doc.querySelectorAll('.ann-rules').length,1);
+    assert.ok(doc.querySelector('[data-note-id="rule-a"]'));
+    assert.equal(doc.querySelectorAll('.ann-rule-evidence').length,1);
+    assert.equal(doc.querySelector('[data-rule-evidence="rule-a"]').open,false);
+  } finally {env.close();}
+});
+
+test('per-rule evidence expands collected raw, controller-scoped Alias and unresolved references safely', () => {
+  const p=fixture();
+  p.snapshot.aliases.push({id:'a',controllerId:'controller-a',name:'Office',entries:[
+    {type:'host',value:'10.0.0.4',raw:'host 10.0.0.4'},
+    {type:'host',value:'<script>alert(1)</script>',raw:'host <script>alert(1)</script>'}
+  ]});
+  p.snapshot.controllers.push({...p.snapshot.controllers[0],id:'controller-b',name:'Different WLC',host:'192.0.2.2'});
+  p.snapshot.aliases.push({id:'b',controllerId:'controller-b',name:'Office',entries:[{type:'host',value:'198.51.100.10',raw:'host 198.51.100.10'}]});
+  p.snapshot.rules[0].source='alias Office';
+  p.snapshot.rules[0].destination='alias NotCollected';
+  p.snapshot.rules[0].raw='<img src=x onerror="alert(2)"> alias Office any permit';
+  const env=mount(p),doc=env.window.document;
+  try {
+    const evidence=doc.querySelector('[data-rule-evidence="rule-a"]');
+    const body=evidence.querySelector('[data-rule-evidence-body]');
+    assert.equal(body.textContent,'','Alias data is lazily rendered');
+    evidence.open=true;evidence.dispatchEvent(new env.window.Event('toggle'));
+    assert.match(body.textContent,/10\.0\.0\.4/);
+    assert.doesNotMatch(body.textContent,/198\.51\.100\.10/);
+    assert.match(body.textContent,/NotCollected/);
+    assert.match(body.textContent,/수집된 Alias 정의가 없습니다/);
+    assert.match(body.textContent,/<script>alert\(1\)<\/script>/);
+    assert.match(body.textContent,/<img src=x onerror="alert\(2\)">/);
+    assert.equal(body.querySelector('script'),null);
+    assert.equal(body.querySelector('img'),null);
+    assert.equal(env.app.exportModel().rules.length,1);
+    assert.equal(env.app.getProject().snapshot.rules[0].raw,p.snapshot.rules[0].raw);
+    assert.equal(env.app.getProject().annotations.rules['rule-a'].text,p.annotations.rules['rule-a'].text);
+  } finally {env.close();}
+});
+
+test('optional old source cannot become visible after loading a mismatched work file', () => {
+  const env=mount(),doc=env.window.document;
+  try {
+    const other=fixture();other.snapshot.rules[0].raw+=' altered';
+    assert.equal(env.app.openText(JSON.stringify(other)),true);
+    const details=doc.getElementById('ann-source-details');
+    details.open=true;details.dispatchEvent(new env.window.Event('toggle'));
+    assert.equal(doc.getElementById('source-report').hidden,true);
+    assert.equal(doc.getElementById('ann-collection-message').hidden,false);
+    assert.match(doc.getElementById('ann-collection-message').textContent,/원본 수집본이 다르/);
+    const evidence=doc.getElementById('ann-role-detail');
+    assert.ok(evidence.querySelector('[data-rule-evidence="rule-a"]'));
+    assert.match(evidence.querySelector('.ann-collection-strip').textContent,/수집 완료/);
+    doc.getElementById('ann-tab-btn-access').click();
+    assert.equal(doc.querySelector('#ann-access-message').hidden,false);
   } finally {env.close();}
 });
 
