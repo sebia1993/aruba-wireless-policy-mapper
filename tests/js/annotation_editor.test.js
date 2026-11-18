@@ -593,6 +593,41 @@ test('exact-name common ACLs are hidden by default, reversible, and preserved in
   } finally {env.close();}
 });
 
+test('switching roles after turning common ACLs off hides ra-guard at either leading position', t => {
+  const p = fixture();
+  const employeeAcls = ['ra-guard', 'EMPLOYEE'];
+  const guestAcls = ['global-sacl', 'ra-guard', 're-guard', 'GUEST', 'ra-guard-custom'];
+  const employee = p.snapshot.roles[0];
+  employee.aclOrder = employeeAcls;
+  p.snapshot.roles.push({...employee, id:'role-b', name:'GUEST', aclOrder:guestAcls});
+  const base = p.snapshot.rules[0];
+  p.snapshot.rules = p.snapshot.roles.flatMap(role => role.aclOrder.map((acl, i) => ({
+    ...base, id:role.id + '-rule-' + i, roleId:role.id, acl, ordinal:i+1
+  })));
+  p.annotations.rules = {};
+
+  const env = mount(p);
+  t.after(env.close);
+  const doc = env.window.document;
+  const toggle = () => doc.getElementById('ann-show-common-acl');
+  const openRole = id => doc.querySelector('[data-open-role="' + id + '"]').click();
+  const aclCells = () => Array.from(doc.querySelectorAll('.ann-rules tbody tr > td:first-child > strong'), cell => cell.textContent);
+
+  toggle().click();
+  assert.equal(toggle().checked, true);
+  assert.deepEqual(aclCells(), employeeAcls);
+  toggle().click();
+  openRole('role-b');
+  assert.equal(toggle().checked, false);
+  assert.deepEqual(aclCells(), ['GUEST', 'ra-guard-custom']);
+  openRole('role-a');
+  assert.deepEqual(aclCells(), ['EMPLOYEE']);
+
+  openRole('role-b');
+  toggle().click();
+  assert.deepEqual(aclCells(), guestAcls);
+});
+
 test('Role with only common ACLs does not claim no ACL policy was collected', () => {
   const p=fixture();
   p.snapshot.rules=p.snapshot.rules.map(r=>({...r,acl:'logon-control'}));
