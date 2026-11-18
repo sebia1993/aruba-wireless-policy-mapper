@@ -160,12 +160,13 @@ SSID → Role → ACL 상세와 Access Check의 이전 HTML 예시는 [2026-06-3
 - 관리자 요약
 - SSID / Role 관계
 - Role별 ACL 상세
-- 기본 `주석·보고서` 화면에서 Role 설명·ACL 주석·확인 상태 편집
+- **C안 Role 내부 탭 통합:** 선택한 Role을 기준으로 `정책·주석` / `ACL 접근 판정` / `수집 상세`를 전환. 기존 상단 두 메뉴는 제거
 - Role 옆 `SSID 명` 직접 입력 및 `단말 구분`(PC / mobile / ETC) 선택, 작업 파일·이전 주석·PDF·Excel에 보관
 - JSON 작업 저장·열기, 이전 주석 재사용과 미연결 설명 보존
 - 전체/선택 Role/변경·확인 범위의 실제 XLSX와 브라우저 인쇄를 통한 PDF 저장
 - 현재 작업을 담은 독립 HTML 편집기 저장
-- 원본 `수집 결과·통신 확인`의 선택 Role PNG 저장
+- Role 내부 `수집 상세` 탭의 선택 Role PNG 저장 및 수집 품질·원본 확인
+- `global-sacl`은 Role의 주석 화면에서 기본 숨김, `공통 ACL 함께 보기`로 복원 (원본·저장·보고 데이터 불변)
 - Access Check
 - 부분 수집 시 영향 Role/SSID와 권장 조치
 
