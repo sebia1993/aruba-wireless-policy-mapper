@@ -173,7 +173,7 @@ def test_streamlit_portable_build_contract():
     assert "첫 실행" in guide
     assert "start_webapp.cmd" in guide
     assert "trust_host_key.cmd" not in build_script
-    assert "trust_host_key.cmd" not in verifier
+    assert '"trust_host_key.cmd",' not in verifier
 
     for batch_file in (
         repo_root / "packaging" / "streamlit_portable" / "start_webapp.cmd",
@@ -212,8 +212,8 @@ def test_combined_release_build_contract():
         assert expected in verifier
 
     assert "Source code" in readme
-    assert "WlcRoleAclCollectorCLI.exe" not in verifier
-    assert "trust_host_key.cmd" not in verifier
+    assert '"gui/WlcRoleAclCollectorCLI.exe",' not in verifier
+    assert '"trust_host_key.cmd",' not in verifier
     assert "gui\\WlcRoleAclCollectorGUI.exe" in readme
     assert "web\\start_webapp.cmd" in readme
 
@@ -514,5 +514,6 @@ def test_runtime_dependencies_include_customtkinter():
 def test_removed_console_artifacts_are_forbidden_in_packages(verifier, forbidden):
     path = Path(__file__).parents[1] / "tools" / verifier
     namespace = runpy.run_path(str(path))
+    names = set(namespace["REQUIRED_FILES"]) | set(namespace.get("REQUIRED_MOCK_SCENARIOS", ())) | {forbidden}
     with pytest.raises(SystemExit, match="Removed CLI"):
-        namespace["_verify_required_files"](set(namespace["REQUIRED_FILES"]) | {forbidden})
+        namespace["_verify_required_files"](names)

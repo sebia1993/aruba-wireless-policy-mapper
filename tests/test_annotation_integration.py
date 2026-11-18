@@ -195,5 +195,6 @@ def test_windows_commands_collect_required_offline_editor_assets():
     root = Path(__file__).resolve().parents[1]
     text = (root / "build_windows_gui_exe.ps1").read_text(encoding="utf-8")
     commands = re.findall(r"& \$PythonExe -m PyInstaller.*?launcher\.py\"", text, flags=re.S)
-    assert len(commands) == 2
-    assert all("--collect-data wlc_role_acl_collector" in command for command in commands)
+    assert len(commands) == 1  # CLI executable has been removed.
+    assert "gui_launcher.py" in commands[0]
+    assert "--collect-data wlc_role_acl_collector" in commands[0]
