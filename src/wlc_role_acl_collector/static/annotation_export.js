@@ -75,6 +75,17 @@
     return result;
   }
 
+
+  function compactControllerLabel(rule, byId, counts) {
+    var controller=byId.get(rule.controllerId);
+    var name=str(rule.controllerName || (controller && controller.name));
+    if((counts.get(name)||0)<2) return name;
+    var endpoint=controller && controller.host
+      ? controller.host+(controller.port?':'+controller.port:'')
+      : 'ID '+str(rule.controllerId);
+    return name+' ('+endpoint+')';
+  }
+
   // Compact is a presentation-only projection: source snapshots, rule IDs,
   // duplicate occurrences and annotation records remain untouched.
   function createCompactWorkbook(model, ExcelJS) {
@@ -83,6 +94,9 @@
     book.creator = 'Aruba Wireless Policy Mapper';
     book.subject = 'Compact ACL annotation report';
     book.title = 'ACL 규칙 간단 보고서';
+    var byId=new Map((model.controllers||[]).map(function(c){return [c.id,c];}));
+    var counts=new Map();
+    (model.controllers||[]).forEach(function(c){var n=str(c.name);counts.set(n,(counts.get(n)||0)+1);});
     var sheet = book.addWorksheet('ACL 간단 보고', {
       views:[{state:'frozen',ySplit:1}],
       pageSetup:{paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}
@@ -93,7 +107,7 @@
       .concat([{width:12,hidden:true},{width:14,hidden:true}]);
     sheet.addRow(headers.concat(['_레코드 번호','_조각 / 전체']));
     (model.rules || []).forEach(function(rule,index){
-      var values=[rule.controllerName,rule.roleName,rule.acl,rule.sequence || rule.ordinal,
+      var values=[compactControllerLabel(rule,byId,counts),rule.roleName,rule.acl,rule.sequence || rule.ordinal,
         rule.source,rule.destination,rule.service,rule.action,record(rule.annotation).text].map(str);
       var parts=values.map(chunks), count=Math.max.apply(null,parts.map(function(p){return p.length;}));
       for(var i=0;i<count;i++){

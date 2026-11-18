@@ -71,6 +71,14 @@
     validateModel(model);
     const rules=model.rules||[], controllers=model.controllers||[];
     const incomplete=controllers.some(c=>!c.identityKnown||c.coverage!=='completed'||(c.failedCommands||[]).length>0);
+    const byId=new Map(controllers.map(c=>[c.id,c]));
+    const duplicateNames=new Map();
+    controllers.forEach(c=>{const n=str(c.name);duplicateNames.set(n,(duplicateNames.get(n)||0)+1);});
+    const controllerLabel=rule=>{
+      const c=byId.get(rule.controllerId),name=str(rule.controllerName||c?.name);
+      if((duplicateNames.get(name)||0)<2)return nonempty(name,'미확인');
+      return nonempty(name,'미확인')+' ('+(c?.host?c.host+(c.port?':'+c.port:''):'ID '+str(rule.controllerId))+')';
+    };
     const content=[
       {text:'ACL 규칙 간단 보고서',style:'reportTitle',margin:[0,0,0,7]},
       para('보고 범위: '+nonempty(model.scopeLabel,'전체 정책')+'   |   수집: '+nonempty(model.collectedAt,'미확인')+
@@ -89,7 +97,7 @@
     if(!groups.length)content.push(para('선택한 보고 범위에 ACL 규칙이 없습니다.'));
     for(const group of groups){
       const first=group.rules[0];
-      content.push({text:'컨트롤러: '+nonempty(first.controllerName,'미확인')+
+      content.push({text:'컨트롤러: '+controllerLabel(first)+
         '   |   Role: '+nonempty(first.roleName,'미확인')+
         '   |   ACL: '+nonempty(first.acl,'미확인'),
         style:'groupHeading',margin:[0,11,0,4]});

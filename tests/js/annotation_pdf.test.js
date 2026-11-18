@@ -161,3 +161,16 @@ test('compact PDF warns on partial controller coverage without changing detailed
   assert.equal(detailed.pageOrientation,'portrait');
   assert.match(allText(detailed.content),/Alias 상세/);
 });
+
+
+test('compact PDF differentiates identically named WLCs by endpoint without exposing internal IDs',()=>{
+  const p=fixture(),c=p.snapshot.controllers[0],r=p.snapshot.roles[0],rule=p.snapshot.rules[0];
+  p.snapshot.controllers.push({...c,id:'controller-b',host:'192.0.2.99'});
+  p.snapshot.roles.push({...r,id:'role-b',controllerId:'controller-b'});
+  p.snapshot.rules.push({...rule,id:'rule-b',controllerId:'controller-b',roleId:'role-b'});
+  const doc=Pdf.documentDefinition(model(p),{profile:'simple'});
+  const output=allText(doc.content);
+  assert.ok(output.includes('192.0.2.1'));
+  assert.ok(output.includes('192.0.2.99'));
+  assert.ok(!output.includes('controller-b'));
+});

@@ -151,3 +151,17 @@ test('compact ACL output keeps duplicate rule occurrences and scope filtering wi
   const empty=Core.buildExportModel(p,{type:'selected',roleIds:[]});
   assert.equal(exporter.createWorkbook(empty,ExcelJS,{profile:'simple'}).getWorksheet('ACL 간단 보고').rowCount,1);
 });
+
+
+test('compact Excel disambiguates controllers with the same display name by actual endpoint',()=>{
+  const p=fixture(),c=p.snapshot.controllers[0],r=p.snapshot.roles[0],rule=p.snapshot.rules[0];
+  p.snapshot.controllers.push({...c,id:'controller-b',host:'192.0.2.99'});
+  p.snapshot.roles.push({...r,id:'role-b',controllerId:'controller-b'});
+  p.snapshot.rules.push({...rule,id:'rule-b',controllerId:'controller-b',roleId:'role-b'});
+  const model=Core.buildExportModel(p,{type:'all'});
+  const sheet=exporter.createWorkbook(model,ExcelJS,{profile:'simple'}).getWorksheet('ACL 간단 보고');
+  const labels=[sheet.getRow(2).getCell(1).value,sheet.getRow(3).getCell(1).value];
+  assert.ok(labels[0].includes('192.0.2.1'),labels[0]);
+  assert.ok(labels[1].includes('192.0.2.99'),labels[1]);
+  assert.notEqual(labels[0],labels[1]);
+});
