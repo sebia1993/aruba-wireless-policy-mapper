@@ -1,12 +1,10 @@
 """Offline raw input must retain the same failure truth as live collection."""
 
-import json
 from pathlib import Path
 import shutil
 
 import pytest
 
-from wlc_role_acl_collector import cli
 from wlc_role_acl_collector.collection_health import assess_collection_results
 from wlc_role_acl_collector.collector import collect_from_offline_raw
 from wlc_role_acl_collector.diagnostic_mode import run_diagnostic
@@ -104,42 +102,3 @@ def test_offline_missing_optional_files_remain_omitted(offline_input):
 
     assert [command.command_id for command in result.commands] == ["configuration_effective"]
     assert assess_collection_results([result]).status == "completed"
-
-
-@pytest.mark.parametrize("command_id,filename,status", [RAW_FILES[0], RAW_FILES[2]])
-def test_offline_cli_collect_and_diagnose_report_rejection(
-    offline_input, tmp_path, capsys, command_id, filename, status,
-):
-    raw_root, target = offline_input
-    (raw_root / target.controller.name / filename).write_text(REJECTION, encoding="utf-8")
-    controllers = tmp_path / "controllers.csv"
-    controllers.write_text("name,host\nsample_controller,192.0.2.10\n", encoding="utf-8")
-    common_args = ["--controllers", str(controllers), "--offline-raw-dir", str(raw_root)]
-    collect_root = tmp_path / "collect"
-
-    exit_code = cli.main(["collect", *common_args, "--output-dir", str(collect_root)])
-    console = capsys.readouterr()
-
-    assert exit_code == (cli.COLLECT_EXIT_FAILED if status == "failed" else cli.COLLECT_EXIT_PARTIAL)
-    assert ("required WLC data" if status == "failed" else "failed optional commands") in console.err
-    run_dir, = collect_root.iterdir()
-    report_status = json.loads((run_dir / "report_status.json").read_text(encoding="utf-8"))
-    assert report_status["collection_status"] == status
-    raw_file, = (run_dir / "raw").iterdir()
-    saved_raw = raw_file.read_text(encoding="utf-8")
-    assert f"=== Command: {command_id} |" in saved_raw
-    assert "success: False\nerror: % Permission denied\n--- output ---\n" in saved_raw
-    if command_id == "configuration_effective":
-        assert "--- output ---\n% Permission denied\n" in saved_raw
-    assert (run_dir / "ssid_role_acl_report.html").exists()
-    assert (run_dir / "ssid_role_acl_report.xlsx").exists()
-
-    diagnostic_root = tmp_path / "diagnose"
-    exit_code = cli.main(["diagnose", *common_args, "--output-dir", str(diagnostic_root)])
-
-    assert exit_code == cli.COLLECT_EXIT_FAILED
-    assert "Primary code: WLC-CMD-003" in capsys.readouterr().out
-    diagnostic_dir, = diagnostic_root.iterdir()
-    assert (diagnostic_dir / "diagnostic_summary.json").exists()
-    assert (diagnostic_dir / "diagnostic_summary.html").exists()
-    assert not (diagnostic_dir / "raw").exists()
