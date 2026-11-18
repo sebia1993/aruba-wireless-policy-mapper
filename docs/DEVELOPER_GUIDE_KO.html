@@ -166,7 +166,7 @@
       <li>사용자가 0명인 Role 기본 숨김</li>
       <li>Role 이름과 맞지 않는 ACL 기본 숨김</li>
       <li>Raw ACL 컬럼 기본 숨김</li>
-      <li>주석·보고서 편집기에서 Role 설명과 ACL 행별 주석·확인 상태 관리</li>
+      <li>B안 통합 편집기에서 Role 설명과 수집된 ACL 원문·Alias 참조·행별 주석·확인 상태를 단일 정책 표로 관리. 전체 원본 보고서는 고급 접힘 영역으로 이동</li>
       <li>버전 있는 JSON 작업 저장·열기, 이전 JSON/주석 HTML에서 보수적 설명 재사용</li>
       <li>전체/선택 Role/변경·확인 범위의 실제 XLSX와 별도 PDF 인쇄</li>
       <li>현재 작업을 포함한 독립 HTML 편집기 저장</li>
@@ -363,7 +363,7 @@ access_history_enabled=False</code></pre>
       <tbody>
       <tr><td><code>annotation_core.js</code></td><td><code>parseProject</code>/<code>validateProject</code>가 엄격한 안전 복사본을 반환. <code>reconcileProjects</code>는 현재 수집본을 유지한 설명 재사용. <code>buildExportModel</code>은 DOM과 독립적인 전체/선택/검토 범위 계산</td></tr>
       <tr><td><code>annotation_import.js</code></td><td>분리된 <code>template.content</code>에서 지원되는 HTML을 데이터로만 읽고 스크립트·네트워크 리소스를 실행하지 않음. 내장된 최신 프로젝트 또는 기존 ACL/Role 메모를 해석</td></tr>
-      <tr><td><code>annotation_editor.js</code></td><td>Role/규칙 편집, 검토 상태, 장비·미연결 주석의 직접 연결, 파일 열기/다운로드, 명시적 임시작업 복구. 원본 화면의 설명은 읽기 전용으로 동기화</td></tr>
+      <tr><td><code>annotation_editor.js</code></td><td>Role/규칙 편집, ACL 행별 원본·Alias 근거 지연 표시, Role 수집 품질 요약, 두 탭 전환 및 고급 원본 보기, 이전 수집본 가드, 검토 상태·미연결 주석·파일 저장/복구. 원본 화면의 설명은 읽기 전용 동기화</td></tr>
       <tr><td><code>annotation_export.js</code></td><td><code>createWorkbook</code>/<code>workbookBytes</code>/<code>printHtml</code>. 같은 export model에서 XLSX 다섯 시트와 이스케이프된 별도 인쇄 HTML 생성</td></tr>
       </tbody>
       </table>

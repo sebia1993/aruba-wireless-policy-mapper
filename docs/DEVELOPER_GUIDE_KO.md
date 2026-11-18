@@ -52,7 +52,7 @@ GUI/Web 입력
 - 사용자가 0명인 Role 기본 숨김
 - Role 이름과 맞지 않는 ACL 기본 숨김
 - Raw ACL 컬럼 기본 숨김
-- 주석·보고서 편집기에서 Role 설명과 ACL 행별 주석·확인 상태 관리
+- B안 통합 편집기에서 Role 설명과 수집된 ACL 원문·Alias 참조·행별 주석·확인 상태를 단일 정책 표로 관리. 전체 원본 보고서는 고급 접힘 영역으로 이동
 - 버전 있는 JSON 작업 저장·열기, 이전 JSON/주석 HTML에서 보수적 설명 재사용
 - 전체/선택 Role/변경·확인 범위의 실제 XLSX와 별도 PDF 인쇄
 - 현재 작업을 포함한 독립 HTML 편집기 저장
@@ -285,7 +285,7 @@ GUI는 사내 Role 대역표를 선택한 실행을 내부용 보고서 생성�
 | --- | --- |
 | `annotation_core.js` | `parseProject`/`validateProject`가 엄격한 안전 복사본을 반환. `reconcileProjects`는 현재 수집본을 유지한 설명 재사용. `buildExportModel`은 DOM과 독립적인 전체/선택/검토 범위 계산 |
 | `annotation_import.js` | 분리된 `template.content`에서 지원되는 HTML을 데이터로만 읽고 스크립트·네트워크 리소스를 실행하지 않음. 내장된 최신 프로젝트 또는 기존 ACL/Role 메모를 해석 |
-| `annotation_editor.js` | Role/규칙 편집, 검토 상태, 장비·미연결 주석의 직접 연결, 파일 열기/다운로드, 명시적 임시작업 복구. 원본 화면의 설명은 읽기 전용으로 동기화 |
+| `annotation_editor.js` | Role/규칙 편집, ACL 행별 원본·Alias 근거 지연 표시, Role 수집 품질 요약, 두 탭 전환 및 고급 원본 보기, 이전 수집본 가드, 검토 상태·미연결 주석·파일 저장/복구. 원본 화면의 설명은 읽기 전용 동기화 |
 | `annotation_export.js` | `createWorkbook`/`workbookBytes`/`printHtml`. 같은 export model에서 XLSX 다섯 시트와 이스케이프된 별도 인쇄 HTML 생성 |
 
 컨트롤러 식별에는 주소·포트·설정 범위를 사용하고, Role/규칙/Alias/DOM/Access Check도 컨트롤러별로 구분합니다. 표시 이름이나 규칙 인덱스만으로 수집본을 연결하지 않습니다. 원문 규칙은 action 옵션과 내부 공백까지 비교하며 동일 원문 중복은 자동 연결하지 않습니다. Alias, ACL 연결·평가 순서, 선행 규칙, 수집 실패나 서비스 정의 미수집은 재확인 사유입니다. JSON 검증은 미지원 버전, 알 수 없는 필드, 잘못된 참조·형식, 위험 키와 크기 초과를 거부하며 실패 시 현재 작업을 유지합니다.
