@@ -55,13 +55,13 @@ try {
     }
 
     Write-Host "[4/7] locked development dependency audit"
-    & $resolvedPythonExe -m pip_audit -r requirements-lock.txt --strict --ignore-vuln CVE-2026-44405
+    & $resolvedPythonExe -m pip_audit -r requirements-lock.txt --strict
     if ($LASTEXITCODE -ne 0) {
         throw "Development dependency audit failed with exit code $LASTEXITCODE."
     }
 
     Write-Host "[5/7] locked web dependency audit"
-    & $resolvedPythonExe -m pip_audit -r requirements-web-lock.txt --strict --ignore-vuln CVE-2026-44405
+    & $resolvedPythonExe -m pip_audit -r requirements-web-lock.txt --strict
     if ($LASTEXITCODE -ne 0) {
         throw "Web dependency audit failed with exit code $LASTEXITCODE."
     }

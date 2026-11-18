@@ -66,7 +66,9 @@ def test_validate_script_runs_local_checks():
     assert "& $resolvedPythonExe -m compileall -q app.py src tests tools" in text
     assert "& $resolvedPythonExe -m pip check" in text
     assert text.count("-m pip_audit") == 2
-    assert text.count("--ignore-vuln CVE-2026-44405") == 2
+    for lockfile in ("requirements-lock.txt", "requirements-web-lock.txt"):
+        assert f"-m pip_audit -r {lockfile} --strict" in text
+    assert "--ignore-vuln" not in text
     assert "node --check" in text
     assert "_role_image_export_script" in text
     assert "Path(sys.argv[1]).write_text" in text
@@ -437,7 +439,7 @@ def test_github_actions_validate_main_and_publish_versioned_release():
     assert "contents: read" in pr_workflow
     assert "--require-hashes -r requirements-lock.txt" in pr_workflow
     assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in pr_workflow
-    assert "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97" in pr_workflow
+    assert "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0" in pr_workflow
     assert validation_command in pr_workflow
     assert build_command in pr_workflow
     assert "python .\\tools\\verify_release_package.py --dist .\\dist" in pr_workflow
