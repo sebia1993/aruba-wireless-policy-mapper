@@ -17,7 +17,7 @@
 ## 2. 전체 데이터 흐름
 
 ```text
-GUI/CLI 입력
+GUI/Web 입력
   -> validation.py 입력 검증
   -> WLC 접속 정보 생성
   -> collector.py
@@ -61,7 +61,6 @@ GUI/CLI 입력
 - GUI 내부용 보고서에 Role 대역과 WLC 비교 상태 표시
 - Role 대역표 작성법 앱 내부 팝업
 - Role 대역표 샘플 Excel 열기
-- CLI 기본 보안모드에서 Role network Excel 값과 Access Check 이력 미저장
 
 ## 4. 폴더와 파일 역할
 
@@ -70,7 +69,6 @@ wlc_role_acl_collector/
   src/wlc_role_acl_collector/
     gui_app.py          Windows GUI 화면과 버튼 동작
     gui_support.py      GUI 입력값 검증, 기본 출력 폴더 계산
-    cli.py              CLI 명령어 진입점
     web_logic.py        Streamlit 수집 흐름, 동일 WLC 동시 실행 제한
     atomic_io.py        임시 파일과 os.replace를 이용한 원자 저장
     validation.py       WLC 주소, Port, Timeout 공통 검증과 시간 상한
@@ -141,11 +139,9 @@ wlc_role_acl_collector/
 - worker는 non-daemon으로 실행합니다. `_on_close()`는 실행 중 종료 요청을 확인하고 `_wait_for_worker_before_close()`로 세션 정리가 끝날 때까지 기다립니다.
 - `_request_cancel()`은 스레드를 강제 종료하지 않고 `cancel_event`만 설정합니다. 현재 Netmiko 명령은 응답 또는 read timeout 후 중단됩니다.
 
-### `cli.py`와 `web_logic.py`
+### `web_logic.py`
 
-CLI collect 종료 코드는 `0=성공`, `1=필수 수집·장비별 런타임·파싱·저장 실패`, `2=입력 오류`, `3=선택 명령 일부 실패`입니다. 자동화에서 보고서 파일 존재 여부만 보지 말고 종료 코드를 함께 확인해야 합니다.
-
-`cli._collect()`은 대상 설정, 결과 폴더 생성, 장비별 수집, raw 저장, 장비별 파싱, 최종 보고서 저장을 별도 예외 경계로 처리합니다. 장비별 수집/파싱 예외는 `collection_runtime` 또는 `parse_runtime` CommandOutput으로 바꾸고 다음 WLC를 계속 처리합니다. 로컬 저장 실패는 결과 무결성을 보장할 수 없으므로 `WLC-RPT-001/002`를 표시하고 전체 실행을 종료합니다. `_diagnose()`도 대상별 예외를 격리합니다.
+Web 수집은 입력 검증, 동일 대상의 중복 실행 제한, 원본 수집, 파싱 및 보고서 생성을 단계별로 처리합니다. GUI 진단은 `diagnostic_mode.py`의 안전 진단 흐름을 유지합니다.
 
 다중 컨트롤러 영향 범위 계산은 실패 command row의 controller와 같은 ACL/SSID 행만 확장해야 합니다. `collection_health.infer_collection_impact_scope()`에서 다른 컨트롤러의 Role/SSID까지 영향 대상으로 섞지 않습니다.
 
@@ -155,11 +151,11 @@ Streamlit은 `_ACTIVE_TARGETS`와 `_target_collection_slot()`으로 같은 WLC�
 
 `web_logic.run_web_collection()`은 입력 검증을 통과한 뒤 `workspace`, `role_networks`, `collection`, `raw_storage`, `parsing`, `report`, `download` 단계 중 현재 위치를 추적합니다. 예상하지 못한 오류는 원본 예외나 내부 경로 대신 안전한 오류 코드, 실패 단계, 한국어 권장 조치가 담긴 `WebCollectionResult(success=False)`로 반환합니다. 잘못된 Role 대역표와 동일 WLC 중복 실행은 사용자가 직접 수정할 수 있도록 기존 예외 계약을 유지합니다.
 
-SSH 연결은 `hostkeys.py`와 `collector._build_connect_params()`가 앱 전용 `known_hosts`를 공유합니다. `trust-host-key`는 인증 전에 서버 키를 probe하고 사용자가 지문을 별도 경로로 확인한 경우에만 최초 키를 저장합니다. Netmiko 연결은 `ssh_strict=True`, 시스템 키 비활성화, 앱 전용 키 파일 사용을 강제합니다. `ssh_connection.py`는 Paramiko 4.0이 RSA known_hosts 항목을 보고 `ssh-rsa` 우선순위를 되살리는 경로를 피하기 위해 키 파일을 `SSHClient`에 직접 로드하지 않고, SHA2-only 교환 뒤 인증 전에 `PinnedHostKeyPolicy`로 키 재료를 비교합니다. 변경된 키와 미승인 키를 자동 등록하거나 Telnet으로 우회하는 코드를 추가하지 않습니다.
+SSH 연결은 `hostkeys.py`와 `collector._build_connect_params()`가 앱 전용 `known_hosts`를 공유합니다. GUI와 Web은 인증 전에 서버 키를 probe하고 사용자가 지문을 별도 경로로 확인한 경우에만 최초 키를 저장합니다. Netmiko 연결은 `ssh_strict=True`, 시스템 키 비활성화, 앱 전용 키 파일 사용을 강제합니다. `ssh_connection.py`는 Paramiko 4.0이 RSA known_hosts 항목을 보고 `ssh-rsa` 우선순위를 되살리는 경로를 피하기 위해 키 파일을 `SSHClient`에 직접 로드하지 않고, SHA2-only 교환 뒤 인증 전에 `PinnedHostKeyPolicy`로 키 재료를 비교합니다. 변경된 키와 미승인 키를 자동 등록하거나 Telnet으로 우회하는 코드를 추가하지 않습니다.
 
 Telnet은 사용자가 명시적으로 선택한 경우에만 사용합니다. 평문 위험 안내를 유지하고 SSH 오류를 이유로 프로토콜을 자동 변경하지 않습니다. `validation.build_show_netdestination_command()`와 `build_show_rights_command()`는 장비 출력에서 발견한 식별자를 중앙에서 검증하므로 동적 명령을 문자열 보간으로 직접 만들지 않습니다.
 
-CLI, GUI, Web은 모두 `collection_health.assess_collection_results()` 결과를 사용합니다. 같은 `CollectionResult`를 표면마다 다르게 판정하지 않도록 상태 문자열을 별도로 재구현하지 않습니다.
+GUI와 Web은 모두 `collection_health.assess_collection_results()` 결과를 사용합니다. 같은 `CollectionResult`를 표면마다 다르게 판정하지 않도록 상태 문자열을 별도로 재구현하지 않습니다.
 
 ### `validation.py`와 `collection_health.py`
 
@@ -279,7 +275,7 @@ export_local_role_networks=False
 access_history_enabled=False
 ```
 
-CLI는 이 기본값을 유지하므로 Role network Excel을 선택해도 `--export-local-role-networks`를 명시하지 않으면 내부 대역이 저장되지 않습니다. GUI는 사내 Role 대역표를 선택한 실행을 내부용 보고서 생성으로 간주해 `export_local_role_networks=True`로 보고서를 만듭니다.
+GUI는 사내 Role 대역표를 선택한 실행을 내부용 보고서 생성으로 간주해 `export_local_role_networks=True`로 보고서를 만듭니다. Web에서는 대역표를 업로드하고 보고서 포함 옵션을 선택할 수 있습니다.
 
 #### 오프라인 작업 DTO와 브라우저 모듈
 
@@ -504,14 +500,12 @@ Windows GUI EXE와 ZIP 생성:
 
 ```text
 dist\WlcRoleAclCollectorGUI.exe
-dist\WlcRoleAclCollectorCLI.exe
 dist\WlcRoleAclCollectorGUI_v0.1.0.zip
 ```
 
 ZIP에는 다음 파일이 포함됩니다.
 
 - `WlcRoleAclCollectorGUI.exe`
-- `WlcRoleAclCollectorCLI.exe`
 - `USER_GUIDE_KO.md`
 - `USER_GUIDE_KO.html`
 - `DEVELOPER_GUIDE_KO.md`
@@ -594,9 +588,9 @@ ACL의 `user`는 “현재 이 Role을 받은 사용자 IP”라는 의미입니
 
 HTML은 WLC에 다시 접속하지 않습니다. 이미 보고서에 들어있는 ACL/Alias 데이터만 사용합니다.
 
-### Role network Excel의 export 기본값은 실행 방식별로 다릅니다.
+### Role network Excel 포함 여부는 화면에서 관리합니다.
 
-GUI에서는 사내 Role 대역표를 선택하면 내부용 보고서에 실제 대역을 표시합니다. CLI는 자동화/외부 검증 흐름을 고려해 기본적으로 저장하지 않으며, 내부 보관용으로 반드시 넣어야 한다면 `--export-local-role-networks` 옵션을 명시적으로 사용해야 합니다.
+GUI에서는 사내 Role 대역표를 선택하면 내부용 보고서에 실제 대역을 표시합니다. Web에서는 Excel 업로드 후 보고서 포함 옵션을 설정할 수 있습니다.
 
 ### `show user-table`은 참고용입니다.
 
@@ -639,6 +633,5 @@ report.py가 HTML/Excel을 만들고,
 acl_evaluator.py가 HTML Access Check 판정 데이터를 준비합니다.
 
 GUI에서 사내 Role 대역표를 선택하면 내부용 보고서에 Role 대역과 WLC 비교 상태가 표시됩니다.
-CLI는 보안 기본값을 유지해 `--export-local-role-networks`가 없으면 Role network Excel 값을 보고서에 저장하지 않습니다.
 Access Check 이력은 기본적으로 보고서에 저장하지 않습니다.
 ```

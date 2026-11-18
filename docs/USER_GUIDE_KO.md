@@ -63,10 +63,9 @@ GUI의 `작성법` 버튼을 누르면 앱 내부 팝업으로 작성 규칙과 
 2. `WlcRoleAclCollectorGUI.exe`를 실행합니다.
 3. Windows SmartScreen 경고가 나오면 회사 보안 정책에 따라 실행 여부를 확인합니다.
 
-ZIP에는 GUI 실행 파일과 콘솔 실행 파일이 함께 포함됩니다.
+ZIP에는 GUI 실행 파일과 로컬 Web 실행 파일이 포함됩니다.
 
 - `WlcRoleAclCollectorGUI.exe`: 일반 수집과 안전 진단을 실행하는 Windows 화면
-- `WlcRoleAclCollectorCLI.exe`: 자동화 진단과 mock 서버 실행용 콘솔 도구
 
 ZIP 안에는 설명서가 두 가지 형식으로 포함됩니다.
 
@@ -89,18 +88,14 @@ python -m wlc_role_acl_collector.gui_app
 
 ### SSH 서버 키 최초 승인
 
-SSH는 승인된 서버 키와 일치할 때만 연결합니다. **Windows GUI에서는 최초 접속 전 별도 CLI 실행이 필요하지 않습니다.**
+SSH는 승인된 서버 키와 일치할 때만 연결합니다. **Windows GUI와 로컬 Web에서는 별도 CLI 없이 최초 접속 시 화면에서 SSH 지문을 확인합니다.**
 
 1. WLC 관리 화면, 자산대장 또는 네트워크 담당자에게서 SSH 서버 키의 SHA-256 지문을 별도 경로로 확인합니다.
 2. GUI에서 `분석 시작` 또는 `안전 진단`을 누르면 로그인 정보를 보내기 전에 서버 키를 자동으로 조회합니다.
 3. 처음 보는 키라면 지문 확인창을 표시합니다. 별도 경로에서 확인한 지문과 완전히 일치하는 경우에만 승인하세요. 거절하면 로그인 정보는 전송하지 않습니다.
 4. 이미 승인된 키는 별도 창 없이 진행하고, 승인된 키와 달라졌다면 자동 변경 없이 차단합니다. 장비 교체 등 정당한 변경인지 확인하기 전에는 `known_hosts`를 삭제하거나 바꾸지 마십시오.
 
-**웹앱과 CLI는 기존 별도 승인 방식을 유지합니다.** 통합 ZIP의 `web\\trust_host_key.cmd`를 실행하거나 다음 명령을 사용할 수 있습니다. 지문 대조 후 정확히 `TRUST`를 입력합니다.
-
-```powershell
-python -m wlc_role_acl_collector trust-host-key --host 192.0.2.10 --port 22
-```
+Web에서는 WLC 정보 입력 후 `수집 실행`을 누르면 신규 SSH 서버의 SHA-256 지문 승인창이 열립니다. 별도 관리 경로에서 확인한 지문과 일치할 때만 승인 후 수집을 진행합니다. 이미 승인된 지문은 자동 확인하고 변경된 지문은 연결을 차단합니다.
 
 Telnet은 서버 키 검증과 암호화를 제공하지 않습니다. 계정과 장비 출력이 평문으로 전송되므로 격리된 관리망에서 위험을 승인한 경우에만 사용하고, SSH 실패 시 대체 수단으로 자동 선택되지 않습니다.
 
@@ -274,7 +269,7 @@ PDF의 각 상세 행에는 컨트롤러 이름과 함께 장비 주소·접속 
 
 원본의 `수집 결과·통신 확인`에 있는 `선택 Role PNG 저장`은 원본 화면의 현재 Role과 표시 상태를 이미지로 보관하는 기존 기능입니다. PDF/Excel의 보고 범위와 별개이며, 내용이 길면 여러 PNG로 나뉠 수 있습니다.
 
-작업 파일과 주석 HTML에도 허용된 정책 원문이 들어갑니다. 사내 Role 대역을 포함하도록 수집한 작업이면 해당 대역이 작업과 보고서에 유지됩니다. CLI의 `--export-local-role-networks`와 GUI의 사내 Role 대역표 선택에 따른 기존 포함 기준은 그대로 적용됩니다. 계정·비밀번호와 `show user-table` 원문은 작업에 넣지 않지만, 직접 적은 설명이나 정책명에도 민감정보가 있을 수 있으므로 공유 전에 확인하십시오.
+작업 파일과 주석 HTML에도 허용된 정책 원문이 들어갑니다. 사내 Role 대역을 포함하도록 수집한 작업이면 해당 대역이 작업과 보고서에 유지됩니다. GUI의 사내 Role 대역표 선택과 Web의 보고서 포함 옵션에 따른 기존 포함 기준은 그대로 적용됩니다. 계정·비밀번호와 `show user-table` 원문은 작업에 넣지 않지만, 직접 적은 설명이나 정책명에도 민감정보가 있을 수 있으므로 공유 전에 확인하십시오.
 
 이번 기능의 자동·합성 검증은 실제 회사 장비, 사내 파일, Windows 브라우저 및 회사 인쇄 환경에서의 사용자 수동 검증을 대신하지 않습니다. 해당 현장 검증은 사용자가 별도로 수행할 범위입니다.
 
@@ -343,15 +338,9 @@ Sheet 선택 기준:
 - `Role_Networks` Sheet가 없으면 기존 호환성을 위해 첫 번째 Sheet를 읽습니다.
 - fallback이 발생하면 화면 상태 메시지에 `Role_Networks Sheet가 없어 첫 번째 Sheet를 읽었다.`가 표시됩니다.
 
-CLI는 기본적으로 대역표를 보고서에 내보내지 않습니다. CLI에서 내부 보관용 보고서에 Role network를 포함해야 하는 경우에만 아래 옵션을 사용합니다.
+GUI는 사내 Role 대역표를 선택한 경우 내부용 보고서에 실제 대역 정보를 표시합니다. Web에서는 Excel 대역표 업로드 후 보고서 포함 여부를 설정할 수 있습니다.
 
-```powershell
-python -m wlc_role_acl_collector collect --role-networks config\role_networks.example.xlsx --export-local-role-networks
-```
-
-이 옵션을 사용한 보고서는 내부 네트워크 대역이 포함될 수 있으므로 외부 반출 금지 대상으로 취급해야 합니다.
-
-CLI에서 여러 WLC를 지정하면 장비 하나의 예상 밖 수집·파싱 오류가 다른 장비의 수집을 중단시키지 않습니다. 실패 장비는 raw와 보고서 상태에 남고 종료 코드 `1`을 반환합니다. 입력 오류는 `2`, 선택 명령 일부 실패는 `3`입니다. 출력 폴더나 보고서 저장 실패는 `WLC-RPT-001` 또는 `WLC-RPT-002`와 조치 안내를 표시하며 Python traceback을 일반 오류 안내로 사용하지 않습니다.
+내부 대역을 포함한 보고서는 외부 반출 금지 대상으로 취급합니다. 장비 수집 실패 및 저장 실패는 화면에서 오류 코드와 권장 조치를 확인하세요.
 
 ## 11. 자주 발생하는 오류
 
@@ -386,12 +375,6 @@ GUI에서 실행하는 경우:
 
 GUI 진단 모드는 수집 보고서용 raw 폴더를 만들지 않습니다. 결과 파일에는 단계, 오류 코드, command_id, 안전한 조치 안내만 포함됩니다.
 
-CLI에서 실행하는 경우:
-
-```powershell
-WlcRoleAclCollectorCLI.exe diagnose --controllers config\controllers.example.csv --output-dir outputs
-```
-
 진단 모드는 아래 파일을 생성합니다.
 
 - `diagnostic_summary.json`
@@ -411,11 +394,7 @@ WlcRoleAclCollectorCLI.exe diagnose --controllers config\controllers.example.csv
 
 오류 코드별 의미는 `ERROR_CODES_KO.html`에서 확인합니다.
 
-실제 장비 없이 개발 PC에서 동작 확인이 필요하면 mock 서버를 사용할 수 있습니다.
-
-```powershell
-WlcRoleAclCollectorCLI.exe mock-server --protocol telnet --scenario config\mock_scenarios\success_minimal.json
-```
+개발 중 실제 장비 없이 동작 확인이 필요하면 비식별 Mock 시나리오와 자동 테스트를 사용합니다. 별도 콘솔 실행 모드는 제공하지 않습니다.
 
 ## 13. 산출물 취급 주의
 
