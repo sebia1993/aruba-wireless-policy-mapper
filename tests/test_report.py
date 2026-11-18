@@ -727,3 +727,31 @@ def test_common_infrastructure_acls_are_not_role_related_by_name():
     for role, acl in (("re-guard", "re-guard-custom"), ("logon-control", "logon-control-v2"), ("re-guard", "employee-re-guard")):
         assert _is_role_related_acl(role, acl)
     assert _is_role_related_acl("employee", "employee-policy")
+
+
+def test_common_acl_unicode_and_quoted_names_default_to_other_acl_not_role_specific():
+    from wlc_role_acl_collector.report import _is_role_related_acl, _acl_rows_html
+
+    names = [
+        '"re-guard"',
+        "'re-guard'",
+        "“re‑guard”",
+        "re–guard",
+        "\u200bre-guard\u200b",
+        "ＲＥ－ＧＵＡＲＤ",
+        "global‐sacl",
+        "LOGON－CONTROL",
+    ]
+    for acl in names:
+        assert not _is_role_related_acl("re-guard", acl), repr(acl)
+        html = _acl_rows_html(
+            "re-guard",
+            [{"acl": acl, "sequence": "1", "action": "permit",
+              "raw_rule": "any any any permit", "source": "any",
+              "destination": "any", "service": "any"}],
+            {},
+        )
+        assert 'class="acl-rule-row other-acl-rule" data-other-acl="true" hidden' in html, repr(acl)
+
+    for acl in ["re-guard-custom", "re-guardian", "employee-role-policy"]:
+        assert _is_role_related_acl("re-guard", acl) == ("re-guard" in acl)

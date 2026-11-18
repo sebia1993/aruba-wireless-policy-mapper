@@ -106,3 +106,23 @@ test('vendored pdfmake and Nanum font generate a real Korean PDF offline',async(
   assert.ok(bytes.length>2500,'PDF with embedded Korean font should not be empty');
   assert.equal(String.fromCharCode(...bytes.slice(0,5)),'%PDF-');
 });
+
+
+test('common ACL naming variants stay only in PDF shared-policy appendix',()=>{
+  const p=fixture(),base=p.snapshot.rules[0];
+  p.snapshot.rules.push({...base,id:'quoted-common',acl:'“re‑guard”',raw:'any any any permit',ordinal:2});
+  p.snapshot.rules.push({...base,id:'own-policy',acl:'re-guard-extra',raw:'any any any deny',ordinal:3});
+  p.annotations.rules['quoted-common']={...p.annotations.rules['rule-a'],text:'공통 규칙 주석'};
+  p.annotations.rules['own-policy']={...p.annotations.rules['rule-a'],text:'Role 전용 주석'};
+  const definition=Pdf.documentDefinition(model(p));
+  const content=definition.content;
+  const techStart=content.findIndex(item=>String(item.text||'').includes('5. Role별 ACL 상세'));
+  const sharedStart=content.findIndex(item=>String(item.text||'').includes('6. 공통 ACL'));
+  assert.ok(techStart>=0 && sharedStart>techStart);
+  const serialized=node=>JSON.stringify(node);
+  const tech=serialized(content.slice(techStart,sharedStart));
+  const shared=serialized(content.slice(sharedStart));
+  assert.ok(!tech.includes('공통 규칙 주석'),'shared rule must not duplicate in Role-only appendix');
+  assert.ok(tech.includes('Role 전용 주석'),'independent custom ACL stays in Role appendix');
+  assert.ok(shared.includes('공통 규칙 주석'),'shared policy appendix keeps full source note');
+});

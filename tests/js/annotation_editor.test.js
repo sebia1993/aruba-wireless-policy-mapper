@@ -740,3 +740,47 @@ test('saved standalone HTML embeds PDFMake, font bundle and direct PDF exporter 
     assert.ok(!html.includes('id="print-pdf"'));
   } finally {env.close();}
 });
+
+
+test('quoted, visually identical Unicode common ACLs remain hidden after explicit checkbox OFF', () => {
+  const p=fixture(), base=p.snapshot.rules[0];
+  const commonNames=[
+    '"re-guard"', "'re-guard'", '“re‑guard”', 're–guard',
+    '\u200Bre-guard\u200B', 'ＲＥ－ＧＵＡＲＤ',
+    'global‐sacl', 'LOGON－CONTROL', '“logon-control”'
+  ];
+  const distinctNames=['re-guard-custom','re-guardian','pre-re-guard'];
+  for(const [i,acl] of [...commonNames,...distinctNames].entries()){
+    const rule={...base,id:'unicode-common-'+i,acl,raw:'rule '+acl,ordinal:i+2};
+    p.snapshot.rules.push(rule);
+    p.annotations.rules[rule.id]={...p.annotations.rules['rule-a'],text:'분리 점검 '+i};
+  }
+  const env=mount(p),doc=env.window.document;
+  try {
+    const names=()=>Array.from(doc.querySelectorAll('.ann-rules tbody tr > td:first-child > strong')).map(el=>el.textContent);
+    assert.equal(doc.getElementById('ann-show-common-acl').checked,false);
+    assert.deepEqual(names(),[base.acl,...distinctNames]);
+    assert.match(doc.querySelector('.ann-role-header').textContent,/전용 4개.*공통 9개/);
+    let toggle=doc.getElementById('ann-show-common-acl');
+    toggle.checked=true;toggle.dispatchEvent(new env.window.Event('change',{bubbles:true}));
+    assert.equal(names().length,1+commonNames.length+distinctNames.length);
+    toggle=doc.getElementById('ann-show-common-acl');
+    toggle.checked=false;toggle.dispatchEvent(new env.window.Event('change',{bubbles:true}));
+    assert.deepEqual(names(),[base.acl,...distinctNames]);
+    assert.equal(env.app.exportModel().rules.length,p.snapshot.rules.length);
+    for(let i=0;i<commonNames.length;i++){
+      assert.equal(env.app.getProject().annotations.rules['unicode-common-'+i].text,'분리 점검 '+i);
+    }
+  } finally {env.close();}
+});
+
+test('common ACL detection remains scoped to ACL names, not raw data or role name',()=>{
+  const p=fixture(),base=p.snapshot.rules[0];
+  p.snapshot.rules[0].raw='any alias re-guard any permit';
+  p.snapshot.rules.push({...base,id:'quoted-common',acl:' "re‐guard" ',raw:'any any permit',ordinal:2});
+  const env=mount(p),doc=env.window.document;
+  try {
+    assert.deepEqual(Array.from(doc.querySelectorAll('.ann-rules tbody tr > td:first-child > strong'),el=>el.textContent),['EMPLOYEE']);
+    assert.equal(env.app.exportModel().rules.length,2);
+  } finally {env.close();}
+});
