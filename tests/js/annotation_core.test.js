@@ -187,3 +187,28 @@ test('validation failure never mutates current work or previous annotations', ()
 test('original note confirmation provenance survives another reuse generation', () => {
   const first=reuse().project;const current=project('third');const result=Core.reconcileProjects(current,first,{now:time});assert.equal(result.project.annotations.rules.rule.source.projectId,'old');assert.equal(result.project.annotations.rules.rule.source.snapshotId,'snapshot-old');assert.equal(result.project.annotations.rules.rule.source.confirmedAt,time);assert.equal(result.project.annotations.rules.rule.confirmedAt,'');assert.equal(result.project.annotations.rules.rule.status,'reused');
 });
+
+test('device category supports Windows PC and MacBook while retaining legacy PC without changing schema', () => {
+  for(const value of ['', 'PC', 'windows_pc', 'macbook', 'mobile', 'ETC']) {
+    const p=project();
+    p.annotations.roles.role={...note('단말'),deviceType:value,manualSsid:'corp'};
+    assert.equal(Core.parseProject(JSON.stringify(p)).annotations.roles.role.deviceType,value);
+    const report=Core.buildExportModel(p,{type:'all'},time);
+    assert.equal(report.roles[0].annotation.deviceType,value);
+    assert.equal(p.schemaVersion,1);
+  }
+  for(const invalid of ['Windows PC','MacBook','win11','macOS','PC-mac']) {
+    const p=project();p.annotations.roles.role={...note(),deviceType:invalid};
+    assert.throws(()=>Core.validateProject(p),/deviceType/);
+  }
+});
+
+test('reusing role annotations preserves a previous MacBook value as a pending review', () => {
+  const older=project('old');
+  older.annotations.roles.role={...note('업무 장비'),deviceType:'macbook',manualSsid:'corp'};
+  const current=project('next');
+  const result=Core.reconcileProjects(current,older,{now:time});
+  assert.equal(result.project.annotations.roles.role.deviceType,'macbook');
+  assert.equal(result.project.annotations.roles.role.status,'reused');
+  assert.equal(result.project.annotations.roles.role.manualSsid,'corp');
+});

@@ -549,3 +549,53 @@ test('moving original Access Check preserves listeners and disables stale source
     assert.equal(doc.querySelector('#source-report').hidden,true);
   } finally {window.close();}
 });
+
+test('device category selector supports Windows PC and MacBook; saved files retain values and legacy PC', async () => {
+  const p=fixture(), record={...p.annotations.rules['rule-a'],deviceType:'PC',manualSsid:'corp'};
+  p.annotations.roles['role-a']=record;
+  const env=mount(p),doc=env.window.document;
+  try {
+    let select=doc.getElementById('ann-device-type');
+    assert.equal(select.value,'PC');
+    const options=Array.from(select.options).map(o=>[o.value,o.textContent]);
+    assert.ok(options.some(([value,label])=>value==='windows_pc'&&label==='윈도우 PC'));
+    assert.ok(options.some(([value,label])=>value==='macbook'&&label==='맥북'));
+    assert.ok(options.some(([value,label])=>value==='PC'&&label==='PC (기존 분류)'));
+    assert.match(doc.getElementById('ann-role-list').textContent,/PC \(기존 분류\)/);
+    select.value='windows_pc';select.dispatchEvent(new env.window.Event('change',{bubbles:true}));
+    assert.equal(env.app.getProject().annotations.roles['role-a'].deviceType,'windows_pc');
+    assert.equal(env.app.getProject().annotations.roles['role-a'].status,'unreviewed');
+    assert.match(doc.getElementById('ann-role-list').textContent,/윈도우 PC/);
+    assert.equal(env.app.getProject().snapshot.roles[0].ssids[0],'corp');
+    select=doc.getElementById('ann-device-type');
+    select.value='macbook';select.dispatchEvent(new env.window.Event('change',{bubbles:true}));
+    assert.equal(env.app.getProject().annotations.roles['role-a'].deviceType,'macbook');
+    assert.match(doc.getElementById('ann-role-list').textContent,/맥북/);
+    assert.equal(env.app.saveProject(),true);
+    const json=await env.downloadedText();
+    const saved=Core.parseProject(json);
+    assert.equal(saved.annotations.roles['role-a'].deviceType,'macbook');
+    const reopened=mount(saved);
+    try {
+      assert.equal(reopened.window.document.getElementById('ann-device-type').value,'macbook');
+      assert.match(reopened.window.document.getElementById('ann-role-list').textContent,/맥북/);
+    } finally {reopened.close();}
+  } finally {env.close();}
+});
+
+test('role annotations from previous work keep MacBook through reuse and independent HTML', () => {
+  const earlier=fixture();
+  earlier.annotations.roles['role-a']={...earlier.annotations.rules['rule-a'],deviceType:'macbook'};
+  const current=fixture();current.annotations.roles={};
+  const env=mount(current);
+  try {
+    assert.equal(env.app.reuseText(JSON.stringify(earlier)),true);
+    assert.equal(env.app.getProject().annotations.roles['role-a'].deviceType,'macbook');
+    assert.equal(env.window.document.getElementById('ann-device-type').value,'macbook');
+    const html=Editor.standaloneHtml(env.app.getProject(),env.window.document);
+    const dom=new JSDOM(html);
+    try {
+      assert.equal(Core.parseProject(dom.window.document.getElementById('annotation-project-data').textContent).annotations.roles['role-a'].deviceType,'macbook');
+    } finally {dom.window.close();}
+  } finally {env.close();}
+});

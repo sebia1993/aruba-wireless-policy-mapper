@@ -96,3 +96,17 @@ test('browser UMD works offline from the supplied model without consulting docum
   assert.equal(sandbox.AnnotationExport.createWorkbook(model(),ExcelJS).getWorksheet('Role 설명').rowCount,2);
 });
 module.exports={model,longNote};
+
+test('Excel and print-ready PDF source show readable Windows PC and MacBook labels', () => {
+  for(const [deviceType,label] of [['windows_pc','윈도우 PC'],['macbook','맥북'],['PC','PC']]) {
+    const p=fixture(),roleNote={...p.annotations.rules['rule-a'],deviceType,manualSsid:'test-ssid'};
+    p.annotations.roles['role-a']=roleNote;
+    const report=Core.buildExportModel(p,{type:'all'},'2026-11-18T00:00:00Z');
+    const sheet=exporter.createWorkbook(report,ExcelJS).getWorksheet('Role 설명');
+    const headers=sheet.getRow(1).values,column=headers.indexOf('단말 구분');
+    assert.ok(column>0);
+    assert.equal(sheet.getRow(2).getCell(column).value,label);
+    const pdfHtml=exporter.printHtml(report);
+    assert.ok(pdfHtml.includes('단말 구분: '+label),deviceType);
+  }
+});
