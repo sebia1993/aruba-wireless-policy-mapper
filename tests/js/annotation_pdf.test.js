@@ -112,19 +112,30 @@ test('common ACL naming variants stay only in PDF shared-policy appendix',()=>{
   const p=fixture(),base=p.snapshot.rules[0];
   p.snapshot.rules.push({...base,id:'quoted-common',acl:'“re‑guard”',raw:'any any any permit',ordinal:2});
   p.snapshot.rules.push({...base,id:'own-policy',acl:'re-guard-extra',raw:'any any any deny',ordinal:3});
+  p.snapshot.rules.push({...base,id:'ra-common',acl:'ra-guard',raw:'any any any permit',ordinal:4});
+  p.snapshot.rules.push({...base,id:'ra-own',acl:'ra-guard-extra',raw:'any any any deny',ordinal:5});
   p.annotations.rules['quoted-common']={...p.annotations.rules['rule-a'],text:'공통 규칙 주석'};
   p.annotations.rules['own-policy']={...p.annotations.rules['rule-a'],text:'Role 전용 주석'};
-  const definition=Pdf.documentDefinition(model(p));
+  const report=model(p);
+  const compact=Pdf.documentDefinition(report,{profile:'simple'});
+  const headings=compact.content.filter(item=>item.style==='groupHeading').map(item=>item.text);
+  assert.deepEqual(headings.map(text=>text.split('   |   ACL: ')[1]),p.snapshot.rules.map(rule=>rule.acl));
+  const definition=Pdf.documentDefinition(report,{profile:'detailed'});
   const content=definition.content;
   const techStart=content.findIndex(item=>String(item.text||'').includes('5. Role별 ACL 상세'));
   const sharedStart=content.findIndex(item=>String(item.text||'').includes('6. 공통 ACL'));
   assert.ok(techStart>=0 && sharedStart>techStart);
+  assert.match(allText(content.slice(0,techStart)),/전용 3건\n공통 2건/);
   const serialized=node=>JSON.stringify(node);
   const tech=serialized(content.slice(techStart,sharedStart));
   const shared=serialized(content.slice(sharedStart));
   assert.ok(!tech.includes('공통 규칙 주석'),'shared rule must not duplicate in Role-only appendix');
   assert.ok(tech.includes('Role 전용 주석'),'independent custom ACL stays in Role appendix');
   assert.ok(shared.includes('공통 규칙 주석'),'shared policy appendix keeps full source note');
+  assert.ok(shared.includes('규칙 ID: ra-common') && !tech.includes('규칙 ID: ra-common'));
+  assert.ok(tech.includes('규칙 ID: ra-own') && !shared.includes('규칙 ID: ra-own'));
+  const legend=content.find(item=>String(item.text||'').includes('공통 정책명'));
+  assert.match(legend.text,/\bra-guard\b/);
 });
 
 
