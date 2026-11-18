@@ -119,7 +119,10 @@ test('a reused snapshot ID cannot expose a mismatched original source view or re
   Editor.saveRecovery(storage,base,edited);
   assert.equal(Editor.readRecovery(storage,base,Core),null);
   const env=mount();env.app.openText(JSON.stringify(edited));
-  assert.equal(env.window.document.getElementById('ann-source-mode').hidden,true);
+  env.window.document.getElementById('ann-tab-btn-access').click();
+  assert.equal(env.window.document.getElementById('ann-tab-access').hidden,false);
+  assert.match(env.window.document.getElementById('ann-access-message').textContent,/수집본.*다르/);
+  assert.equal(env.window.document.getElementById('source-report').hidden,true);
   env.close();
 });
 test('restoring a different draft at the same revision invalidates the review filter cache', () => {
@@ -454,4 +457,65 @@ test('discarding the pending draft permits current branch recovery after a downl
     env.window.document.getElementById('ann-discard-draft').click();editRule(env,'continued chosen branch');
     for(const anchor of [original,saved]) assert.equal(Editor.readRecovery(storage,anchor,Core)?.annotations.rules['rule-a'].text,'continued chosen branch');
   } finally {env.close();}
+});
+
+test('C layout has one Role workspace with three internal tabs and no legacy mode buttons', () => {
+  const env=mount(); const doc=env.window.document;
+  try {
+    const ids=['policy','access','collection'];
+    assert.deepEqual(Array.from(doc.querySelectorAll('[data-unified-tab]')).map(el=>el.dataset.unifiedTab),ids);
+    assert.equal(doc.getElementById('ann-source-mode'),null);
+    assert.equal(doc.getElementById('ann-editor-mode'),null);
+    assert.equal(doc.getElementById('ann-tab-policy').hidden,false);
+    for(const name of ids){
+      doc.getElementById('ann-tab-btn-'+name).click();
+      for(const other of ids) assert.equal(doc.getElementById('ann-tab-'+other).hidden,other!==name);
+      assert.equal(doc.getElementById('ann-tab-btn-'+name).getAttribute('aria-selected'),'true');
+    }
+  } finally {env.close();}
+});
+
+test('global-sacl is hidden only in UI; full snapshot and exports retain all rules and notes', () => {
+  const p=fixture(), original=p.snapshot.rules[0], common={...original,id:'global-1',acl:'global-sacl',ordinal:2};
+  p.snapshot.rules.push(common);
+  p.annotations.rules[common.id]={text:'전역 인증 정책',status:'reviewed',updatedAt:p.updatedAt,confirmedAt:p.updatedAt,reasons:[],source:null};
+  const env=mount(p),doc=env.window.document;
+  try {
+    assert.equal(doc.querySelectorAll('.ann-rules tbody tr').length,1);
+    assert.equal(doc.getElementById('ann-show-common-acl').checked,false);
+    assert.equal(env.app.exportModel().rules.length,2);
+    assert.equal(env.app.getProject().annotations.rules['global-1'].text,'전역 인증 정책');
+    const control=doc.getElementById('ann-show-common-acl');
+    control.checked=true;
+    control.dispatchEvent(new env.window.Event('change',{bubbles:true}));
+    assert.equal(doc.querySelectorAll('.ann-rules tbody tr').length,2);
+    assert.match(doc.querySelector('.ann-rules').textContent,/global-sacl/);
+    assert.equal(env.app.getProject().revision,p.revision);
+  } finally {env.close();}
+});
+
+test('moving original Access Check preserves listeners and disables stale sources', () => {
+  const p=fixture(),docHtml=`<!doctype html><div id="annotation-workspace"></div>
+    <div id="source-report" data-source-snapshot-id="snapshot-a">
+      <main><section class="role-panel" id="original-role" data-controller-id="controller-a" data-role="EMPLOYEE" data-role-key="EMPLOYEE"></section>
+      <button class="role-tab" data-panel-id="original-role"></button>
+      <section class="access-check"><button id="test-check">Run</button></section></main></div>
+    <script id="annotation-project-data" type="application/json"></script>`;
+  const dom=new JSDOM(docHtml,{url:'https://offline.test/report.html'});
+  const {window}=dom,doc=window.document;
+  doc.getElementById('annotation-project-data').textContent=JSON.stringify(p);
+  let clicks=0;
+  doc.getElementById('test-check').addEventListener('click',()=>clicks++);
+  const app=Editor.init({document:doc,window,core:Core,importer:Importer});
+  try {
+    doc.getElementById('ann-tab-btn-access').click();
+    assert.equal(doc.querySelector('#ann-access-slot #test-check')!==null,true);
+    doc.getElementById('test-check').click();
+    assert.equal(clicks,1);
+    const modified=fixture();modified.snapshot.rules[0].raw+=' modified';
+    assert.equal(app.openText(JSON.stringify(modified)),true);
+    doc.getElementById('ann-tab-btn-access').click();
+    assert.equal(doc.querySelector('#ann-access-slot .access-check').hidden,true);
+    assert.equal(doc.querySelector('#source-report').hidden,true);
+  } finally {window.close();}
 });
