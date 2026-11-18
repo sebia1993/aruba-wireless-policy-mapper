@@ -373,6 +373,8 @@ def test_release_documentation_describes_current_package_contract():
     assert "ClearPass/RADIUS 서버의 동적 Role 직접 조회" in changelog
     assert "코드서명 / installer / MSIX" in changelog
     assert requirements.splitlines() == ["--require-hashes", "-r requirements-lock.txt"]
+    demo_requirements = (repo_root / "portfolio_demo" / "requirements.txt").read_text(encoding="utf-8")
+    assert demo_requirements.splitlines() == ["-r ../requirements-web-lock.txt"]
     assert "--hash=sha256:" in requirements_lock
     assert "--hash=sha256:" in web_lock
     assert "st.file_uploader" in app

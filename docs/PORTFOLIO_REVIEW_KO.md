@@ -41,6 +41,6 @@ py -3.11 -m venv .venv
 - [Windows PR Validation](https://github.com/sebia1993/aruba-wireless-policy-mapper/actions/workflows/pr-validation.yml)의 **검토한 커밋 SHA에 해당하는 완료 결과**를 확인합니다. [정의](../.github/workflows/pr-validation.yml)는 Windows GUI, Streamlit portable, 통합 ZIP과 공개 데모 시나리오를 검증합니다.
 - [Releases](https://github.com/sebia1993/aruba-wireless-policy-mapper/releases)의 바이너리는 해당 태그와 자산을 별도로 검토합니다. 현재 소스의 CI 결과만으로 다른 태그의 검증 상태를 대신하지 않습니다.
 - 남은 실증은 펌웨어별 출력, 실제 SSID/기본 Role 관계의 수동 대조, 동적 Role 적용 환경에서의 오해 방지, 합성 규모 테스트와 실제 장비 지연의 차이입니다.
-- [Paramiko 감사 예외](DEPENDENCY_AUDIT_EXCEPTIONS_KO.md)는 취약점 해소를 뜻하지 않습니다. SHA-1 차단, 지문 고정, 수정 버전 교체와 Windows 재검증 조건을 함께 평가해야 합니다.
+- 공개 데모와 Windows 웹앱은 같은 Web 잠금 파일을 사용합니다. Netmiko 4.8.0과 Paramiko 5.0.0으로 교체한 근거와 이전 감사 예외 이력은 [의존성 감사 기록](DEPENDENCY_AUDIT_EXCEPTIONS_KO.md)에서 확인할 수 있습니다.
 
 면접에서는 허용/차단 예시뿐 아니라 **왜 누락된 Alias에서 판정을 멈추는지**를 테스트 입력과 결과로 설명하는 것이 이 프로젝트의 핵심입니다.
