@@ -9,6 +9,11 @@
   function str(value) { return value === null || value === undefined ? '' : String(value); }
   function list(values) { return (values || []).map(str).join('\n'); }
   function record(value) { return value || {}; }
+  // Preserve legacy PC unchanged and expand the two new codes for human reports.
+  function deviceLabel(value) {
+    var labels = {windows_pc:'윈도우 PC', macbook:'맥북'};
+    return Object.prototype.hasOwnProperty.call(labels, value) ? labels[value] : str(value);
+  }
   function json(value) { return value === null || value === undefined ? '' : JSON.stringify(value); }
   function annotationColumns(annotation) {
     var a = record(annotation), s = record(a.source);
@@ -38,7 +43,7 @@
       return ['변경', '', x.type, x.controllerId, controller?controller.name:'', x.roleId, role?role.name:'', x.ruleId, rule?rule.acl:'', rule?rule.raw:'', x.message, x.previousRaw, '', '', '', '', '', '', '', '', '', '', '', ''];
     });
     (m.unresolvedAnnotations || []).forEach(function (x) {
-      changes.push(['미연결 주석', x.id, x.kind, x.controllerId, x.controllerName, '', x.roleName, '', x.acl, x.raw, x.reason+(x.kind==='role'&&x.annotation.manualSsid?'\n직접 입력 SSID: '+x.annotation.manualSsid:'')+(x.kind==='role'&&x.annotation.deviceType?'\n단말: '+x.annotation.deviceType:''), '', list(x.candidateIds), x.sourceProjectId, x.sourceSnapshotId].concat(annotationColumns(x.annotation)));
+      changes.push(['미연결 주석', x.id, x.kind, x.controllerId, x.controllerName, '', x.roleName, '', x.acl, x.raw, x.reason+(x.kind==='role'&&x.annotation.manualSsid?'\n직접 입력 SSID: '+x.annotation.manualSsid:'')+(x.kind==='role'&&x.annotation.deviceType?'\n단말: '+deviceLabel(x.annotation.deviceType):''), '', list(x.candidateIds), x.sourceProjectId, x.sourceSnapshotId].concat(annotationColumns(x.annotation)));
     });
     // Review rows retain the exact occurrence IDs alongside changes and unmatched notes.
     roles.concat(rules).forEach(function (x) {
@@ -50,7 +55,7 @@
     });
     return [
       {name:'보고 요약', headers:['분류', '항목 / 식별자', '내용'], rows:summary},
-      {name:'Role 설명', headers:['Role ID','컨트롤러 ID','컨트롤러','Role','수집 SSID','Role 유형','ACL 바인딩 순서','원문 바인딩','문맥 수집 완료','관측 사용자 수','SSID 명 (직접 입력)','단말 구분'].concat(annotationHeaders), rows:roles.map(function (x) { return [x.id,x.controllerId,x.controllerName,x.name,list(x.ssids),list(x.roleTypes),list(x.aclOrder),list(x.bindingRaw),x.contextComplete,x.observedUsers,str(record(x.annotation).manualSsid),str(record(x.annotation).deviceType)].concat(annotationColumns(x.annotation)); })},
+      {name:'Role 설명', headers:['Role ID','컨트롤러 ID','컨트롤러','Role','수집 SSID','Role 유형','ACL 바인딩 순서','원문 바인딩','문맥 수집 완료','관측 사용자 수','SSID 명 (직접 입력)','단말 구분'].concat(annotationHeaders), rows:roles.map(function (x) { return [x.id,x.controllerId,x.controllerName,x.name,list(x.ssids),list(x.roleTypes),list(x.aclOrder),list(x.bindingRaw),x.contextComplete,x.observedUsers,str(record(x.annotation).manualSsid),deviceLabel(record(x.annotation).deviceType)].concat(annotationColumns(x.annotation)); })},
       {name:'ACL 상세', headers:['규칙 ID','컨트롤러 ID','컨트롤러','Role ID','Role','ACL','시퀀스','발생 순번','원문 규칙','출발지','목적지','서비스','동작','출발지 해석','목적지 해석'].concat(annotationHeaders), rows:rules.map(function (x) { return [x.id,x.controllerId,x.controllerName,x.roleId,x.roleName,x.acl,x.sequence,x.ordinal,x.raw,x.source,x.destination,x.service,x.action,json(x.sourceInterpretation),json(x.destinationInterpretation)].concat(annotationColumns(x.annotation)); })},
       {name:'변경·확인 사항', headers:['구분','레코드 ID','유형','컨트롤러 ID','컨트롤러','Role ID','Role','규칙 ID','ACL','원문 규칙','사유 / 변경 내용','이전 규칙','후보 ID','가져온 프로젝트 ID','가져온 스냅샷 ID'].concat(annotationHeaders), rows:changes},
       {name:'Alias 상세', headers:['Alias ID','컨트롤러 ID','컨트롤러','Alias','항목 순번','유형','값','원문'], rows:aliases.flatMap(function (x) {

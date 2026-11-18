@@ -89,7 +89,7 @@
     if(v.source!==null){obj(v.source,path+'.source',['projectId','snapshotId','recordId','confirmedAt']);id(v.source.projectId,path+'.source.projectId');id(v.source.snapshotId,path+'.source.snapshotId');id(v.source.recordId,path+'.source.recordId');timestamp(v.source.confirmedAt,path+'.source.confirmedAt',true);}
     if(isRole) {
       if(Object.hasOwn(v,'manualSsid'))str(v.manualSsid,path+'.manualSsid',true,512);
-      if(Object.hasOwn(v,'deviceType'))choice(v.deviceType,['','PC','mobile','ETC'],path+'.deviceType');
+      if(Object.hasOwn(v,'deviceType'))choice(v.deviceType,['','PC','windows_pc','macbook','mobile','ETC'],path+'.deviceType');
     }
   }
   function indexed(rows, path) {

@@ -8,6 +8,10 @@
   'use strict';
   const STATUS = {unreviewed:'미확인', reviewed:'확인 완료', reused:'이전 설명 재사용', needs_review:'재확인 필요'};
   const COVERAGE = {completed:'수집 완료', partial:'일부 수집', failed:'수집 실패', unknown:'수집 범위 미확인'};
+  // A legacy PC value does not establish that the computer is running Windows.
+  const DEVICE_TYPES = [['','미지정'], ['windows_pc','윈도우 PC'], ['macbook','맥북'], ['PC','PC (기존 분류)'], ['mobile','mobile'], ['ETC','ETC']];
+  const DEVICE_LABELS = new Map(DEVICE_TYPES);
+  const deviceLabel = value => DEVICE_LABELS.get(value || '') || String(value || '미지정');
   // Operationally shared ACLs: hide by exact name in the Role workspace only.
   // Never modify the collected snapshot, rule order, annotations, or exports.
   const SYSTEM_COMMON_ACLS = new Set(['global-sacl', 're-guard', 'logon-control']);
@@ -292,7 +296,7 @@
 
     function renderRoleList() {
       const roles=visibleRoles();
-      $('ann-role-list').innerHTML=roles.map(r=>`<div class="ann-role-item ${r.id===activeRole?'active':''}"><input type="checkbox" data-select-role="${escapeHtml(r.id)}" aria-label="${escapeHtml((controller(r.controllerId)?.name||'')+' / '+r.name)} 보고에 포함" ${selectedRoles.has(r.id)?'checked':''}><button type="button" data-open-role="${escapeHtml(r.id)}" aria-pressed="${r.id===activeRole}"><strong>${escapeHtml(r.name)}</strong><span>SSID: ${escapeHtml(record('roles',r.id).manualSsid||'미입력')} · 단말: ${escapeHtml(record('roles',r.id).deviceType||'미지정')}</span><span>${escapeHtml(controller(r.controllerId)?.name||'')}  · ${rulesOf(r.id).filter(x=>!isCommonAcl(x.acl)).length} 전용 규칙 · ${rulesOf(r.id).filter(x=>isCommonAcl(x.acl)).length} 공통 규칙${roleNeedsReview(r)?' · 확인 필요':''}</span></button></div>`).join('') || '<p class="ann-empty">조건에 맞는 Role이 없습니다.</p>';
+      $('ann-role-list').innerHTML=roles.map(r=>`<div class="ann-role-item ${r.id===activeRole?'active':''}"><input type="checkbox" data-select-role="${escapeHtml(r.id)}" aria-label="${escapeHtml((controller(r.controllerId)?.name||'')+' / '+r.name)} 보고에 포함" ${selectedRoles.has(r.id)?'checked':''}><button type="button" data-open-role="${escapeHtml(r.id)}" aria-pressed="${r.id===activeRole}"><strong>${escapeHtml(r.name)}</strong><span>SSID: ${escapeHtml(record('roles',r.id).manualSsid||'미입력')} · 단말: ${escapeHtml(deviceLabel(record('roles',r.id).deviceType))}</span><span>${escapeHtml(controller(r.controllerId)?.name||'')}  · ${rulesOf(r.id).filter(x=>!isCommonAcl(x.acl)).length} 전용 규칙 · ${rulesOf(r.id).filter(x=>isCommonAcl(x.acl)).length} 공통 규칙${roleNeedsReview(r)?' · 확인 필요':''}</span></button></div>`).join('') || '<p class="ann-empty">조건에 맞는 Role이 없습니다.</p>';
     }
 
     function noteEditor(kind,id,label) {
@@ -310,7 +314,7 @@
       const aliases=project.snapshot.aliases.filter(a=>a.controllerId===r.controllerId);
       target.innerHTML=`<div class="ann-role-header"><div><div class="ann-kicker">${escapeHtml(c?.name||'')} · ${escapeHtml(c?.host||'장비 주소 미확인')}</div><div class="ann-role-title-row"><h2>${escapeHtml(r.name)}</h2><div class="ann-role-fields">
           <label for="ann-manual-ssid">SSID 명 <input type="text" id="ann-manual-ssid" data-manual-ssid="${escapeHtml(r.id)}" value="${escapeHtml(record('roles',r.id).manualSsid||'')}" maxlength="512" autocomplete="off" placeholder="직접 입력"></label>
-          <label for="ann-device-type">단말 구분 <select id="ann-device-type" data-device-type="${escapeHtml(r.id)}" aria-label="${escapeHtml(r.name)} 단말 구분">${['','PC','mobile','ETC'].map(v=>'<option value="'+v+'" '+((record('roles',r.id).deviceType||'')===v?'selected':'')+'>'+(v||'미지정')+'</option>').join('')}</select></label>
+          <label for="ann-device-type">단말 구분 <select id="ann-device-type" data-device-type="${escapeHtml(r.id)}" aria-label="${escapeHtml(r.name)} 단말 구분">${DEVICE_TYPES.map(([value,label])=>'<option value="'+value+'" '+((record('roles',r.id).deviceType||'')===value?'selected':'')+'>'+escapeHtml(label)+'</option>').join('')}</select></label>
         </div></div><p>수집 SSID: ${escapeHtml(r.ssids.join(', ')||'연결 정보 없음')} · 관측 사용자 ${r.observedUsers}명 · 전용 ${rows.length-commonAclRows.length}개 · 공통 ${commonAclRows.length}개 (전체 ${rows.length}개)</p></div><span class="ann-coverage ${c?.coverage==='completed'?'':'incomplete'}">${COVERAGE[c?.coverage]||'미확인'}</span></div>
         <div class="ann-role-note"><h3>보고용 Role 설명</h3><p class="ann-help">업무 목적 · 대상 사용자 · 주요 접근 범위 · 예외 및 확인 사항을 정리하세요.</p>${noteEditor('roles',r.id,r.name+' Role 설명')}</div>
         ${networks.length?'<div class="ann-local"><strong>포함된 내부망 대역</strong><p>'+networks.map(n=>escapeHtml(n.network+' / '+n.subnetMask+' · '+n.status)).join('<br>')+'</p></div>':''}
@@ -325,7 +329,7 @@
     function renderChanges() {
       $('ann-changes').innerHTML=project.changes.length?'<ul class="ann-change-list">'+project.changes.map(c=>'<li><strong>'+escapeHtml([controller(c.controllerId)?.name,role(c.roleId)?.name].filter(Boolean).join(' / '))+'</strong> '+escapeHtml(c.message)+(c.previousRaw?'<pre>'+escapeHtml(c.previousRaw)+'</pre>':'')+'</li>').join('')+'</ul>':'<p class="ann-empty">이전 작업을 가져오면 규칙과 수집 문맥의 변경 사항을 여기에 표시합니다.</p>';
       $('ann-unresolved').innerHTML=project.unresolvedAnnotations.length?'<h3>미연결 주석 '+project.unresolvedAnnotations.length+'개</h3><p class="ann-help">동일 규칙 중복, 장비 미확인 또는 변경된 규칙의 설명입니다. 대상 행을 직접 선택해 연결할 수 있습니다. 기존 주석이 있으면 이 목록에 보관합니다.</p>'+project.unresolvedAnnotations.map(u=>{
-        return '<article class="ann-orphan"><h4>'+escapeHtml(u.controllerName+' / '+u.roleName+(u.acl?' / '+u.acl:''))+'</h4><p>'+escapeHtml(u.reason)+'</p><pre>'+escapeHtml(u.raw)+'</pre><blockquote>'+escapeHtml(u.annotation.text||'(빈 주석)')+(u.kind==='role'&&u.annotation.manualSsid?'<p>직접 입력 SSID: '+escapeHtml(u.annotation.manualSsid)+'</p>':'')+(u.kind==='role'&&u.annotation.deviceType?'<p>단말: '+escapeHtml(u.annotation.deviceType)+'</p>':'')+'</blockquote><label>연결할 '+(u.kind==='role'?'Role':'규칙')+' <select data-link-target="'+escapeHtml(u.id)+'"><option value="">대상을 선택하세요</option></select></label><button type="button" data-link-orphan="'+escapeHtml(u.id)+'">선택한 행에 주석 연결</button><small>출처 '+escapeHtml(u.sourceProjectId)+' · '+escapeHtml(u.sourceSnapshotId)+'</small></article>';
+        return '<article class="ann-orphan"><h4>'+escapeHtml(u.controllerName+' / '+u.roleName+(u.acl?' / '+u.acl:''))+'</h4><p>'+escapeHtml(u.reason)+'</p><pre>'+escapeHtml(u.raw)+'</pre><blockquote>'+escapeHtml(u.annotation.text||'(빈 주석)')+(u.kind==='role'&&u.annotation.manualSsid?'<p>직접 입력 SSID: '+escapeHtml(u.annotation.manualSsid)+'</p>':'')+(u.kind==='role'&&u.annotation.deviceType?'<p>단말: '+escapeHtml(deviceLabel(u.annotation.deviceType))+'</p>':'')+'</blockquote><label>연결할 '+(u.kind==='role'?'Role':'규칙')+' <select data-link-target="'+escapeHtml(u.id)+'"><option value="">대상을 선택하세요</option></select></label><button type="button" data-link-orphan="'+escapeHtml(u.id)+'">선택한 행에 주석 연결</button><small>출처 '+escapeHtml(u.sourceProjectId)+' · '+escapeHtml(u.sourceSnapshotId)+'</small></article>';
       }).join(''):'';
     }
 
