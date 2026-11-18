@@ -17,7 +17,7 @@
   // No controller service-object definitions are collected in this schema.
   const KNOWN_SERVICES = new Set(['any', 'ip']);
   // Visual classification only: keep collected names, notes and ACL order unchanged.
-  const COMMON_ACL_NAMES = new Set(['global-sacl', 're-guard', 'logon-control']);
+  const COMMON_ACL_NAMES = new Set(['global-sacl', 'ra-guard', 're-guard', 'logon-control']);
   function normalizedAclName(value) {
     let name=String(value==null?'':value)
       .normalize('NFKC')

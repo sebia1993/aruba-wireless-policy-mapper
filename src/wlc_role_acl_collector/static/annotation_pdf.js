@@ -203,7 +203,7 @@
     content.push(rowsTable(['유형','대상','근거 및 운영 메모'],followups,[67,149,'*']));
 
     content.push(title('5. Role별 ACL 상세 — 기술 부록'));
-    content.push(para('아래 내용은 Role별 전용 ACL의 수집 원문과 주석입니다. 공통 정책 3종은 다음 섹션으로 분리했으며 원본 적용 순서를 제거하지 않았습니다.'));
+    content.push(para('아래 내용은 Role별 전용 ACL의 수집 원문과 주석입니다. 각 Role의 ACL 적용 순서는 수집된 그대로 표시하며, 공통 ACL 규칙은 다음 부록에서 확인할 수 있습니다.'));
     for(const r of roles){
       const own=exclusive.filter(rule=>related(rule,r));
       content.push({text:roleTarget(r),style:'roleHeading',margin:[0,12,0,4]});
@@ -214,7 +214,7 @@
     }
 
     content.push(title('6. 공통 ACL — 컨트롤러별 기술 부록'));
-    content.push(para('공통 정책명: global-sacl / re-guard / logon-control. 각 발생 규칙의 컨트롤러·Role·식별자와 주석을 보존합니다. 같은 이름이라도 실제 규칙 내용이 다르면 별도 항목으로 표시합니다.'));
+    content.push(para('공통 정책명: global-sacl / ra-guard / re-guard / logon-control. 각 발생 규칙의 컨트롤러·Role·식별자와 주석을 보존합니다. 같은 이름이라도 실제 규칙 내용이 다르면 별도 항목으로 표시합니다.'));
     const groups=new Map();
     for(const r of shared){
       const k=JSON.stringify([r.controllerId,str(r.acl).trim().toLowerCase()]);

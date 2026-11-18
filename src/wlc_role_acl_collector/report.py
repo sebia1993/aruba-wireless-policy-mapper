@@ -3435,7 +3435,7 @@ def _is_role_related_acl(role: str, acl_name: str) -> bool:
     role_name = role.strip().casefold()
     acl = acl_name.strip().casefold()
     # Keep collected ACLs and evaluation order; hide known shared names only.
-    if _common_acl_name(acl_name) in {"global-sacl", "re-guard", "logon-control"}:
+    if _common_acl_name(acl_name) in {"global-sacl", "ra-guard", "re-guard", "logon-control"}:
         return False
     if not role_name or not acl:
         return False

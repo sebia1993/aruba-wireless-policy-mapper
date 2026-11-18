@@ -138,6 +138,7 @@ test('compact ACL workbook defaults to nine visible reporting fields and preserv
 
 test('compact ACL output keeps duplicate rule occurrences and scope filtering without leaking internal IDs',()=>{
   const p=fixture(), rule=p.snapshot.rules[0];
+  rule.acl='ra-guard';
   p.snapshot.rules.push({...rule,id:'duplicate-rule',ordinal:2,sequence:'2'});
   p.annotations.rules['duplicate-rule']={...p.annotations.rules['rule-a'],text:'별도 규칙 설명'};
   const m=Core.buildExportModel(p,{type:'all'});
@@ -145,6 +146,10 @@ test('compact ACL output keeps duplicate rule occurrences and scope filtering wi
   assert.equal(sheet.rowCount,3);
   assert.equal(sheet.getRow(2).getCell(9).value,p.annotations.rules['rule-a'].text);
   assert.equal(sheet.getRow(3).getCell(9).value,'별도 규칙 설명');
+  assert.deepEqual(sheet.getColumn(3).values.slice(2),['ra-guard','ra-guard']);
+  const detail=exporter.createWorkbook(m,ExcelJS,{profile:'detailed'}).getWorksheet('ACL 상세');
+  const aclColumn=detail.getRow(1).values.indexOf('ACL');
+  assert.deepEqual(detail.getColumn(aclColumn).values.slice(2),['ra-guard','ra-guard']);
   const headers=sheet.getRow(1).values.join('|');
   assert.ok(!headers.includes('규칙 ID'));
   assert.ok(!headers.includes('수집본'));
