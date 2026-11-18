@@ -20,7 +20,6 @@
 |---|---|
 | `src/wlc_role_acl_collector/` | 수집기, Parser, ACL 평가, 진단, GUI, 보고서 |
 | `app.py` | Streamlit 웹앱 진입점 |
-| `cli_launcher.py` | CLI 실행 진입점 |
 | `gui_launcher.py` | GUI 실행 진입점 |
 | `config/` | 비식별 예제와 Role 대역 템플릿 |
 | `config/mock_scenarios/` | 실제 WLC 접속 없이 사용하는 비식별 Mock 시나리오 |
@@ -46,12 +45,6 @@ GUI 실행:
 python -m wlc_role_acl_collector.gui_app
 ```
 
-CLI 확인:
-
-```powershell
-wlc-role-acl-collector --help
-```
-
 웹앱 실행:
 
 ```powershell
@@ -73,7 +66,7 @@ Windows 배포 경로를 변경했다면 다음까지 확인합니다.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_gui_exe.ps1
-python .\tools\verify_release_package.py --dist .\dist --smoke-cli
+python .\tools\verify_release_package.py --dist .\dist
 
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows_streamlit_portable.ps1
 python .\tools\verify_streamlit_portable_package.py --dist .\dist --smoke

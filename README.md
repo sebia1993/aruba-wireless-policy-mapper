@@ -13,7 +13,7 @@
 | 채용 관점 | 내용 |
 |---|---|
 | 해결한 문제 | 여러 WLC CLI 화면을 따라가며 확인하던 SSID 접근 정책을 하나의 관계도와 보고서로 연결 |
-| 담당 범위 | 문제 정의, SSH/Telnet 수집, Parser, ACL 평가, GUI·로컬 Web·CLI, Windows 패키징과 CI/CD |
+| 담당 범위 | 문제 정의, SSH/Telnet 수집, Parser, ACL 평가, GUI·로컬 Web, Windows 패키징과 CI/CD |
 | 핵심 판단 | 수집하지 못한 정책은 임의 추정하지 않고 `부분 완료/판정 불가`로 구분하며, 동적 CLI 인자는 전송 전에 차단 검증 |
 | 보안 경계 | SSH 서버 키 고정, 변경 키 차단, Streamlit loopback 강제, Telnet 평문 위험과 비자동 전환 명시 |
 | 검증 증거 | Mock/fixture, 대량 Role·ACL 회귀, Windows GUI·Web 통합 ZIP과 smoke 자동 검증 |
@@ -42,7 +42,7 @@
 | 장비 변경 | **없음 — 조회 중심 수집, 설정 변경 명령 사용 안 함** |
 | 결과 | Excel, HTML, 생성 상태 JSON |
 | 추가 분석 | Role별 ACL 상세, Access Check, Role 대역 비교, VLAN/사용자 관측 정보 |
-| 실행 방식 | Windows GUI / 로컬 Streamlit 웹앱 / CLI |
+| 실행 방식 | Windows GUI / 로컬 Streamlit 웹앱 |
 | 오프라인 운영 | Windows 통합 ZIP 제공, Python 별도 설치 불필요 |
 | 검증 | Mock/fixture, 대량 데이터 회귀, Windows 패키지/통합 ZIP CI 검증 |
 
@@ -178,7 +178,7 @@ SSID → Role → ACL 상세와 Access Check의 이전 HTML 예시는 [2026-06-3
 - 승인되지 않은 SSH 키와 변경된 키는 차단하며, SSH 실패를 Telnet으로 자동 전환하지 않습니다.
 - Telnet은 계정과 장비 출력이 암호화되지 않으므로 격리된 관리망에서 위험을 승인한 경우에만 직접 선택합니다.
 - Streamlit은 `127.0.0.1` 등 loopback 주소에서만 실행되고 외부 인터페이스 바인딩은 차단됩니다.
-- GUI/Web/CLI에서 실제 WLC 수집과 테스트 fixture를 분리합니다.
+- GUI/Web에서 실제 WLC 수집과 테스트 fixture를 분리합니다.
 - Raw 장비 출력과 내부 Role 대역표는 공개 저장소에 포함하지 않습니다.
 - 안전 진단 결과는 주소·계정·Role/ACL 원문 등 운영 정보를 마스킹합니다.
 - GUI 작업 취소와 종료 시 장비 세션을 정리하도록 설계했습니다.
@@ -194,10 +194,10 @@ SSID → Role → ACL 상세와 Access Check의 이전 HTML 예시는 [2026-06-3
 |---|---|
 | Parser / ACL 평가 단위 테스트 | ✅ 자동 검증 |
 | Mock WLC / fixture 기반 수집 | ✅ 자동 검증 |
-| GUI / CLI / Web 공통 상태 모델 | ✅ 자동 검증 |
+| GUI / Web 공통 상태 모델 | ✅ 자동 검증 |
 | 60 Role / 1,200 ACL 회귀 | ✅ 자동 검증 |
 | 100 Role / 4,000 ACL HTML 렌더링 경로 | ✅ 검증 항목 포함 |
-| Windows GUI/CLI 패키지 | ✅ GitHub Actions |
+| Windows GUI 패키지 | ✅ GitHub Actions |
 | Streamlit portable 패키지 | ✅ GitHub Actions |
 | GUI + Web 통합 ZIP | ✅ GitHub Actions |
 | 실제 운영 환경 결과 | 공개 자료에서는 민감정보를 제거한 검증 요약만 관리 |
@@ -220,10 +220,8 @@ wlc-role-acl-collector_v0.4.1_windows.zip
 README_START_HERE_KO.txt
 gui/
   WlcRoleAclCollectorGUI.exe
-  WlcRoleAclCollectorCLI.exe
 web/
   start_webapp.cmd
-  trust_host_key.cmd
   webapp_settings.cmd
 ```
 
@@ -243,7 +241,7 @@ gui\WlcRoleAclCollectorGUI.exe
 4. `정상 완료 / 부분 완료 / 수집 실패` 상태를 확인합니다.
 5. HTML/Excel 결과에서 SSID → Role → ACL 관계를 확인합니다.
 
-로컬 웹앱은 신규 SSH 장비 접속 시 SHA-256 지문 승인창을 표시합니다. 별도 확인 후 체크박스를 선택하고 승인해야 수집이 시작됩니다. 명령행(CLI)은 `WlcRoleAclCollectorCLI.exe trust-host-key --host 192.0.2.10 --port 22`로 별도 승인합니다.
+로컬 웹앱은 신규 SSH 장비 접속 시 SHA-256 지문 승인창을 표시합니다. 별도 확인 후 체크박스를 선택하고 승인해야 수집이 시작됩니다.
 
 ### 로컬 웹앱
 
