@@ -224,8 +224,14 @@ def test_write_excel_and_html_report(tmp_path):
     assert 'id="annotation-workspace"' in html
     assert "저장됨" in html
     assert "주석 포함 HTML 저장" in html
-    assert "PDF 저장/인쇄" in html
-    assert "AnnotationEditorApp?.printPdf()" in html
+    assert "PDF 다운로드" in html
+    assert "PDF 저장/인쇄" not in html
+    assert "AnnotationEditorApp?.printPdf()" not in html
+    assert "target.print()" not in html
+    assert 'id="print-pdf"' not in html
+    assert 'id="annotation-pdfmake-script"' in html
+    assert 'id="annotation-pdf-font-script"' in html
+    assert 'id="annotation-pdf-export-script"' in html
     assert "window.addEventListener('beforeprint', preparePrint)" not in html
     assert "@media print" in html
     assert 'class="report-actions no-print"' in html

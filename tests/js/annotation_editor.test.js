@@ -7,19 +7,22 @@ const Importer = require('../../src/wlc_role_acl_collector/static/annotation_imp
 const Editor = require('../../src/wlc_role_acl_collector/static/annotation_editor.js');
 const fixture = require('./editor_fixture.js');
 
-function mount(project = fixture(), storage) {
+function mount(project = fixture(), storage, overrides = {}) {
   const dom = new JSDOM('<!doctype html><div id="annotation-workspace"></div><div id="source-report" data-source-snapshot-id="snapshot-a">ORIGINAL_SOURCE_SECRET</div><script id="annotation-project-data" type="application/json"></script>', {url:'https://offline.test/report.html'});
   const {window} = dom;
   window.document.getElementById('annotation-project-data').textContent = JSON.stringify(project);
   window.confirm = () => true;
-  let downloads = 0, downloadedBlob;
+  let downloads = 0, downloadedBlob, lastDownloadName;
   window.URL.createObjectURL = blob => {downloadedBlob=blob;return 'blob:test';};
   window.URL.revokeObjectURL = () => {};
-  window.HTMLAnchorElement.prototype.click = () => { downloads++; };
+  window.HTMLAnchorElement.prototype.click = function () { downloads++; lastDownloadName=this.download; };
   if (storage) Object.defineProperty(window, 'localStorage', {value:storage});
+  if (overrides.pdfMake) window.pdfMake=overrides.pdfMake;
+  window.open=()=>{ throw new Error('PDF export must not open a print window'); };
+  window.print=()=>{ throw new Error('PDF export must not invoke browser print'); };
   window.addEventListener('error', event=>{throw event.error;});
-  const app = Editor.init({document:window.document,window,core:Core,importer:Importer});
-  return {window,app,downloads:()=>downloads,close:()=>window.close(),downloadedText:()=>new Promise((resolve,reject)=>{
+  const app = Editor.init({document:window.document,window,core:Core,importer:Importer,pdfExporter:overrides.pdfExporter});
+  return {window,app,downloads:()=>downloads,downloadName:()=>lastDownloadName,downloadedBlob:()=>downloadedBlob,close:()=>window.close(),downloadedText:()=>new Promise((resolve,reject)=>{
     const reader=new window.FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error);reader.readAsText(downloadedBlob);
   })};
 }
@@ -683,5 +686,57 @@ test('role annotations from previous work keep MacBook through reuse and indepen
     try {
       assert.equal(Core.parseProject(dom.window.document.getElementById('annotation-project-data').textContent).annotations.roles['role-a'].deviceType,'macbook');
     } finally {dom.window.close();}
+  } finally {env.close();}
+});
+
+
+test('PDF button requests an offline file without print dialogs, preserving report scope and project state',async()=>{
+  const m=fixture();const before=structuredClone(m);let calls=0;
+  const pdfExporter={createPdfBytes:async (report,provider)=>{
+    calls++;
+    assert.ok(provider);
+    assert.equal(report.projectId,m.projectId);
+    assert.equal(report.rules.length,m.snapshot.rules.length);
+    return Uint8Array.from([37,80,68,70,45,49,46,55,10,0,1]);
+  }};
+  const env=mount(m,undefined,{pdfExporter,pdfMake:{createPdf(){}}});
+  try {
+    assert.equal(env.window.document.getElementById('ann-pdf').textContent,'PDF 다운로드');
+    assert.equal(env.window.document.getElementById('print-pdf'),null);
+    assert.equal(typeof env.app.printPdf,'undefined');
+    assert.equal(await env.app.downloadPdf(),true);
+    assert.equal(calls,1);
+    assert.equal(env.downloads(),1);
+    assert.match(env.downloadName(),/_management_report\.pdf$/);
+    assert.equal(env.downloadedBlob().type,'application/pdf');
+    assert.deepEqual(env.app.getProject(),before);
+    assert.match(env.window.document.getElementById('ann-status').textContent,/다운로드를 요청/);
+  } finally {env.close();}
+});
+
+test('PDF export failures are explicit and do not lose notes or report a completed download',async()=>{
+  const env=mount();
+  try {
+    assert.equal(await env.app.downloadPdf(),false);
+    assert.equal(env.downloads(),0);
+    assert.match(env.window.document.getElementById('ann-status').textContent,/PDF 생성 실패/);
+    assert.deepEqual(env.app.getProject(),fixture());
+    assert.equal(env.window.document.getElementById('ann-pdf').disabled,false);
+  } finally {env.close();}
+});
+
+test('saved standalone HTML embeds PDFMake, font bundle and direct PDF exporter scripts',()=>{
+  const env=mount();
+  try {
+    const doc=env.window.document;
+    for(const id of ['annotation-pdfmake-script','annotation-pdf-font-script','annotation-pdf-export-script']){
+      const s=doc.createElement('script');s.id=id;s.textContent='/* '+id+' self-contained offline asset */';doc.body.appendChild(s);
+    }
+    const html=Editor.standaloneHtml(fixture(),doc);
+    for(const id of ['annotation-pdfmake-script','annotation-pdf-font-script','annotation-pdf-export-script']){
+      assert.ok(html.includes('id="'+id+'"'));
+      assert.ok(html.includes('/* '+id+' self-contained offline asset */'));
+    }
+    assert.ok(!html.includes('id="print-pdf"'));
   } finally {env.close();}
 });

@@ -73,8 +73,8 @@ test('PDF model scope remains the authoritative source, no stale DOM or extra co
 
 test('invalid source data and excessive text are rejected without partial PDF success',()=>{
   assert.throws(()=>Pdf.documentDefinition({roles:[],controllers:[]}),/모델/);
-  const p=fixture();p.annotations.rules['rule-a'].text='x'.repeat(8*1024*1024);
-  assert.throws(()=>Pdf.documentDefinition(model(p)),/크기/);
+  const large=model();large.rules[0].annotation.text='x'.repeat(8*1024*1024);
+  assert.throws(()=>Pdf.documentDefinition(large),/크기/);
 });
 
 test('pdfMake adapter creates actual binary and checks bundled Hangul font',async()=>{
