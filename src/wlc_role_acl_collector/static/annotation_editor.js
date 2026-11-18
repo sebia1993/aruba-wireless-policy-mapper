@@ -161,6 +161,22 @@
       if (ids) ids.textContent='작업 '+project.projectId+' · 수집본 '+project.snapshot.id;
     }
 
+    function syncSourceCommonAclRows(panel) {
+      if(!sourceAvailable())return;
+      if(!panel) {
+        const current=role(activeRole),source=$('source-report');
+        if(!current||!source)return;
+        panel=Array.from(source.querySelectorAll('.role-panel')).find(el=>
+          el.dataset.controllerId===current.controllerId && el.dataset.role===current.name);
+      }
+      if(!panel)return;
+      const toggle=panel.querySelector('.toggle-other-acls');
+      // The original full report uses an independent Show other ACLs toggle.
+      // Keep it synchronized with the Role editor's only visible control.
+      if(toggle && (toggle.getAttribute('aria-pressed')==='true')!==showCommonAcl) toggle.click();
+      for(const row of panel.querySelectorAll('.other-acl-rule')) row.hidden=!showCommonAcl;
+    }
+
     function syncSourceRole() {
       const current=role(activeRole), source=$('source-report'), message=$('ann-access-message');
       const access=$('ann-access-slot')?.querySelector('.access-check');
@@ -183,6 +199,7 @@
         if(zero && zero.getAttribute('aria-pressed')!=='true') zero.click();
       }
       if(!tab.hidden) tab.click();  // Existing handler also syncs the Access Check role.
+      syncSourceCommonAclRows(panel);
       if(access) access.hidden=tab.hidden;
       if(message){message.hidden=!tab.hidden;message.textContent=tab.hidden?'현재 Role의 원본 표시 상태를 확인해야 합니다.':'';}
     }
@@ -602,7 +619,7 @@
 
     function onChange(event) {
       const el=event.target;
-      if (el.id==='ann-show-common-acl') {showCommonAcl=el.checked;renderRole();return;}
+      if (el.id==='ann-show-common-acl') {showCommonAcl=el.checked;syncSourceCommonAclRows();renderRole();return;}
       if (el.dataset.selectRole) {if(el.checked)selectedRoles.add(el.dataset.selectRole);else selectedRoles.delete(el.dataset.selectRole);return;}
       if (el.dataset.deviceType) {editRoleField(el.dataset.deviceType,'deviceType',el.value);return;}
       if (el.dataset.statusId) {
