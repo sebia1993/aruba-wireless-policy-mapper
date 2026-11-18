@@ -585,7 +585,7 @@ def test_large_html_report_keeps_role_order_visibility_and_unique_ids(tmp_path):
     html = html_path.read_text(encoding="utf-8")
 
     assert elapsed < 10
-    assert html.count('class="role-tab') == 60  # Ignore the three unified Role workspace tabs.
+    assert len(re.findall(r'<button class="role-tab(?: |")', html)) == 60  # Ignore unified tabs and role-label spans.
     assert html.count('class="acl-section role-panel') == 60
     assert html.index('data-role="branch/a"') < html.index('data-role="branch a"')
     assert html.index('data-role="branch a"') < html.index('data-role="role-000"')
