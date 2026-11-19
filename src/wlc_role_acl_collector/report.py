@@ -1677,12 +1677,16 @@ def _write_html(
 
     for (const button of document.querySelectorAll('.alias-link')) {{
       button.addEventListener('click', () => {{
-        const detailId = button.dataset.detailId;
-        const detail = document.getElementById(detailId);
+        const detail = document.getElementById(button.dataset.detailId);
         if (!detail) return;
-        const isHidden = detail.hasAttribute('hidden');
-        detail.toggleAttribute('hidden', !isHidden);
-        button.setAttribute('aria-expanded', String(isHidden));
+        const open = detail.hidden;
+        for (const link of button.closest('tr').querySelectorAll('.alias-link')) {{
+          const target = document.getElementById(link.dataset.detailId);
+          if (!target) continue;
+          const expanded = open && link === button;
+          target.hidden = !expanded;
+          link.setAttribute('aria-expanded', String(expanded));
+        }}
       }});
     }}
     {source_annotation_bridge_script}
@@ -3094,20 +3098,16 @@ def _acl_rows_html(
         detail_id = f"alias-detail-{_safe_dom_id(role_key)}-{index}"
         source_alias = _alias_name_from_field(str(row.get("source", "")))
         destination_alias = _alias_name_from_field(str(row.get("destination", "")))
-        detail_html = _inline_alias_detail_html(
-            detail_id=detail_id,
-            source_alias=source_alias,
-            destination_alias=destination_alias,
-            alias_lookup=alias_lookup,
-        )
+        source_id = f"{detail_id}-source"
+        destination_id = f"{detail_id}-destination"
         rendered.append(
             f"""
             <tr class="{row_class}"{other_acl_attr} data-rule-id="{escape(rule_id)}" data-annotation-ordinal="{annotation_ordinal}">
               <td>{escape(str(row.get('acl', '')))}</td>
               <td>{escape(str(row.get('sequence', '')))}</td>
               <td>{_action_badge_html(str(row.get('action', '')))}</td>
-              <td>{_acl_field_html(str(row.get('source', '')), detail_id, str(row.get('source_interpretation', '')))}</td>
-              <td>{_acl_field_html(str(row.get('destination', '')), detail_id, str(row.get('destination_interpretation', '')))}</td>
+              <td>{_acl_field_html(str(row.get('source', '')), source_id, str(row.get('source_interpretation', '')))}</td>
+              <td>{_acl_field_html(str(row.get('destination', '')), destination_id, str(row.get('destination_interpretation', '')))}</td>
               <td>{_service_badge_html(str(row.get('service', '')))}</td>
               <td class="raw raw-column">{escape(str(row.get('raw_rule', '')))}</td>
               <td class="comment-cell">
@@ -3116,7 +3116,8 @@ def _acl_rows_html(
                 <div id="{escape(comment_id)}-print" class="comment-print"></div>
               </td>
             </tr>
-            {detail_html}
+            {_inline_alias_detail_html(source_id, "Source", source_alias, alias_lookup)}
+            {_inline_alias_detail_html(destination_id, "Destination", destination_alias, alias_lookup)}
             """
         )
     return "".join(rendered)
@@ -3166,9 +3167,9 @@ def _acl_field_html(value: str, detail_id: str, interpretation: str = "") -> str
         field = escape(value)
     else:
         field = (
-        f'<span class="alias-prefix">alias</span>'
-        f'<button class="alias-link" type="button" data-detail-id="{escape(detail_id)}" '
-        f'aria-expanded="false">{escape(alias)}</button>'
+            f'<span class="alias-prefix">alias</span>'
+            f'<button class="alias-link" type="button" data-detail-id="{escape(detail_id)}" '
+            f'aria-controls="{escape(detail_id)}" aria-expanded="false">{escape(alias)}</button>'
         )
     if not interpretation:
         return field
@@ -3176,56 +3177,46 @@ def _acl_field_html(value: str, detail_id: str, interpretation: str = "") -> str
 
 
 def _inline_alias_detail_html(
-    *,
     detail_id: str,
-    source_alias: str,
-    destination_alias: str,
+    position: str,
+    alias: str,
     alias_lookup: dict[str, list[dict[str, Any]]],
 ) -> str:
-    aliases: list[tuple[str, str]] = []
-    if source_alias:
-        aliases.append(("Source", source_alias))
-    if destination_alias and destination_alias != source_alias:
-        aliases.append(("Destination", destination_alias))
-    if not aliases:
+    if not alias:
         return ""
-
-    sections = []
-    for position, alias in aliases:
-        sections.append(
-            f"""
-            <div class="alias-detail-title">{escape(position)} alias: {escape(alias)}</div>
-            <div>{_alias_chips_html(alias_lookup.get(alias, []))}</div>
-            """
-        )
+    chips = _alias_chips_html(alias_lookup[alias]) if alias in alias_lookup else '<span class="notice">정의 미수집</span>'
     return f"""
     <tr id="{escape(detail_id)}" class="alias-detail-row" hidden>
       <td colspan="8">
-        <div class="alias-detail">{''.join(sections)}</div>
+        <div class="alias-detail">
+          <div class="alias-detail-title">{escape(position)} alias: {escape(alias)}</div>
+          <div>{chips}</div>
+        </div>
       </td>
     </tr>
     """
 
 
 def _alias_chips_html(rows: list[dict[str, Any]]) -> str:
-    if not rows:
-        return '<span class="notice">Alias detail was not collected.</span>'
-    return "".join(
-        f"""
-        <span class="alias-chip">
-          <span class="alias-type alias-type-{_alias_type_class(str(row.get('entry_type', '')))}">{escape(_alias_type_label(str(row.get('entry_type', ''))))}</span>
-          <span>{escape(str(row.get('value', '')))}</span>
-        </span>
-        """
-        for row in rows
-    )
-
-
-def _alias_type_label(entry_type: str) -> str:
-    normalized = entry_type.strip().lower()
-    if normalized in {"host", "network", "range", "name"}:
-        return normalized.upper()
-    return "RAW"
+    chips = []
+    has_members = False
+    for row in rows:
+        entry_type = str(row.get("entry_type") or "")
+        value = str(row.get("value") or "")
+        if not entry_type and not value:
+            continue
+        kind = _alias_type_class(entry_type)
+        if kind != "raw" and value.strip():
+            has_members = True
+        chips.append(f"""
+            <span class="alias-chip">
+              <span class="alias-type alias-type-{kind}">{kind.upper()}</span>
+              <span>{escape(value)}</span>
+            </span>
+        """)
+    if not has_members:
+        chips.insert(0, '<span class="notice">구성원 미수집</span>')
+    return "".join(chips)
 
 
 def _alias_type_class(entry_type: str) -> str:
@@ -3349,10 +3340,13 @@ def _local_network_status_class(status: str) -> str:
 
 
 def _alias_name_from_field(value: str) -> str:
-    stripped = value.strip()
-    if stripped.lower().startswith("alias "):
-        return stripped.split(" ", 1)[1].strip()
-    return ""
+    match = re.fullmatch(r"alias\s+(.+)", value.strip(), re.IGNORECASE)
+    if not match:
+        return ""
+    name = match[1]
+    if len(name) > 1 and name[0] in {"'", '"'} and name[-1] == name[0]:
+        return name[1:-1]
+    return name
 
 
 def _group_by_alias(alias_rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:

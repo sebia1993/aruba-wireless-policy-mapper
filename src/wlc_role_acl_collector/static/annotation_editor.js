@@ -325,6 +325,45 @@
     }
 
 
+    const fieldLabels = {source:'출발지',destination:'목적지'};
+    let indexedSnapshot, lookupAlias;
+    function ruleAlias(rule, field) {
+      if (indexedSnapshot !== project.snapshot) {
+        lookupAlias = core.createAliasLookup(project.snapshot.aliases);
+        indexedSnapshot = project.snapshot;
+      }
+      return lookupAlias(rule.controllerId, rule[field]);
+    }
+
+    function memberListHtml(entries) {
+      return '<ul>'+entries.map(entry => '<li>'+escapeHtml([entry.type,entry.value].filter(Boolean).join(' '))+'</li>').join('')+'</ul>';
+    }
+
+    function aliasFieldHtml(value, alias, field, detailId) {
+      if (!alias) return escapeHtml(value);
+      return '<button type="button" class="ann-alias-link" data-alias-field="'+field+'" aria-controls="'+detailId+
+        '" aria-expanded="false" aria-label="'+escapeHtml(fieldLabels[field]+' Alias '+alias+' 구성원')+'">'+escapeHtml(value)+'</button>';
+    }
+
+    function toggleRuleAlias(button) {
+      const ruleRow = button.closest('tr');
+      const detail = doc.getElementById(button.getAttribute('aria-controls'));
+      const rule = project.snapshot.rules.find(item => item.id===ruleRow.dataset.annRuleId && item.roleId===activeRole);
+      if (!detail || !rule) return;
+      const field = button.dataset.aliasField;
+      const ref = ruleAlias(rule,field);
+      if (!ref) return;
+      const opening = button.getAttribute('aria-expanded')==='false';
+      for (const link of ruleRow.querySelectorAll('[data-alias-field]')) {
+        link.setAttribute('aria-expanded', String(opening && link===button));
+      }
+      detail.cells[0].innerHTML = opening
+        ? '<strong>'+escapeHtml(fieldLabels[field]+' · '+ref.name)+'</strong>'+
+          (ref.members.length ? memberListHtml(ref.members) : '<p>'+escapeHtml(ref.summary)+'</p>')
+        : '';
+      detail.hidden = !opening;
+    }
+
     // Show raw data and controller-scoped Alias definitions only when the operator asks.
     // Do not infer Alias members or use a stale source-report DOM when viewing saved work.
     function renderRuleEvidence(detail) {
@@ -333,20 +372,15 @@
       const current=project.snapshot.rules.find(rule=>rule.id===detail.dataset.ruleEvidence && rule.roleId===activeRole);
       if(!current){body.textContent='현재 Role에서 규칙 원본을 확인할 수 없습니다.';return;}
       const targetRole=role(current.roleId), targetController=controller(current.controllerId);
-      const aliases=project.snapshot.aliases.filter(alias=>alias.controllerId===current.controllerId);
-      const aliasByName=new Map(aliases.map(alias=>[alias.name,alias]));
       const references=[];
-      for(const [field,value] of [['출발지',current.source],['목적지',current.destination]]){
-        const match=/^alias\s+(?:"([^"]+)"|'([^']+)'|([^\s]+))$/i.exec(String(value||'').trim());
-        if(!match)continue;
-        const name=match[1]||match[2]||match[3];
-        if(!references.some(item=>item.name===name))references.push({field,name});
+      for(const field of ['source','destination']){
+        const ref=ruleAlias(current,field);
+        if(ref && !references.some(item=>item.name===ref.name))references.push({...ref,field:fieldLabels[field]});
       }
       const aliasHtml=references.map(ref=>{
-        const alias=aliasByName.get(ref.name);
-        const entries=alias?.entries||[];
-        if(!alias)return '<div class="ann-evidence-alias ann-evidence-missing"><strong>'+escapeHtml(ref.field+' Alias '+ref.name)+'</strong><p>수집된 Alias 정의가 없습니다. 현재 규칙의 대상을 확정할 수 없습니다.</p></div>';
-        const listing=entries.length?'<ul>'+entries.map(entry=>'<li>'+escapeHtml([entry.type,entry.value].filter(Boolean).join(' '))+'</li>').join('')+'</ul>':'<p>수집된 Alias 구성원이 없습니다.</p>';
+        const entries=ref.alias?.entries||[];
+        if(!ref.alias)return '<div class="ann-evidence-alias ann-evidence-missing"><strong>'+escapeHtml(ref.field+' Alias '+ref.name)+'</strong><p>'+escapeHtml(ref.status==='missing'?'수집된 Alias 정의가 없습니다. 현재 규칙의 대상을 확정할 수 없습니다.':ref.summary)+'</p></div>';
+        const listing=entries.length?memberListHtml(entries):'<p>수집된 Alias 구성원이 없습니다.</p>';
         return '<div class="ann-evidence-alias"><strong>'+escapeHtml(ref.field+' Alias '+ref.name)+'</strong>'+listing+'</div>';
       }).join('')||'<p class="ann-help">이 규칙의 출발지·목적지에 직접 참조된 Alias가 없습니다.</p>';
       body.innerHTML=
@@ -366,6 +400,26 @@
       if(element.matches?.('details[data-rule-evidence]') && element.open) renderRuleEvidence(element);
     }
 
+    function ruleRowHtml(rule,index) {
+      const sourceAlias = core.aliasReference(rule.source), destinationAlias = core.aliasReference(rule.destination);
+      const detailId = 'ann-alias-detail-'+index;
+      const detail = sourceAlias || destinationAlias
+        ? `<tr class="ann-alias-detail" id="${detailId}" hidden><td colspan="3"></td></tr>` : '';
+      return `<tr data-ann-rule-id="${escapeHtml(rule.id)}">
+        <td><strong>${escapeHtml(rule.acl)}</strong>
+          <span class="ann-sequence">#${escapeHtml(rule.sequence)} · Role 내 ${rule.ordinal}번째</span>
+          <span class="ann-action ${rule.action==='deny'?'deny':''}">${escapeHtml(rule.action||'미확인')}</span></td>
+        <td><dl class="ann-rule-fields">
+          <dt>출발지</dt><dd>${aliasFieldHtml(rule.source, sourceAlias, 'source', detailId)}</dd>
+          <dt>목적지</dt><dd>${aliasFieldHtml(rule.destination, destinationAlias, 'destination', detailId)}</dd>
+          <dt>서비스</dt><dd>${escapeHtml(rule.service)}</dd>
+        </dl><details class="ann-rule-evidence" data-rule-evidence="${escapeHtml(rule.id)}">
+          <summary>ACL 원문 · Alias · 수집 근거</summary><div class="ann-rule-evidence-content" data-rule-evidence-body></div>
+        </details></td>
+        <td>${noteEditor('rules',rule.id,rule.acl+' '+rule.sequence+' 주석')}</td>
+      </tr>${detail}`;
+    }
+
     function renderRole() {
       const r=role(activeRole), target=$('ann-role-detail');
       if (!r) {target.innerHTML='<div class="ann-empty"><h2>수집된 Role이 없습니다</h2><p>작업 파일을 열거나 수집 상태를 확인해 주세요. 미연결 주석은 아래에 보관됩니다.</p></div>';return;}
@@ -382,7 +436,7 @@
         <div class="ann-role-note"><h3>보고용 Role 설명</h3><p class="ann-help">업무 목적 · 대상 사용자 · 주요 접근 범위 · 예외 및 확인 사항을 정리하세요.</p>${noteEditor('roles',r.id,r.name+' Role 설명')}</div>
         ${networks.length?'<div class="ann-local"><strong>포함된 내부망 대역</strong><p>'+networks.map(n=>escapeHtml(n.network+' / '+n.subnetMask+' · '+n.status)).join('<br>')+'</p></div>':''}
         <div class="ann-section-title"><h3>ACL 원본 · 주석 통합</h3><label class="ann-common-toggle"><input type="checkbox" id="ann-show-common-acl" ${showCommonAcl?'checked':''}>공통 ACL 함께 보기 ${commonAclRows.length?'('+commonAclRows.length+')':''}</label></div><p class="ann-help">Excel과 PDF에도 이 설정을 적용합니다. 공통 ACL을 포함하려면 체크하세요. 작업 파일에는 전체 규칙과 주석이 저장됩니다.${!showCommonAcl&&commonAclRows.length?' '+commonAclRows.length+'개 공통 규칙이 화면에서 숨겨졌습니다.':''}</p>
-        <div class="ann-table-scroll" tabindex="0" role="region" aria-label="${escapeHtml(r.name)} ACL 원본 및 주석 표"><table class="ann-rules"><thead><tr><th>ACL / 순서</th><th>수집 정책 (Source / Destination / Service)</th><th>주석 · 확인 상태</th></tr></thead><tbody>${visibleRows.map(rule=>`<tr><td><strong>${escapeHtml(rule.acl)}</strong><span class="ann-sequence">#${escapeHtml(rule.sequence)} · Role 내 ${rule.ordinal}번째</span><span class="ann-action ${rule.action==='deny'?'deny':''}">${escapeHtml(rule.action||'미확인')}</span></td><td><dl class="ann-rule-fields"><dt>출발지</dt><dd>${escapeHtml(rule.source)}</dd><dt>목적지</dt><dd>${escapeHtml(rule.destination)}</dd><dt>서비스</dt><dd>${escapeHtml(rule.service)}</dd></dl><details class="ann-rule-evidence" data-rule-evidence="${escapeHtml(rule.id)}"><summary>ACL 원문 · Alias · 수집 근거</summary><div class="ann-rule-evidence-content" data-rule-evidence-body></div></details></td><td>${noteEditor('rules',rule.id,rule.acl+' '+rule.sequence+' 주석')}</td></tr>`).join('')||'<tr><td colspan="3">'+(rows.length && commonAclRows.length?'전용 ACL이 표시되지 않습니다. 공통 ACL '+commonAclRows.length+'개가 숨겨져 있습니다. 공통 ACL 함께 보기로 확인하세요.':'이 Role에 수집된 ACL 규칙이 없습니다.')+'</td></tr>'}</tbody></table></div>
+        <div class="ann-table-scroll" tabindex="0" role="region" aria-label="${escapeHtml(r.name)} ACL 원본 및 주석 표"><table class="ann-rules"><thead><tr><th>ACL / 순서</th><th>수집 정책 (Source / Destination / Service)</th><th>주석 · 확인 상태</th></tr></thead><tbody>${visibleRows.map(ruleRowHtml).join('')||'<tr><td colspan="3">'+(rows.length && commonAclRows.length?'전용 ACL이 표시되지 않습니다. 공통 ACL '+commonAclRows.length+'개가 숨겨져 있습니다. 공통 ACL 함께 보기로 확인하세요.':'이 Role에 수집된 ACL 규칙이 없습니다.')+'</td></tr>'}</tbody></table></div>
         <details class="ann-context"><summary>전체 ACL 연결 순서 · Alias 목록 · 수집 확인 사항</summary><h3>ACL 연결 순서</h3><p>${escapeHtml(r.aclOrder.join(' → ')||'연결 정보 없음')}</p><pre>${escapeHtml(r.bindingRaw.join('\n'))}</pre><h3>이 장비의 Alias</h3>${aliases.map(a=>'<div class="ann-alias"><strong>'+escapeHtml(a.name)+'</strong><ul>'+a.entries.map(e=>'<li>'+escapeHtml(e.type+' '+e.value)+'</li>').join('')+'</ul></div>').join('')||'<p>수집된 Alias가 없습니다.</p>'}<h3>확인 사항</h3><ul>${project.snapshot.issues.filter(i=>i.controllerId===r.controllerId&&(!i.roleId||i.roleId===r.id)).map(i=>'<li>'+escapeHtml(i.message)+'</li>').join('')||'<li>추가 수집 확인 사항이 없습니다.</li>'}</ul></details>`;
       // HTML parsing consumes an initial LF in textarea markup. The project is
       // authoritative, so assign DOM values explicitly after every render.
@@ -651,6 +705,7 @@
     function onClick(event) {
       const el=event.target.closest('button');
       if (!el || !root.contains(el)) return;
+      if (el.dataset.aliasField) {toggleRuleAlias(el);return;}
       if (el.dataset.openRole) {activeRole=el.dataset.openRole;renderRoleList();renderRole();syncSourceRole();return;}
       if (el.dataset.unifiedTab) {setView(el.dataset.unifiedTab);return;}
       if (el.dataset.templateId) {insertTemplate(el.dataset.templateKind,el.dataset.templateId);return;}

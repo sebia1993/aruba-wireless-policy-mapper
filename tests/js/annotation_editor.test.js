@@ -541,6 +541,74 @@ test('per-rule evidence expands collected raw, controller-scoped Alias and unres
   } finally {env.close();}
 });
 
+test('Alias field buttons disclose the clicked direction below its rule and follow the active controller', () => {
+  const p=fixture(), first=p.snapshot.rules[0], name='Office Servers';
+  first.source='alias "Office Servers"';
+  first.destination='alias Office Servers';
+  const other={...p.snapshot.controllers[0],id:'b',host:'192.0.2.2'};
+  p.snapshot.controllers.push(other);
+  p.snapshot.roles.push({...p.snapshot.roles[0],controllerId:other.id,id:'role-b'});
+  p.snapshot.rules.push({...first,id:'rule-b',controllerId:other.id,roleId:'role-b'});
+  const alias=(controllerId, value)=>({id:'alias-'+controllerId,controllerId,name,
+    entries:[{type:'host',value,raw:'host '+value}]});
+  p.snapshot.aliases.push(alias(first.controllerId,'<img src=x onerror=alert(1)>'),alias(other.id,'192.0.2.2'));
+  const env=mount(p), doc=env.window.document;
+  try {
+    const row=doc.querySelector('.ann-rules tbody tr');
+    const [src,dst]=row.querySelectorAll('button[data-alias-field]');
+    assert.ok(src && dst);
+    assert.equal(src.type,'button');
+    assert.equal(src.getAttribute('aria-expanded'),'false');
+    const detail=doc.getElementById(src.getAttribute('aria-controls'));
+    assert.equal(row.nextElementSibling,detail);
+    assert.equal(detail.hidden,true);
+    src.focus();src.click();
+    assert.equal(doc.activeElement,src);
+    assert.equal(src.getAttribute('aria-expanded'),'true');
+    assert.equal(detail.hidden,false);
+    assert.match(detail.textContent,/출발지.*Office Servers/s);
+    assert.match(detail.textContent,/<img src=x onerror=alert\(1\)>/);
+    assert.equal(detail.querySelector('img'),null);
+    assert.doesNotMatch(detail.textContent,/192\.0\.2\.2/);
+    dst.click();
+    assert.equal(src.getAttribute('aria-expanded'),'false');
+    assert.equal(dst.getAttribute('aria-expanded'),'true');
+    assert.match(detail.textContent,/목적지.*Office Servers/s);
+    assert.doesNotMatch(detail.textContent,/출발지/);
+    dst.click();
+    assert.equal(detail.hidden,true);
+    assert.equal(dst.getAttribute('aria-expanded'),'false');
+    doc.querySelector('[data-open-role="role-b"]').click();
+    const current=doc.querySelector('[data-alias-field="source"]');
+    assert.equal(current.getAttribute('aria-expanded'),'false');
+    current.click();
+    const reopened=doc.getElementById(current.getAttribute('aria-controls'));
+    assert.match(reopened.textContent,/192\.0\.2\.2/);
+    assert.doesNotMatch(reopened.textContent,/<img/);
+  } finally { env.close(); }
+});
+
+test('an Alias disclosure distinguishes empty and missing definitions and disappears with its hidden common rule', () => {
+  const p=fixture(), rule=p.snapshot.rules[0];
+  p.snapshot.rules.push({...rule,id:'shared',ordinal:2,acl:'ra-guard',source:'alias Empty',destination:'alias Unknown'});
+  p.snapshot.aliases.push({id:'empty',controllerId:rule.controllerId,name:'Empty',entries:[]});
+  const env=mount(p),doc=env.window.document;
+  try {
+    assert.equal(doc.querySelector('[data-alias-field]'),null);
+    doc.getElementById('ann-show-common-acl').click();
+    const [src,dst]=doc.querySelectorAll('[data-alias-field]');
+    assert.ok(src && dst);
+    src.click();
+    const row=doc.getElementById(src.getAttribute('aria-controls'));
+    assert.match(row.textContent,/구성원 미수집/);
+    dst.click();
+    assert.match(row.textContent,/정의 미수집/);
+    doc.getElementById('ann-show-common-acl').click();
+    assert.equal(doc.querySelector('[data-alias-field]'),null);
+    assert.equal(row.isConnected,false);
+  } finally { env.close(); }
+});
+
 test('optional old source cannot become visible after loading a mismatched work file', () => {
   const env=mount(),doc=env.window.document;
   try {

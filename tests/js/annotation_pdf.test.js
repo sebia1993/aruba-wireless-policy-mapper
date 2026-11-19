@@ -27,7 +27,7 @@ test('management PDF uses searchable A4 content with Korean summary, evidence an
   assert.equal(def.pageOrientation,'portrait');
   assert.equal(def.defaultStyle.font,'NanumGothic');
   assert.match(text,/무선랜 Role 및 ACL 정책 점검 보고서/);
-  for(const part of ['컨트롤러 및 수집 신뢰도','Role별 정책 현황','추가 확인·변경','Role별 ACL 상세','공통 ACL','Alias 상세','맥북','corp-ssid','업무망 허용','상급 보고용 설명']) {
+  for(const part of ['컨트롤러 및 수집 신뢰도','Role별 정책 현황','추가 확인·변경','Role별 ACL 상세','공통 ACL','자료 범위','맥북','corp-ssid','업무망 허용','상급 보고용 설명']) {
     assert.ok(text.includes(part),part);
   }
   assert.equal(typeof def.footer,'function');
@@ -76,7 +76,7 @@ test('hidden common ACLs have no PDF appendix, count or included-policy guidance
   const detailed=Pdf.documentDefinition(report);
   const headings=detailed.content.filter(item=>item.style==='sectionHeading').map(item=>item.text);
   assert.equal(headings.length,6);
-  assert.match(headings[5],/^6\. Alias/);
+  assert.equal(headings[5],'6. 자료 범위');
   assert.doesNotMatch(allText(detailed.content),/공통 정책 규칙|공통 0건|ra-guard|공통 ACL 규칙은 다음 부록/);
   assert.doesNotMatch(allText(Pdf.documentDefinition(report,{profile:'simple'}).content),/공통 ACL도 보고 범위에 포함/);
   report.rules=[];
@@ -279,7 +279,7 @@ test('compact PDF warns on partial controller coverage without changing detailed
   const detailed=Pdf.documentDefinition(m,{profile:'detailed'});
   assert.match(concise,/수집 미완료/);
   assert.equal(detailed.pageOrientation,'portrait');
-  assert.match(allText(detailed.content),/Alias 상세/);
+  assert.match(allText(detailed.content),/자료 범위/);
 });
 
 
@@ -293,4 +293,75 @@ test('compact PDF differentiates identically named WLCs by endpoint without expo
   assert.ok(output.includes('192.0.2.1'));
   assert.ok(output.includes('192.0.2.99'));
   assert.ok(!output.includes('controller-b'));
+});
+
+function aliasReportFixture(){
+  const p=fixture(), base=p.snapshot.rules[0], ctrl=p.snapshot.controllers[0], role=p.snapshot.roles[0];
+  p.snapshot.controllers.push({...ctrl,id:'controller-b',host:'192.0.2.2'});
+  p.snapshot.roles.push({...role,id:'role-b',controllerId:'controller-b'});
+  Object.assign(base,{source:'alias SHORT',destination:'alias LONG'});
+  p.snapshot.rules.push({...base,id:'second',source:'alias LONG',destination:'alias EMPTY',ordinal:2},
+    {...base,id:'other',roleId:'role-b',controllerId:'controller-b',source:'alias UNKNOWN',destination:'alias LONG'},
+    {...base,id:'common-alias',acl:'ra-guard',source:'any',destination:'alias PRIVATE',ordinal:3});
+  function alias(controllerId,name,members){
+    const entries=[{type:'description',value:'설명',raw:'description 설명'}];
+    for(const value of members)entries.push({type:'host',value,raw:'host '+value});
+    return {controllerId,id:controllerId+'-'+name,name,entries};
+  }
+  p.snapshot.aliases.push(alias('controller-a','SHORT',['192.0.2.10','192.0.2.11','192.0.2.12']),
+    alias('controller-a','LONG',['198.51.100.10','198.51.100.11','198.51.100.12','198.51.100.13']),
+    alias('controller-a','EMPTY',[]),alias('controller-a','PRIVATE',['192.0.2.100']),
+    alias('controller-b','LONG',['203.0.113.20']));
+  return p;
+}
+
+for(const profile of ['simple','detailed']){
+  test(profile+' PDF prints short aliases inline and links repeated long aliases to one scoped definition',async()=>{
+    const project=aliasReportFixture();
+    const short=project.snapshot.aliases.find(alias=>alias.name==='SHORT');
+    short.entries[0]={type:'description',value:'단말 주소',raw:'description 단말 주소'};
+    short.entries[1].raw='host 192.0.2.10 position 1';
+    const report=model(project,{type:'all',showCommonAcl:false});
+    const doc=Pdf.documentDefinition(report,{profile});
+    const body=aclTables(report,profile).flatMap(table=>table.body.slice(1));
+    const rules=allText(body);
+    for(const address of ['192.0.2.10','192.0.2.11','192.0.2.12','203.0.113.20'])assert.ok(rules.includes(address),address);
+    assert.match(rules,/198\.51\.100\.10 외 3개/);
+    assert.doesNotMatch(rules,/198\.51\.100\.13/);
+    assert.match(rules,/정의 미수집/);
+    assert.match(rules,/구성원 미수집/);
+    assert.doesNotMatch(allText(doc.content),/192\.0\.2\.100|alias PRIVATE/);
+    const definition=doc.content.find(item=>item.id);
+    assert.ok(definition && definition.text.includes('[A01]') && definition.text.includes('LONG'));
+    const appendix=allText(doc.content.slice(doc.content.indexOf(definition)));
+    assert.doesNotMatch(appendix,/192\.0\.2\.1[012]|203\.0\.113\.20|EMPTY|SHORT/);
+    if(profile==='detailed'){
+      assert.match(rules,/description 단말 주소/);
+      assert.match(rules,/host 192\.0\.2\.10 position 1/);
+    }
+    const inlineLinks=[];
+    JSON.stringify(body,(key,value)=>{if(key==='linkToDestination')inlineLinks.push(value);return value;});
+    assert.deepEqual(inlineLinks,[definition.id,definition.id]);
+    assert.ok(allText(doc.content).includes('198.51.100.13'));
+    const selected=Pdf.documentDefinition(model(project,{type:'selected',roleIds:['role-b'],showCommonAcl:false}),{profile});
+    assert.doesNotMatch(allText(selected.content),/198\.51\.100\.1|\[A01\]|Alias 상세/);
+    const inclusive=Pdf.documentDefinition(model(project,{type:'all',showCommonAcl:true}),{profile});
+    assert.match(allText(inclusive.content),/192\.0\.2\.100/);
+    const pdfMake=require('../../src/wlc_role_acl_collector/static/pdfmake.min.js');
+    pdfMake.vfs=require('../../src/wlc_role_acl_collector/static/pdfmake_nanum.vfs.js');
+    const binary=Buffer.from(await Pdf.createPdfBytes(report,pdfMake,{profile})).toString('latin1');
+    assert.equal((binary.match(/\/S \/GoTo\s+\/D \(alias-A01\)/g)||[]).length,2);
+    assert.match(binary,/\/Names\s*\[\s*\(alias-A01\)\s*\[\d+ \d+ R \/XYZ/);
+  });
+}
+
+test('PDF limits account for repeated expansion of large short-alias definitions',()=>{
+  const report=model();
+  const base={...report.rules[0],destination:'alias LARGE'};
+  report.aliases=[{id:'large',name:'LARGE',controllerId:base.controllerId,
+    entries:[{type:'name',value:'z'.repeat(600000),raw:''}]}];
+  report.rules=Array.from({length:16},(_,i)=>({...base,id:'rule-'+i}));
+  for(const profile of ['simple','detailed']){
+    assert.throws(()=>Pdf.documentDefinition(report,{profile}),/Alias.*범위/);
+  }
 });

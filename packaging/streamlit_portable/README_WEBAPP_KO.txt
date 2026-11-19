@@ -8,7 +8,7 @@ ZIP 안에 내장 Python, 앱 코드, 실행에 필요한 라이브러리가 함
 -----------
 
 1) GitHub Release에서 아래 파일을 다운로드합니다.
-   - wlc-role-acl-collector_v0.5.3_windows.zip 안의 web 폴더
+   - wlc-role-acl-collector_v0.5.4_windows.zip 안의 web 폴더
 
 2) ZIP 파일을 원하는 폴더에 압축 해제합니다.
    예: C:\Tools\wlc-role-acl-collector-web

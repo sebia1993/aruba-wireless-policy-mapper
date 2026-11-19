@@ -1,9 +1,9 @@
 /* Offline policy reporting. Receives AnnotationCore's explicit, DOM-independent export model. */
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.AnnotationExport = factory();
-}(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./annotation_core.js'));
+  else root.AnnotationExport = factory(root.AnnotationCore);
+}(typeof globalThis !== 'undefined' ? globalThis : this, function (core) {
   'use strict';
   var LIMIT = 32767;
   function str(value) { return value === null || value === undefined ? '' : String(value); }
@@ -21,7 +21,22 @@
     return [a.text, a.status, a.updatedAt, a.confirmedAt, list(a.reasons), s.projectId, s.snapshotId, s.recordId, s.confirmedAt];
   }
   var annotationHeaders = ['주석', '확인 상태', '주석 수정 시각', '확인 시각', '검토 사유', '원본 프로젝트 ID', '원본 스냅샷 ID', '원본 주석 ID', '원본 확인 시각'];
-  function datasets(m) {
+  const addressColumns = [
+    {header:'출발지', read:rule => rule.source},
+    {header:'목적지', read:rule => rule.destination}
+  ];
+  function excelAddressColumns(model) {
+    const lookup = core.createAliasLookup(model.aliases || []);
+    return addressColumns.flatMap(column => {
+      const aliasFor = rule => lookup(rule.controllerId, column.read(rule));
+      if (!(model.rules || []).some(aliasFor)) return [column];
+      return [column, {
+        header:column.header + ' Alias 요약',
+        read:rule => aliasFor(rule)?.summary || ''
+      }];
+    });
+  }
+  function datasets(m, addresses = addressColumns) {
     var c = m.controllers || [], roles = m.roles || [], rules = m.rules || [], aliases = m.aliases || [];
     var summary = [
       ['보고서', '프로젝트 ID', m.projectId], ['보고서', '스냅샷 ID', m.snapshotId], ['보고서', '리비전', m.revision],
@@ -30,7 +45,7 @@
       ['안내', '수집 완전성', 'completed=완료; partial=일부 수집; failed=실패; unknown=알 수 없음. 불완전한 수집에서 항목 부재는 삭제 증거가 아닙니다.'],
       ['안내', '연속 행', 'Excel 셀 한도(UTF-16 32767자)를 넘으면 같은 레코드 번호의 조각 순서대로 각 열을 이어 붙이세요. 빈 셀은 빈 문자열입니다.'],
       ['안내', '보고서 수치', m.showCommonAcl === false ? '선택한 보고 범위에서 공통 ACL을 제외하고 집계했습니다.' : '선택한 보고 범위에서 공통 ACL을 포함해 집계했습니다.'],
-      ['안내', 'Alias 범위', '보고 대상 Role이 속한 장비의 수집된 Alias 전체를 문맥 확인용으로 포함합니다.']
+      ['안내', 'Alias 범위', '보고서에 표시한 규칙의 출발지 또는 목적지가 참조하는 장비별 Alias 정의를 포함합니다.']
     ];
     var labels = {controllerCount:'컨트롤러 수',roleCount:'Role 수',ruleCount:'규칙 수',annotatedRuleCount:'주석 있는 규칙 수',needsReviewCount:'재검토 필요 주석 수 (미연결 포함)'};
     Object.keys(labels).forEach(function (key) { summary.push(['범위 집계', labels[key], record(m.summary)[key]]); });
@@ -57,7 +72,11 @@
     return [
       {name:'보고 요약', headers:['분류', '항목 / 식별자', '내용'], rows:summary},
       {name:'Role 설명', headers:['Role ID','컨트롤러 ID','컨트롤러','Role','수집 SSID','Role 유형','ACL 바인딩 순서','원문 바인딩','문맥 수집 완료','관측 사용자 수','SSID 명 (직접 입력)','단말 구분'].concat(annotationHeaders), rows:roles.map(function (x) { return [x.id,x.controllerId,x.controllerName,x.name,list(x.ssids),list(x.roleTypes),list(x.aclOrder),list(x.bindingRaw),x.contextComplete,x.observedUsers,str(record(x.annotation).manualSsid),deviceLabel(record(x.annotation).deviceType)].concat(annotationColumns(x.annotation)); })},
-      {name:'ACL 상세', headers:['규칙 ID','컨트롤러 ID','컨트롤러','Role ID','Role','ACL','시퀀스','발생 순번','원문 규칙','출발지','목적지','서비스','동작','출발지 해석','목적지 해석'].concat(annotationHeaders), rows:rules.map(function (x) { return [x.id,x.controllerId,x.controllerName,x.roleId,x.roleName,x.acl,x.sequence,x.ordinal,x.raw,x.source,x.destination,x.service,x.action,json(x.sourceInterpretation),json(x.destinationInterpretation)].concat(annotationColumns(x.annotation)); })},
+      {name:'ACL 상세',
+        headers:['규칙 ID','컨트롤러 ID','컨트롤러','Role ID','Role','ACL','시퀀스','발생 순번','원문 규칙']
+          .concat(addresses.map(column => column.header), ['서비스','동작','출발지 해석','목적지 해석'], annotationHeaders),
+        rows:rules.map(x => [x.id,x.controllerId,x.controllerName,x.roleId,x.roleName,x.acl,x.sequence,x.ordinal,x.raw]
+          .concat(addresses.map(column => column.read(x)), [x.service,x.action,json(x.sourceInterpretation),json(x.destinationInterpretation)], annotationColumns(x.annotation)))},
       {name:'변경·확인 사항', headers:['구분','레코드 ID','유형','컨트롤러 ID','컨트롤러','Role ID','Role','규칙 ID','ACL','원문 규칙','사유 / 변경 내용','이전 규칙','후보 ID','가져온 프로젝트 ID','가져온 스냅샷 ID'].concat(annotationHeaders), rows:changes},
       {name:'Alias 상세', headers:['Alias ID','컨트롤러 ID','컨트롤러','Alias','항목 순번','유형','값','원문'], rows:aliases.flatMap(function (x) {
         var controller = c.find(function (item) { return item.id === x.controllerId; });
@@ -104,8 +123,9 @@
     });
     var rules = model.rules || [];
     var includeNotes = rules.some(function(rule){return hasNoteText(record(rule.annotation).text);});
-    var headers = ['컨트롤러','Role','ACL','순서','출발지','목적지','서비스','동작'];
-    var widths = [24,26,26,12,30,30,24,14];
+    const addresses = excelAddressColumns(model);
+    var headers = ['컨트롤러','Role','ACL','순서'].concat(addresses.map(column => column.header), ['서비스','동작']);
+    var widths = [24,26,26,12].concat(addresses.map(() => 30), [24,14]);
     var noteIndex = headers.length;
     if (includeNotes) {
       headers.push('행별 주석');
@@ -116,8 +136,8 @@
       .concat([{width:12,hidden:true},{width:14,hidden:true}]);
     sheet.addRow(headers.concat(['_레코드 번호','_조각 / 전체']));
     rules.forEach(function(rule,index){
-      var values=[compactControllerLabel(rule,byId,counts),rule.roleName,rule.acl,rule.sequence || rule.ordinal,
-        rule.source,rule.destination,rule.service,rule.action];
+      var values=[compactControllerLabel(rule,byId,counts),rule.roleName,rule.acl,rule.sequence || rule.ordinal]
+        .concat(addresses.map(column => column.read(rule)), [rule.service,rule.action]);
       if (includeNotes) values.push(record(rule.annotation).text);
       var parts=values.map(chunks), count=Math.max.apply(null,parts.map(function(p){return p.length;}));
       for(var i=0;i<count;i++){
@@ -155,7 +175,7 @@
     book.creator = 'Aruba Wireless Policy Mapper';
     book.subject = 'Offline annotation report';
     book.title = '무선 정책 주석 보고서';
-    datasets(model).forEach(function (data) {
+    datasets(model, excelAddressColumns(model)).forEach(function (data) {
       // These freshly built rows are private to this workbook. The print layout uses the full dataset.
       var noteIndex = data.headers.indexOf('주석');
       if (noteIndex >= 0 && !data.rows.some(function(row){return hasNoteText(row[noteIndex]);})) {
