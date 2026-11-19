@@ -559,7 +559,7 @@ test('optional old source cannot become visible after loading a mismatched work 
   } finally {env.close();}
 });
 
-test('exact-name common ACLs are hidden by default, reversible, and preserved in snapshots and export', () => {
+test('export follows the common ACL toggle and preserves the full editable snapshot', () => {
   const p=fixture(), original=p.snapshot.rules[0];
   const names=['global-sacl','re-guard','logon-control','Re-Guard','LOGON-CONTROL','re-guardian','logon-control-v2','custom-global-sacl','role-specific'];
   names.forEach((acl,i)=>{
@@ -579,16 +579,19 @@ test('exact-name common ACLs are hidden by default, reversible, and preserved in
     for(const name of ['global-sacl','re-guard','logon-control']) {
       assert.ok(!Array.from(doc.querySelectorAll('.ann-rules tbody tr > td:first-child > strong')).some(x=>x.textContent.toLowerCase()===name),name);
     }
-    assert.equal(env.app.exportModel().rules.length,10);
-    for(const name of names) assert.ok(env.app.exportModel().rules.some(x=>x.acl===name));
+    const checkExport = () => assert.deepEqual(env.app.exportModel().rules.map(rule=>rule.acl),
+      Array.from(doc.querySelectorAll('.ann-rules tbody tr > td:first-child > strong'), cell=>cell.textContent));
+    checkExport();
     const control=doc.getElementById('ann-show-common-acl');
     control.checked=true;control.dispatchEvent(new env.window.Event('change',{bubbles:true}));
     assert.equal(count(),10);
+    checkExport();
     assert.deepEqual(Array.from(doc.querySelectorAll('.ann-rules tbody tr > td:first-child > strong')).map(x=>x.textContent),[original.acl,...names]);
     assert.equal(env.app.getProject().revision,p.revision);
     const reset=doc.getElementById('ann-show-common-acl');
     reset.checked=false;reset.dispatchEvent(new env.window.Event('change',{bubbles:true}));
     assert.equal(count(),5);
+    checkExport();
     for(let i=0;i<names.length;i++) assert.equal(env.app.getProject().annotations.rules['test-rule-'+i].text,'주석 '+names[i]);
   } finally {env.close();}
 });
@@ -636,7 +639,7 @@ test('Role with only common ACLs does not claim no ACL policy was collected', ()
     assert.match(doc.querySelector('.ann-rules').textContent,/전용 ACL이 표시되지 않습니다/);
     assert.match(doc.querySelector('.ann-rules').textContent,/공통 ACL 1개가 숨겨져 있습니다/);
     assert.doesNotMatch(doc.querySelector('.ann-rules').textContent,/수집된 ACL 규칙이 없습니다/);
-    assert.equal(env.app.exportModel().rules.length,p.snapshot.rules.length);
+    assert.equal(env.app.exportModel().rules.length,0);
     const check=doc.getElementById('ann-show-common-acl');
     check.checked=true;check.dispatchEvent(new env.window.Event('change',{bubbles:true}));
     assert.match(doc.querySelector('.ann-rules').textContent,/logon-control/);
@@ -803,7 +806,7 @@ test('quoted, visually identical Unicode common ACLs remain hidden after explici
     toggle=doc.getElementById('ann-show-common-acl');
     toggle.checked=false;toggle.dispatchEvent(new env.window.Event('change',{bubbles:true}));
     assert.deepEqual(names(),[base.acl,...distinctNames]);
-    assert.equal(env.app.exportModel().rules.length,p.snapshot.rules.length);
+    assert.deepEqual(env.app.exportModel().rules.map(rule=>rule.acl),names());
     for(let i=0;i<commonNames.length;i++){
       assert.equal(env.app.getProject().annotations.rules['unicode-common-'+i].text,'분리 점검 '+i);
     }
@@ -817,7 +820,7 @@ test('common ACL detection remains scoped to ACL names, not raw data or role nam
   const env=mount(p),doc=env.window.document;
   try {
     assert.deepEqual(Array.from(doc.querySelectorAll('.ann-rules tbody tr > td:first-child > strong'),el=>el.textContent),['EMPLOYEE']);
-    assert.equal(env.app.exportModel().rules.length,2);
+    assert.deepEqual(env.app.exportModel().rules.map(rule=>rule.raw),['any alias re-guard any permit']);
   } finally {env.close();}
 });
 

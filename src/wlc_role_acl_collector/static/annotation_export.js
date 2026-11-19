@@ -29,7 +29,7 @@
       ['보고서', '내보내기 범위', m.scopeLabel], ['안내', '확인 상태', 'reviewed=확인됨; unreviewed=미확인; reused=이전 주석 재사용; needs_review=재검토 필요'],
       ['안내', '수집 완전성', 'completed=완료; partial=일부 수집; failed=실패; unknown=알 수 없음. 불완전한 수집에서 항목 부재는 삭제 증거가 아닙니다.'],
       ['안내', '연속 행', 'Excel 셀 한도(UTF-16 32767자)를 넘으면 같은 레코드 번호의 조각 순서대로 각 열을 이어 붙이세요. 빈 셀은 빈 문자열입니다.'],
-      ['안내', '보고서 수치', '수치는 선택한 보고 범위를 기준으로 합니다. 화면에서 숨긴 행도 보고 범위에 포함될 수 있습니다.'],
+      ['안내', '보고서 수치', m.showCommonAcl === false ? '선택한 보고 범위에서 공통 ACL을 제외하고 집계했습니다.' : '선택한 보고 범위에서 공통 ACL을 포함해 집계했습니다.'],
       ['안내', 'Alias 범위', '보고 대상 Role이 속한 장비의 수집된 Alias 전체를 문맥 확인용으로 포함합니다.']
     ];
     var labels = {controllerCount:'컨트롤러 수',roleCount:'Role 수',ruleCount:'규칙 수',annotatedRuleCount:'주석 있는 규칙 수',needsReviewCount:'재검토 필요 주석 수 (미연결 포함)'};

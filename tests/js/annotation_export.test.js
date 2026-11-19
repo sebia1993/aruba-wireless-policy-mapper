@@ -39,6 +39,14 @@ test('preserves formula-like text and splits Korean and emoji losslessly at Exce
   sheet.eachRow((row,n)=>{ if(n>1) reconstructed.push(row.getCell(noteColumn).value||''); row.eachCell(c=>{if(typeof c.value==='string'){assert.ok(c.value.length<=32767);assert.ok(!/[\uD800-\uDBFF]$/.test(c.value));} assert.notEqual(c.type,ExcelJS.ValueType.Formula);}); });
   assert.equal(reconstructed.join(''),longNote);
 });
+test('detailed Excel reports which common ACL visibility its counts reflect', () => {
+  for (const [showCommonAcl,expected] of [[false,/공통 ACL을 제외/],[true,/공통 ACL을 포함/]]) {
+    const book=exporter.createWorkbook({...model(),showCommonAcl},ExcelJS);
+    const row=book.getWorksheet('보고 요약').getSheetValues().find(cells=>cells?.includes('보고서 수치'));
+    assert.match(row.at(-1),expected);
+    assert.doesNotMatch(row.at(-1),/숨긴 행도 보고 범위에 포함/);
+  }
+});
 test('print view is complete inert HTML with full notes and all report sections', () => {
   assert.equal(typeof exporter.printHtml,'function');
   const html=exporter.printHtml(model());
