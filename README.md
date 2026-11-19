@@ -210,7 +210,7 @@ SSID → Role → ACL 상세와 Access Check의 이전 HTML 예시는 [2026-06-3
 일반 사용자는 GitHub **Releases**의 Windows 통합 ZIP을 사용합니다.
 
 ```text
-wlc-role-acl-collector_v0.5.1_windows.zip
+wlc-role-acl-collector_v0.5.2_windows.zip
 ```
 
 압축을 완전히 푼 뒤 목적에 맞는 실행 경로를 선택합니다.
