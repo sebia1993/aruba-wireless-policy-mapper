@@ -12,6 +12,7 @@ from wlc_role_acl_collector.models import CollectionResult, CommandOutput, Contr
 from wlc_role_acl_collector.report import (
     _access_check_script,
     _acl_rows_html,
+    _alias_chips_html,
     _build_frames,
     _html2canvas_source,
     _is_role_related_acl,
@@ -130,6 +131,25 @@ def test_original_acl_row_buttons_target_only_the_clicked_alias_direction():
                                    (targets[1], "198.51.100.0/24", "192.0.2.1")):
         details = html.split(f'<tr id="{target}"', 1)[1].split("</tr>", 1)[0]
         assert address in details and other not in details
+
+
+@pytest.mark.parametrize("kind,value,has_members", [
+    ("host", "192.0.2.1", True),
+    ("NETWORK", "198.51.100.0/24", True),
+    ("range", "192.0.2.2 192.0.2.8", True),
+    ("name", "staff.example", True),
+    ("host", "   ", False),
+    ("", "", False),
+])
+def test_original_alias_chips_distinguish_members_from_metadata(kind, value, has_members):
+    rows = [{"entry_type": "description", "value": "site <notes>"}]
+    if kind:
+        rows.append({"entry_type": kind, "value": value})
+    html = _alias_chips_html(rows)
+    assert "site &lt;notes&gt;" in html
+    assert ("구성원 미수집" in html) == (not has_members)
+    if has_members:
+        assert value in html
 
 
 def test_write_excel_and_html_report(tmp_path):

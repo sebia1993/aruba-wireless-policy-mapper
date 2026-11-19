@@ -3198,23 +3198,25 @@ def _inline_alias_detail_html(
 
 
 def _alias_chips_html(rows: list[dict[str, Any]]) -> str:
-    return "".join(
-        f"""
-        <span class="alias-chip">
-          <span class="alias-type alias-type-{_alias_type_class(str(row.get('entry_type', '')))}">{escape(_alias_type_label(str(row.get('entry_type', ''))))}</span>
-          <span>{escape(str(row.get('value', '')))}</span>
-        </span>
-        """
-        for row in rows
-        if row.get("entry_type") or row.get("value")
-    ) or '<span class="notice">구성원 미수집</span>'
-
-
-def _alias_type_label(entry_type: str) -> str:
-    normalized = entry_type.strip().lower()
-    if normalized in {"host", "network", "range", "name"}:
-        return normalized.upper()
-    return "RAW"
+    chips = []
+    has_members = False
+    for row in rows:
+        entry_type = str(row.get("entry_type") or "")
+        value = str(row.get("value") or "")
+        if not entry_type and not value:
+            continue
+        kind = _alias_type_class(entry_type)
+        if kind != "raw" and value.strip():
+            has_members = True
+        chips.append(f"""
+            <span class="alias-chip">
+              <span class="alias-type alias-type-{kind}">{kind.upper()}</span>
+              <span>{escape(value)}</span>
+            </span>
+        """)
+    if not has_members:
+        chips.insert(0, '<span class="notice">구성원 미수집</span>')
+    return "".join(chips)
 
 
 def _alias_type_class(entry_type: str) -> str:
