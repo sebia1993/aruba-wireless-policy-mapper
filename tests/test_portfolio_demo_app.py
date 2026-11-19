@@ -1,8 +1,9 @@
 from io import BytesIO
 from pathlib import Path
+from unittest.mock import patch
 
 from openpyxl import load_workbook
-
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 
@@ -22,13 +23,18 @@ def _new_app() -> AppTest:
 
 
 def test_portfolio_demo_offers_role_network_sample_before_collection():
-    app = _new_app()
+    with patch.object(st, "download_button", wraps=st.download_button) as download:
+        app = _new_app()
     downloads = [
         button for button in app.get("download_button") if "샘플" in button.label
     ]
     assert len(downloads) == 1
     assert not downloads[0].disabled
-    assert downloads[0].proto.url.endswith(".xlsx")
+    download.assert_called_once()
+    sample = APP_PATH.parents[1] / "config" / "role_networks.example.xlsx"
+    assert download.call_args.kwargs["file_name"] == sample.name
+    assert download.call_args.kwargs["data"] == sample.read_bytes()
+    assert downloads[0].proto.url
     assert "demo_last_result" not in app.session_state
 
 
