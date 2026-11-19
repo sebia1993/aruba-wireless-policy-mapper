@@ -31,7 +31,7 @@
   };
   const checked = record => label(record?.annotation?.status);
   const related = (rule,role) => rule.roleId===role.id && rule.controllerId===role.controllerId;
-  const bodyCell = (value,opts) => ({text:str(value),style:'tableBody',...(opts||{})});
+  const bodyCell = (value,opts) => ({text:Array.isArray(value)?value:str(value),style:'tableBody',...(opts||{})});
   const headerCell = value => ({text:str(value),style:'tableHead',fillColor:COLORS.fill});
   const rowsTable = (headers,rows,widths) => ({
     // Repeat the header alone so a first-row annotation can span several pages.
@@ -56,15 +56,70 @@
       '\n규칙 ID: '+nonempty(rule.id,'미확인');
   }
 
-  function rolePolicyCells(rule) {
-    return [
-      nonempty(rule.acl,'ACL 미확인')+' #'+nonempty(rule.sequence,'?')+
-        '\n발생 순번: '+nonempty(rule.ordinal,'?')+'\n규칙 ID: '+nonempty(rule.id),
-      'Action: '+action(rule)+'\nSource: '+nonempty(rule.source,'미확인')+
-        '\nDestination: '+nonempty(rule.destination,'미확인')+
-        '\nService: '+nonempty(rule.service,'미확인')+
-        '\n원문: '+nonempty(rule.raw,'수집 원문 없음')
-    ];
+  function shortAliasText(found,detailed){
+    const memberText=entry=>[entry.type,entry.value].filter(Boolean).join(' ');
+    const lines=found.members.length ? found.members.map(memberText) : [found.summary];
+    if(detailed){
+      const members=new Set(found.members);
+      for(const entry of found.alias.entries){
+        const collected=nonempty(entry.raw,memberText(entry));
+        if(collected && (!members.has(entry) || collected!==memberText(entry)))lines.push('Alias 원문: '+collected);
+      }
+    }
+    return lines.join('\n');
+  }
+
+  function reportAliases(model,detailed=false) {
+    const lookup=aclCore.createAliasLookup(model.aliases||[]);
+    const definitions=new Map();
+    const appendix=[];
+    let expandedChars=0;
+    // Number by first use in the scoped rule order, before a profile groups rows.
+    for(const rule of model.rules){
+      for(const field of [rule.source,rule.destination]){
+        const found=lookup(rule.controllerId,field);
+        if(!found?.alias || definitions.has(found.alias.id))continue;
+        const code=found.members.length>3?'A'+String(appendix.length+1).padStart(2,'0'):'';
+        const display=code?found.summary:shortAliasText(found,detailed);
+        definitions.set(found.alias.id,{display,code});
+        if(code)appendix.push({found,code,controllerId:rule.controllerId,controllerName:rule.controllerName});
+      }
+    }
+    function operand(rule,field){
+      const value=nonempty(field,'미확인');
+      const found=lookup(rule.controllerId,field);
+      if(!found)return [value];
+      if(!found.alias)return [value+'\n'+found.summary];
+      const {display,code}=definitions.get(found.alias.id);
+      expandedChars+=display.length;
+      if(expandedChars>MAX_JSON_CHARS)throw new Error('PDF에 표시할 Alias 정보가 큽니다. 보고 범위를 줄이거나 Excel로 저장하세요.');
+      if(!code)return [value+'\n'+display];
+      return [value+'\n'+display+' ',{text:'['+code+']',linkToDestination:'alias-'+code,
+        color:'#205894',decoration:'underline'}];
+    }
+    return {operand,appendix};
+  }
+
+  function appendAliasTables(content,definitions,detailed,controllerLabel){
+    for(const {found,code,controllerId,controllerName} of definitions){
+      const alias=found.alias;
+      const heading={id:'alias-'+code,text:'['+code+']  '+controllerLabel({controllerId,controllerName})+' / '+alias.name,
+        style:detailed?'roleHeading':'groupHeading',margin:[0,10,0,4]};
+      content.push(heading);
+      if(detailed){
+        content.push(para('컨트롤러 ID: '+controllerId+'   |   Alias ID: '+alias.id));
+        const rows=alias.entries.map(entry=>[entry.type,entry.value,entry.raw]);
+        content.push(rowsTable(['유형','값','수집 원문'],rows,[72,145,'*']));
+      }else{
+        content.push(rowsTable(['유형','구성원'],found.members.map(entry=>[entry.type,entry.value]),[105,'*']));
+      }
+    }
+  }
+
+  function policyText(rule,aliases){
+    return ['동작: '+action(rule)+'\n출발지: ',...aliases.operand(rule,rule.source),
+      '\n목적지: ',...aliases.operand(rule,rule.destination),'\n서비스: '+nonempty(rule.service,'미확인')+
+      '\n원문: '+nonempty(rule.raw,'수집 원문 없음')];
   }
 
   function aclAppendixTable(headers,rules,policyCells,widths,includeNotes) {
@@ -86,6 +141,7 @@
   function compactDocumentDefinition(model) {
     validateModel(model);
     const rules=model.rules||[], controllers=model.controllers||[];
+    const aliases=reportAliases(model);
     const includeNotes=rules.some(aclNote);
     const headers=['순서','출발지','목적지','서비스','동작'];
     if(includeNotes)headers.push('행별 주석');
@@ -106,8 +162,7 @@
     ];
     if(incomplete)content.push(para('주의: 수집 미완료 또는 확인되지 않은 컨트롤러가 포함되어 누락된 규칙이 있을 수 있습니다.',
       {color:COLORS.alert,bold:true}));
-    content.push(para('출발지·목적지의 Alias 표기는 원본 그대로 유지됩니다. '+
-      (model.showCommonAcl===false?'공통 ACL은 이 보고서에서 제외했습니다.':'공통 ACL도 보고 범위에 포함됩니다.')));
+    content.push(para(model.showCommonAcl===false?'공통 ACL은 이 보고서에서 제외했습니다.':'공통 ACL도 보고 범위에 포함됩니다.'));
     const groups=[];
     for(const rule of rules){
       const key=JSON.stringify([rule.controllerId,rule.roleId,rule.acl]);
@@ -123,12 +178,16 @@
         '   |   ACL: '+nonempty(first.acl,'미확인'),
         style:'groupHeading',margin:[0,11,0,4]});
       const rows=group.rules.map(rule=>{
-        const cells=[nonempty(rule.sequence,nonempty(rule.ordinal,'?')),nonempty(rule.source,'미확인'),
-          nonempty(rule.destination,'미확인'),nonempty(rule.service,'미확인'),nonempty(rule.action,'미확인')];
+        const cells=[nonempty(rule.sequence,nonempty(rule.ordinal,'?')),aliases.operand(rule,rule.source),
+          aliases.operand(rule,rule.destination),nonempty(rule.service,'미확인'),nonempty(rule.action,'미확인')];
         if(includeNotes)cells.push(aclNote(rule));
         return cells.map(value=>bodyCell(value));
       });
       content.push(rowsTable(headers,rows,[...widths]));
+    }
+    if(aliases.appendix.length){
+      content.push({text:'Alias 상세',style:'reportTitle',pageBreak:'before',margin:[0,0,0,7]});
+      appendAliasTables(content,aliases.appendix,false,controllerLabel);
     }
     return {
       pageSize:'A4',pageOrientation:'landscape',pageMargins:[26,42,26,39],
@@ -152,6 +211,7 @@
     if (options && options.profile === 'simple') return compactDocumentDefinition(model);
     validateModel(model);
     const controllers=model.controllers||[], roles=model.roles||[], rules=model.rules||[];
+    const aliases=reportAliases(model,true);
     const showCommonAcl=model.showCommonAcl!==false;
     const includeNotes=rules.some(aclNote);
     const byController=new Map(controllers.map(c=>[c.id,c]));
@@ -233,7 +293,11 @@
       content.push(para('ACL 적용 순서: '+((r.aclOrder||[]).map(str).join(' → ')||'정보 없음')+
         '\nRole 원문 바인딩: '+((r.bindingRaw||[]).map(str).join('\n')||'정보 없음')));
       if(!own.length)content.push(para('이 보고 범위에서 표시할 전용 ACL 규칙이 없습니다.'));
-      else content.push(aclAppendixTable(['ACL / 순서','수집 규칙 원문'],own,rolePolicyCells,[120,215,'*'],includeNotes));
+      else content.push(aclAppendixTable(['ACL / 순서','수집 규칙 원문'],own,rule=>[
+        nonempty(rule.acl,'ACL 미확인')+' #'+nonempty(rule.sequence,'?')+
+          '\n발생 순번: '+nonempty(rule.ordinal,'?')+'\n규칙 ID: '+nonempty(rule.id),
+        policyText(rule,aliases)
+      ],[120,215,'*'],includeNotes));
     }
 
     if(showCommonAcl){
@@ -252,21 +316,13 @@
           ' (발생 '+entries.length+'건)',style:'roleHeading',margin:[0,10,0,4]});
         content.push(aclAppendixTable(['Role / 적용 정보','원문 정책'],entries,rule=>[
           nonempty(rule.roleName)+'\nRole ID: '+nonempty(rule.roleId)+'\n규칙 ID: '+nonempty(rule.id),
-          'Seq '+nonempty(rule.sequence,'?')+' / '+nonempty(rule.action,'미확인')+
-            '\n'+nonempty(rule.raw,'수집 원문 없음')
+          ['Seq '+nonempty(rule.sequence,'?')+'\n',...policyText(rule,aliases)]
         ],[112,223,'*'],includeNotes));
       }
     }
-    content.push(title((showCommonAcl?'7. ':'6. ')+'Alias 상세 및 자료 범위'));
-    const aliasRows=[];
-    for(const alias of model.aliases||[]){
-      const controller=byController.get(alias.controllerId);
-      aliasRows.push([
-        bodyCell(nonempty(controller?.name)+'\n컨트롤러 ID: '+nonempty(alias.controllerId)+'\nAlias: '+nonempty(alias.name)+'\nID: '+nonempty(alias.id)),
-        bodyCell((alias.entries||[]).map(e=>[e.type,e.value,e.raw].filter(Boolean).map(str).join(' / ')).join('\n')||'구성원 미수집')
-      ]);
-    }
-    content.push(rowsTable(['컨트롤러 / Alias','수집 구성원'],aliasRows,[195,'*']));
+    content.push(title((showCommonAcl?'7. ':'6. ')+(aliases.appendix.length?'Alias 상세 및 자료 범위':'자료 범위')));
+    appendAliasTables(content,aliases.appendix,true,
+      ref=>nonempty(byController.get(ref.controllerId)?.name,ref.controllerName));
     content.push(para('관련 기록: 실제 수집본 ID '+nonempty(model.snapshotId)+
       ', 프로젝트 ID '+nonempty(model.projectId)+
       '. Excel·JSON에 저장된 원본은 PDF 작성으로 변경되지 않습니다.'));

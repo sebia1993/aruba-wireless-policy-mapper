@@ -161,11 +161,27 @@ for (const panel of panels) {
   assert.ok(!panel.querySelector('.alias-detail-row').textContent.includes(otherAlias));
 }
 assert.equal(win.PWNED,undefined);
+function checkAlias(document) {
+  const button = document.querySelector('.ann-rules [data-alias-field="destination"]');
+  assert.equal(button.getAttribute('aria-expanded'),'false');
+  button.click();
+  const detail = document.getElementById(button.getAttribute('aria-controls'));
+  assert.equal(detail.hidden,false);
+  assert.match(detail.textContent,/목적지 · servers/);
+  const ownAlias = project.snapshot.aliases.find(alias=>alias.controllerId===rule.controllerId).entries[0].value;
+  const otherAlias = project.snapshot.aliases.find(alias=>alias.controllerId!==rule.controllerId).entries[0].value;
+  assert.ok(detail.textContent.includes(ownAlias));
+  assert.ok(!detail.textContent.includes(otherAlias));
+  button.click();
+  assert.equal(detail.hidden,true);
+}
+checkAlias(win.document);
 const saved = win.AnnotationEditor.standaloneHtml(win.AnnotationEditorApp.getProject(),win.document);
 const reopened = new JSDOM(saved,{runScripts:'dangerously',url:'https://offline.test/saved.html',virtualConsole});
 assert.equal(errors.length,0,errors.join('\n'));
 assert.equal(reopened.window.AnnotationEditorApp.getProject().annotations.rules[rule.id].text,note.value);
 assert.equal(reopened.window.document.getElementById('source-report'),null);
+checkAlias(reopened.window.document);
 assert.equal(reopened.window.PWNED,undefined);
 reopened.window.close();
 win.close();

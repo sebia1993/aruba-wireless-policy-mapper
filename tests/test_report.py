@@ -118,6 +118,20 @@ def test_report_completion_status_failure_rolls_back_artifacts(monkeypatch, tmp_
     assert not list(tmp_path.glob(".*.staging.*"))
 
 
+def test_original_acl_row_buttons_target_only_the_clicked_alias_direction():
+    row = {"acl": "staff", "sequence": "1", "source": 'alias "Office Servers"',
+           "destination": "alias Guest", "raw_rule": "fixture rule"}
+    aliases = {"Office Servers": [{"entry_type": "host", "value": "192.0.2.1"}],
+               "Guest": [{"entry_type": "network", "value": "198.51.100.0/24"}]}
+    html = _acl_rows_html("staff", [row], aliases)
+    targets = re.findall(r'<button class="alias-link"[^>]*aria-controls="([^"]+)"', html)
+    assert len(set(targets)) == 2
+    for target, address, other in ((targets[0], "192.0.2.1", "198.51.100.0/24"),
+                                   (targets[1], "198.51.100.0/24", "192.0.2.1")):
+        details = html.split(f'<tr id="{target}"', 1)[1].split("</tr>", 1)[0]
+        assert address in details and other not in details
+
+
 def test_write_excel_and_html_report(tmp_path):
     fixture_root = Path(__file__).parent / "fixtures"
     controller = Controller(name="sample_controller", host="192.0.2.10")

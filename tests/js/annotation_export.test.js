@@ -67,7 +67,7 @@ test('PDF detail rows keep same-named controllers and policy occurrences disting
     const cid='controller-'+c.suffix, rid='role-'+c.suffix, ruleId='rule-'+c.suffix;
     p.snapshot.controllers.push({...controller,id:cid,host:c.host,port:c.port,scope:c.scope});
     p.snapshot.roles.push({...role,id:rid,controllerId:cid});
-    p.snapshot.rules.push({...rule,id:ruleId,controllerId:cid,roleId:rid});
+    p.snapshot.rules.push({...rule,id:ruleId,controllerId:cid,roleId:rid,destination:'alias SAME_ALIAS'});
     p.snapshot.aliases.push({id:'alias-'+c.suffix,controllerId:cid,name:'SAME_ALIAS',entries:[{type:'host',value:c.aliasValue,raw:'host '+c.aliasValue}]});
     p.annotations.roles[rid]={...annotation,text:'Role note '+c.suffix};
     p.annotations.rules[ruleId]={...annotation,text:'Rule note '+c.suffix};
@@ -98,6 +98,7 @@ test('PDF detail rows keep same-named controllers and policy occurrences disting
 test('browser UMD works offline from the supplied model without consulting document rows', () => {
   const sandbox = {document:new Proxy({}, {get(){throw new Error('Exporter must not read the editor DOM');}})};
   vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(staticDir,'annotation_core.js'),'utf8'),sandbox);
   vm.runInContext(fs.readFileSync(target,'utf8'),sandbox);
   assert.equal(typeof sandbox.AnnotationExport.printHtml,'function');
   assert.ok(sandbox.AnnotationExport.printHtml(model()).includes('선택 역할: selected'));
@@ -177,6 +178,61 @@ test('compact Excel disambiguates controllers with the same display name by actu
   assert.ok(labels[0].includes('192.0.2.1'),labels[0]);
   assert.ok(labels[1].includes('192.0.2.99'),labels[1]);
   assert.notEqual(labels[0],labels[1]);
+});
+
+test('both XLSX profiles add adjacent Alias summaries for each visible direction and resolve by controller', async () => {
+  const p=fixture();
+  const [first]=p.snapshot.rules;
+  const [controller]=p.snapshot.controllers;
+  const [role]=p.snapshot.roles;
+  first.source='alias "APP SERVERS"';
+  p.snapshot.controllers.push({...controller,id:'ctrl-b',host:'192.0.2.99'});
+  p.snapshot.roles.push({...role,id:'role-b',controllerId:'ctrl-b'});
+  const other={...first,id:'rule-b',controllerId:'ctrl-b',roleId:'role-b',source:'any',destination:first.source};
+  p.snapshot.rules.push(other, {...other,id:'empty',ordinal:2,destination:'alias EMPTY'});
+  p.snapshot.rules.push({...first,id:'common',ordinal:2,acl:'ra-guard',source:'alias HIDDEN',destination:'alias MISSING'});
+  function alias(controllerId,name,entries) {
+    return {id:controllerId+'_'+name,controllerId,name,entries:entries.map(([type,value])=>({type,value,raw:type+' '+value}))};
+  }
+  p.snapshot.aliases=[
+    alias(controller.id,'APP SERVERS',[['description','설명'],['host','192.0.2.10'],['network','198.51.100.0/24']]),
+    alias('ctrl-b','APP SERVERS',[['host','203.0.113.5']]),
+    alias('ctrl-b','EMPTY',[]),
+    alias(controller.id,'HIDDEN',[['host','192.0.2.200']])
+  ];
+  for(const [profile,name] of [['simple','ACL 간단 보고'],['detailed','ACL 상세']]) {
+    async function read(scope) {
+      const bytes=await exporter.workbookBytes(Core.buildExportModel(p,scope),ExcelJS,{profile});
+      const book=new ExcelJS.Workbook();
+      await book.xlsx.load(bytes);
+      return book;
+    }
+    const off=await read({type:'all',showCommonAcl:false});
+    const sheet=off.getWorksheet(name), headers=sheet.getRow(1).values;
+    const src=headers.indexOf('출발지'),dst=headers.indexOf('목적지');
+    assert.deepEqual(headers.slice(src,dst+2),['출발지','출발지 Alias 요약','목적지','목적지 Alias 요약']);
+    assert.equal(sheet.getRow(2).getCell(src).value,'alias "APP SERVERS"');
+    assert.equal(sheet.getRow(2).getCell(src+1).value,'192.0.2.10 외 1개');
+    assert.equal(sheet.getRow(3).getCell(dst+1).value,'203.0.113.5');
+    assert.match(sheet.getRow(4).getCell(dst+1).value,/구성원 미수집/);
+    assert.equal(sheet.getRow(2).getCell(dst+1).value || '', '');
+    assert.equal(sheet.getRow(2).getCell(src).hyperlink,undefined);
+    if(profile==='detailed') {
+      assert.ok(!off.getWorksheet('Alias 상세').getSheetValues().flat().includes('HIDDEN'));
+    }
+    const selected=await read({type:'selected',roleIds:[role.id],showCommonAcl:false});
+    const selectedHeaders=selected.getWorksheet(name).getRow(1).values;
+    assert.ok(selectedHeaders.includes('출발지 Alias 요약'));
+    assert.ok(!selectedHeaders.includes('목적지 Alias 요약'));
+    const otherRole=await read({type:'selected',roleIds:['role-b'],showCommonAcl:false});
+    const otherHeaders=otherRole.getWorksheet(name).getRow(1).values;
+    assert.ok(!otherHeaders.includes('출발지 Alias 요약'));
+    assert.ok(otherHeaders.includes('목적지 Alias 요약'));
+    const on=await read({type:'all',showCommonAcl:true});
+    const onSheet=on.getWorksheet(name);
+    const missingRow=onSheet.getSheetValues().find(row=>row?.includes('alias MISSING'));
+    assert.match(missingRow[onSheet.getRow(1).values.indexOf('목적지 Alias 요약')],/정의 미수집/);
+  }
 });
 
 test('compact XLSX omits blank notes and keeps continuation markers beside the eight visible columns', async () => {

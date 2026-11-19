@@ -17,6 +17,43 @@ function project(id = 'old') {
       aliases:[],localNetworks:[],issues:[]}, annotations:{roles:{},rules:{}},unresolvedAnnotations:[],changes:[],importHistory:[]};
 }
 const copy = x => JSON.parse(JSON.stringify(x));
+test('resolve Alias report fields using the controller and full collected name', () => {
+  const address = (type,value) => ({type,value,raw:type+' '+value});
+  const definition = (controllerId,name,entries) => ({controllerId,name,entries});
+  const lookup = Core.createAliasLookup([
+    definition('a','APP Servers',[address('description','team'),address('host','192.0.2.10'),address('network','198.51.100.0/24')]),
+    definition('b','APP Servers',[address('name','app.example')]),
+    definition('b','EMPTY',[address('description','no addresses')]),
+    definition('a','DUP',[]),definition('a','DUP',[address('host','203.0.113.4')])
+  ]);
+  assert.equal(lookup('a','any'),null);
+  assert.equal(lookup('a','alias  '),null);
+  for (const field of ['alias APP Servers','ALIAS "APP Servers"', "alias 'APP Servers'"]) {
+    const info = lookup('a',field);
+    assert.equal(info.status,'defined');
+    assert.equal(info.summary,'192.0.2.10 외 1개');
+    assert.deepEqual(info.members.map(m=>m.type),['host','network']);
+  }
+  assert.equal(lookup('b','alias APP Servers').summary,'app.example');
+  assert.equal(lookup('b','alias EMPTY').summary,'구성원 미수집');
+  assert.equal(lookup('a','alias EMPTY').summary,'정의 미수집');
+  assert.equal(lookup('a','alias DUP').status,'ambiguous');
+  assert.equal(lookup('a','alias DUP').alias,null);
+});
+
+test('export includes only Alias definitions directly referenced by visible scoped rules', () => {
+  const p=project(), own=p.snapshot.rules[0];
+  own.source='alias Used'; own.destination='alias Used';
+  p.snapshot.rules.push({...own,id:'shared',acl:'ra-guard',ordinal:2,destination:'alias CommonOnly'});
+  p.snapshot.roles.push({...p.snapshot.roles[0],id:'r2',name:'Second'});
+  p.snapshot.rules.push({...own,id:'r2rule',roleId:'r2',source:'any',destination:'alias OtherRole'});
+  p.snapshot.aliases=['Used','CommonOnly','OtherRole','Unreferenced'].map(name=>({id:'id-'+name,controllerId:'c',name,entries:[]}));
+  const names = scope => Core.buildExportModel(p,scope,time).aliases.map(a=>a.name);
+  assert.deepEqual(names({type:'selected',roleIds:['role'],showCommonAcl:false}),['Used']);
+  assert.deepEqual(names({type:'all',showCommonAcl:true}),['Used','CommonOnly','OtherRole']);
+  assert.deepEqual(names({type:'review',showCommonAcl:false}),[]);
+  assert.equal(p.snapshot.aliases.length,4);
+});
 function reuse(edit = () => {}) { const old=project();old.annotations.rules.rule=note();const cur=project('new');edit(cur,old);return Core.reconcileProjects(cur,old,{now:time}); }
 
 test('validation makes an independent, whitespace-preserving safe copy', () => {

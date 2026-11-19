@@ -34,6 +34,56 @@
     return name;
   }
   function isCommonAclName(acl){return COMMON_ACL_NAMES.has(normalizedAclName(acl));}
+
+  // Collected endpoints may already have had their CLI quotes removed.
+  function aliasReference(field) {
+    const match = /^alias\s+(.+)$/i.exec(String(field || '').trim());
+    if (!match) return '';
+    const name = match[1];
+    if (name.length > 1 && (name[0] === '"' || name[0] === "'") && name.at(-1) === name[0]) {
+      return name.slice(1,-1);
+    }
+    return name;
+  }
+
+  const MEMBER_TYPES = new Set(['host','network','range','name']);
+  function aliasMembers(alias) {
+    return (alias?.entries || []).filter(entry => MEMBER_TYPES.has(entry.type.trim().toLowerCase()) && entry.value.trim());
+  }
+
+  function createAliasLookup(aliases) {
+    const index = new Map();
+    for (const alias of aliases || []) {
+      const key = JSON.stringify([alias.controllerId,alias.name]);
+      if (index.has(key)) {
+        index.set(key,{name:alias.name,alias:null,members:[],status:'ambiguous',summary:'정의 중복 · 확인 필요'});
+        continue;
+      }
+      const members = aliasMembers(alias);
+      let summary = '구성원 미수집';
+      if (members.length) {
+        summary = members[0].value;
+        if (members.length > 1) summary += ' 외 '+(members.length-1)+'개';
+      }
+      index.set(key,{name:alias.name,alias,members,status:members.length ? 'defined' : 'empty',summary});
+    }
+    return (controllerId,field) => {
+      const name = aliasReference(field);
+      if (!name) return null;
+      return index.get(JSON.stringify([controllerId,name])) || {name,alias:null,members:[],status:'missing',summary:'정의 미수집'};
+    };
+  }
+
+  function referencedAliases(aliases,rules) {
+    const referenced = new Set();
+    for (const rule of rules) {
+      for (const field of [rule.source,rule.destination]) {
+        const name = aliasReference(field);
+        if (name) referenced.add(JSON.stringify([rule.controllerId,name]));
+      }
+    }
+    return aliases.filter(alias => referenced.has(JSON.stringify([alias.controllerId,alias.name])));
+  }
   function fail(path, message) { throw new Error('Invalid annotation project at ' + path + ': ' + message); }
   function safeCopy(value) {
     const active = new Set();
@@ -310,7 +360,7 @@
     const changes=p.changes.filter(c=>scope.type==='all'||scope.type==='review'||(c.ruleId?ruleIds.has(c.ruleId):c.roleId?roleIds.has(c.roleId):controllerIds.has(c.controllerId)));
     const exportedRoles=roles.map(r=>({...r,controllerName:controllerMap.get(r.controllerId).name,annotation:p.annotations.roles[r.id]||emptyRecord(p.updatedAt)}));
     const exportedRules=rules.map(r=>({...r,controllerName:controllerMap.get(r.controllerId).name,roleName:byId.get(r.roleId).name,annotation:p.annotations.rules[r.id]||emptyRecord(p.updatedAt)}));
-    return {projectId:p.projectId,snapshotId:p.snapshot.id,revision:p.revision,collectedAt:p.snapshot.collectedAt,updatedAt:p.updatedAt,exportedAt,showCommonAcl,scopeLabel:scope.type==='all'?'전체 정책':scope.type==='review'?'변경 및 검토 항목':'선택한 역할 ('+roles.length+')',controllers:p.snapshot.controllers.filter(c=>controllerIds.has(c.id)),roles:exportedRoles,rules:exportedRules,aliases:p.snapshot.aliases.filter(a=>controllerIds.has(a.controllerId)),localNetworks:p.snapshot.localNetworks.filter(n=>roleIds.has(n.roleId)),changes,unresolvedAnnotations:unresolved,issues:p.snapshot.issues.filter(i=>roleIds.has(i.roleId)||(!i.roleId&&controllerIds.has(i.controllerId))),summary:{controllerCount:controllerIds.size,roleCount:roles.length,ruleCount:rules.length,annotatedRuleCount:exportedRules.filter(r=>r.annotation.text.trim()!=='').length,needsReviewCount:exportedRoles.filter(r=>pending(r.annotation)).length+exportedRules.filter(r=>pending(r.annotation)).length+unresolved.length}};
+    return {projectId:p.projectId,snapshotId:p.snapshot.id,revision:p.revision,collectedAt:p.snapshot.collectedAt,updatedAt:p.updatedAt,exportedAt,showCommonAcl,scopeLabel:scope.type==='all'?'전체 정책':scope.type==='review'?'변경 및 검토 항목':'선택한 역할 ('+roles.length+')',controllers:p.snapshot.controllers.filter(c=>controllerIds.has(c.id)),roles:exportedRoles,rules:exportedRules,aliases:referencedAliases(p.snapshot.aliases,rules),localNetworks:p.snapshot.localNetworks.filter(n=>roleIds.has(n.roleId)),changes,unresolvedAnnotations:unresolved,issues:p.snapshot.issues.filter(i=>roleIds.has(i.roleId)||(!i.roleId&&controllerIds.has(i.controllerId))),summary:{controllerCount:controllerIds.size,roleCount:roles.length,ruleCount:rules.length,annotatedRuleCount:exportedRules.filter(r=>r.annotation.text.trim()!=='').length,needsReviewCount:exportedRoles.filter(r=>pending(r.annotation)).length+exportedRules.filter(r=>pending(r.annotation)).length+unresolved.length}};
   }
-  return Object.freeze({parseProject,validateProject,reconcileProjects,buildExportModel,isCommonAclName});
+  return Object.freeze({parseProject,validateProject,reconcileProjects,buildExportModel,isCommonAclName,aliasReference,aliasMembers,createAliasLookup});
 }));
