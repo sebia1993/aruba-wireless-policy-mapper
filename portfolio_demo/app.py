@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
 from portfolio_demo.guided_flow import GuidedSlot, begin
 
 from wlc_role_acl_collector.mock_server import MockWlcServer
+from wlc_role_acl_collector.streamlit_ui import render_role_network_sample_download
 from wlc_role_acl_collector.web_logic import (
     WebCollectionRequest,
     WebCollectionResult,
@@ -149,6 +150,7 @@ def _render_input_form() -> tuple[bool, str]:
             )
 
         st.subheader("선택 입력 파일")
+        render_role_network_sample_download(REPO_ROOT / "config")
         st.file_uploader(
             "사내 Role 대역표 Excel",
             type=["xlsx", "xlsm"],
