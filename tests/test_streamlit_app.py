@@ -1,5 +1,6 @@
 from pathlib import Path
 import runpy
+import shutil
 
 import pytest
 
@@ -24,6 +25,41 @@ def _preapproved_ssh_for_existing_app_tests(monkeypatch):
 
 
 APP_PATH = Path(__file__).parents[1] / "app.py"
+
+
+@pytest.mark.parametrize("portable", [False, True], ids=["source", "windows-portable"])
+def test_sample_download_matches_workbook_accepted_by_uploader(tmp_path, monkeypatch, portable):
+    import streamlit as st
+    from wlc_role_acl_collector.role_networks import load_role_network_definitions_with_summary
+
+    sample = APP_PATH.parent / "config" / "role_networks.example.xlsx"
+    root = tmp_path / "web" if portable else tmp_path / "checkout"
+    script_dir = root / "app" if portable else root
+    script_dir.mkdir(parents=True)
+    (root / "config").mkdir()
+    shutil.copy2(APP_PATH, script_dir)
+    shutil.copy2(sample, root / "config")
+    monkeypatch.chdir(tmp_path)
+    downloads = []
+    download_button = st.download_button
+
+    def capture(label, **kwargs):
+        downloads.append(kwargs)
+        return download_button(label, **kwargs)
+
+    monkeypatch.setattr(st, "download_button", capture)
+    app = AppTest.from_file(str(script_dir / "app.py")).run(timeout=20)
+    assert not app.exception
+    assert [btn.proto.label for btn in app.get("download_button")] == ["사내 Role 대역표 샘플 다운로드 (.xlsx)"]
+    assert app.get("file_uploader")[0].proto.label == "사내 Role 대역표 Excel"
+    (download,) = downloads
+    assert download["file_name"] == sample.name
+    assert download["mime"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert download["data"] == sample.read_bytes()
+    received = tmp_path / download["file_name"]
+    received.write_bytes(download["data"])
+    loaded = load_role_network_definitions_with_summary(received)
+    assert (loaded.sheet_name, loaded.role_count, loaded.network_count) == ("Role_Networks", 2, 3)
 
 
 def _successful_web_result(run_id):
@@ -62,7 +98,7 @@ def test_streamlit_failed_retry_retains_previous_downloads(monkeypatch, failure_
     assert app.session_state["last_result"].artifacts == previous.artifacts
     assert any("이전 성공 결과" in item.value for item in app.subheader)
     assert any("previous-success" in item.value for item in app.caption)
-    assert len(app.get("download_button")) == 3
+    assert len(app.get("download_button")) == 4  # Three result files plus the input template.
     if failure_kind == "failed_result":
         assert any("synthetic failure" in item.value for item in app.error)
     app.run(timeout=20)
