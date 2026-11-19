@@ -106,7 +106,8 @@
     ];
     if(incomplete)content.push(para('주의: 수집 미완료 또는 확인되지 않은 컨트롤러가 포함되어 누락된 규칙이 있을 수 있습니다.',
       {color:COLORS.alert,bold:true}));
-    content.push(para('출발지·목적지의 Alias 표기는 원본 그대로 유지됩니다. 공통 ACL도 보고 범위에 포함됩니다.'));
+    content.push(para('출발지·목적지의 Alias 표기는 원본 그대로 유지됩니다. '+
+      (model.showCommonAcl===false?'공통 ACL은 이 보고서에서 제외했습니다.':'공통 ACL도 보고 범위에 포함됩니다.')));
     const groups=[];
     for(const rule of rules){
       const key=JSON.stringify([rule.controllerId,rule.roleId,rule.acl]);
@@ -114,7 +115,7 @@
       if(!last || last.key!==key){last={key,rules:[]};groups.push(last);}
       last.rules.push(rule);
     }
-    if(!groups.length)content.push(para('선택한 보고 범위에 ACL 규칙이 없습니다.'));
+    if(!groups.length)content.push(para('선택한 보고 범위에서 표시할 ACL 규칙이 없습니다.'));
     for(const group of groups){
       const first=group.rules[0];
       content.push({text:'컨트롤러: '+controllerLabel(first)+
@@ -151,6 +152,7 @@
     if (options && options.profile === 'simple') return compactDocumentDefinition(model);
     validateModel(model);
     const controllers=model.controllers||[], roles=model.roles||[], rules=model.rules||[];
+    const showCommonAcl=model.showCommonAcl!==false;
     const includeNotes=rules.some(aclNote);
     const byController=new Map(controllers.map(c=>[c.id,c]));
     const shared=rules.filter(r=>common(r.acl)),exclusive=rules.filter(r=>!common(r.acl));
@@ -168,9 +170,10 @@
     content.push(title('1. 점검 현황 및 핵심 지표'));
     const stats=[
       ['WLC',''+controllers.length],['Role',''+roles.length],
-      ['ACL 규칙',''+rules.length],['Role 전용 규칙',''+exclusive.length],
-      ['공통 정책 규칙',''+shared.length],['검토 필요 주석',''+(model.summary?.needsReviewCount??'미확인')]
+      ['ACL 규칙',''+rules.length]
     ];
+    if(showCommonAcl)stats.push(['Role 전용 규칙',''+exclusive.length],['공통 정책 규칙',''+shared.length]);
+    stats.push(['검토 필요 주석',''+(model.summary?.needsReviewCount??'미확인')]);
     content.push(rowsTable(['집계 항목','수량'],stats,[160,'*']));
     if(incomplete.length){
       content.push(para('수집 신뢰도 주의: 수집 미완료/식별 미확인/명령 실패 장비 '+incomplete.length+'대가 포함됩니다. 누락된 규칙을 삭제된 정책으로 판단하지 마세요.',
@@ -188,7 +191,7 @@
     ]),[185,80,'*']));
 
     content.push(title('3. Role별 정책 현황'));
-    content.push(para('전용 규칙과 공통 ACL 규칙은 구분해 집계합니다. 공통 ACL은 뒤쪽 부록에 컨트롤러·Role 적용 관계와 함께 표시합니다.'));
+    content.push(para(showCommonAcl?'전용 규칙과 공통 ACL 규칙은 구분해 집계합니다. 공통 ACL은 뒤쪽 부록에 컨트롤러·Role 적용 관계와 함께 표시합니다.':'HTML에서 공통 ACL을 숨겨 Role별 전용 규칙만 집계했습니다.'));
     const roleRows=roles.map(r=>{
       const current=rules.filter(rule=>related(rule,r));
       const own=current.filter(rule=>!common(rule.acl)), sharedRole=current.filter(rule=>common(rule.acl));
@@ -197,7 +200,7 @@
         bodyCell(nonempty(r.controllerName)+'\n'+nonempty(r.name)+'\nRole ID: '+nonempty(r.id)),
         bodyCell(((r.ssids||[]).map(str).join(', ')||'연결 정보 없음')+'\n수기 SSID: '+nonempty(a.manualSsid,'미입력')),
         bodyCell(device(a.deviceType)),
-        bodyCell('전용 '+own.length+'건\n공통 '+sharedRole.length+'건'),
+        bodyCell('전용 '+own.length+'건'+(showCommonAcl?'\n공통 '+sharedRole.length+'건':'')),
         bodyCell(label(a.status)+'\n'+nonempty(a.text,'(설명 미작성)'))
       ];
     });
@@ -223,37 +226,38 @@
     content.push(rowsTable(['유형','대상','근거 및 운영 메모'],followups,[67,149,'*']));
 
     content.push(title('5. Role별 ACL 상세 — 기술 부록'));
-    content.push(para('아래 내용은 Role별 전용 ACL의 수집 원문과 주석입니다. 각 Role의 ACL 적용 순서는 수집된 그대로 표시하며, 공통 ACL 규칙은 다음 부록에서 확인할 수 있습니다.'));
+    content.push(para('Role별 전용 ACL의 수집 원문과 주석입니다.'));
     for(const r of roles){
       const own=exclusive.filter(rule=>related(rule,r));
       content.push({text:roleTarget(r),style:'roleHeading',margin:[0,12,0,4]});
       content.push(para('ACL 적용 순서: '+((r.aclOrder||[]).map(str).join(' → ')||'정보 없음')+
         '\nRole 원문 바인딩: '+((r.bindingRaw||[]).map(str).join('\n')||'정보 없음')));
-      if(!own.length)content.push(para('전용 ACL 규칙이 없습니다. 공통 ACL만 연결됐거나 수집이 불완전할 수 있으므로 수집 신뢰도를 함께 확인하세요.'));
+      if(!own.length)content.push(para('이 보고 범위에서 표시할 전용 ACL 규칙이 없습니다.'));
       else content.push(aclAppendixTable(['ACL / 순서','수집 규칙 원문'],own,rolePolicyCells,[120,215,'*'],includeNotes));
     }
 
-    content.push(title('6. 공통 ACL — 컨트롤러별 기술 부록'));
-    content.push(para('공통 정책명: global-sacl / ra-guard / re-guard / logon-control. 각 발생 규칙의 컨트롤러·Role·식별자와 주석을 보존합니다. 같은 이름이라도 실제 규칙 내용이 다르면 별도 항목으로 표시합니다.'));
-    const groups=new Map();
-    for(const r of shared){
-      const k=JSON.stringify([r.controllerId,str(r.acl).trim().toLowerCase()]);
-      if(!groups.has(k))groups.set(k,[]);
-      groups.get(k).push(r);
+    if(showCommonAcl){
+      content.push(title('6. 공통 ACL — 컨트롤러별 기술 부록'));
+      content.push(para('공통 정책명: global-sacl / ra-guard / re-guard / logon-control. 각 발생 규칙의 컨트롤러·Role·식별자와 주석을 보존합니다. 같은 이름이라도 실제 규칙 내용이 다르면 별도 항목으로 표시합니다.'));
+      const groups=new Map();
+      for(const r of shared){
+        const k=JSON.stringify([r.controllerId,str(r.acl).trim().toLowerCase()]);
+        if(!groups.has(k))groups.set(k,[]);
+        groups.get(k).push(r);
+      }
+      if(!groups.size)content.push(para('이 보고 범위에서 표시할 공통 ACL 규칙이 없습니다.'));
+      for(const entries of groups.values()){
+        const r=entries[0],c=byController.get(r.controllerId);
+        content.push({text:nonempty(c?.name,r.controllerName)+' / '+nonempty(r.acl)+
+          ' (발생 '+entries.length+'건)',style:'roleHeading',margin:[0,10,0,4]});
+        content.push(aclAppendixTable(['Role / 적용 정보','원문 정책'],entries,rule=>[
+          nonempty(rule.roleName)+'\nRole ID: '+nonempty(rule.roleId)+'\n규칙 ID: '+nonempty(rule.id),
+          'Seq '+nonempty(rule.sequence,'?')+' / '+nonempty(rule.action,'미확인')+
+            '\n'+nonempty(rule.raw,'수집 원문 없음')
+        ],[112,223,'*'],includeNotes));
+      }
     }
-    if(!groups.size)content.push(para('수집된 공통 ACL 규칙이 없습니다.'));
-    for(const entries of groups.values()){
-      const r=entries[0],c=byController.get(r.controllerId);
-      content.push({text:nonempty(c?.name,r.controllerName)+' / '+nonempty(r.acl)+
-        ' (발생 '+entries.length+'건)',style:'roleHeading',margin:[0,10,0,4]});
-      content.push(aclAppendixTable(['Role / 적용 정보','원문 정책'],entries,rule=>[
-        nonempty(rule.roleName)+'\nRole ID: '+nonempty(rule.roleId)+'\n규칙 ID: '+nonempty(rule.id),
-        'Seq '+nonempty(rule.sequence,'?')+' / '+nonempty(rule.action,'미확인')+
-          '\n'+nonempty(rule.raw,'수집 원문 없음')
-      ],[112,223,'*'],includeNotes));
-    }
-
-    content.push(title('7. Alias 상세 및 자료 범위'));
+    content.push(title((showCommonAcl?'7. ':'6. ')+'Alias 상세 및 자료 범위'));
     const aliasRows=[];
     for(const alias of model.aliases||[]){
       const controller=byController.get(alias.controllerId);

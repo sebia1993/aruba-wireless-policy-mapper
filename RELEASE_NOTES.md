@@ -24,9 +24,9 @@ GitHub Actions의 `Release` workflow를 수동 실행하며, 다음과 같이 �
 일반 사용자용 실행 파일은 Windows 통합 ZIP으로 제공하며, SHA-256 체크섬과 Python 의존성 SBOM을 함께 공개합니다.
 
 ```text
-wlc-role-acl-collector_v0.5.1_windows.zip
-wlc-role-acl-collector_v0.5.1_windows.zip.sha256
-wlc-role-acl-collector_v0.5.1_sbom.cdx.json
+wlc-role-acl-collector_v0.5.2_windows.zip
+wlc-role-acl-collector_v0.5.2_windows.zip.sha256
+wlc-role-acl-collector_v0.5.2_sbom.cdx.json
 ```
 
 GitHub가 자동 표시하는 `Source code (zip)`과 `Source code (tar.gz)`는 실행용 배포 파일이 아닙니다.

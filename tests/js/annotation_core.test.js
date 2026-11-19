@@ -97,6 +97,57 @@ test('selected scope includes unresolved notes only for an unambiguous scoped ro
   const p=project();p.unresolvedAnnotations=[{id:'orphan',kind:'rule',controllerId:'c',controllerName:'Controller',roleName:'Elsewhere',acl:'acl',raw:'raw',annotation:note(),reason:'missing',candidateIds:[],sourceProjectId:'old',sourceSnapshotId:'old-snapshot'}];
   assert.equal(Core.buildExportModel(p,{type:'all'},time).unresolvedAnnotations.length,1);assert.equal(Core.buildExportModel(p,{type:'selected',roleIds:['role']},time).unresolvedAnnotations.length,0);
 });
+test('common ACL visibility scopes rules, bindings, review evidence and totals without editing the project', () => {
+  const p = project(), role = p.snapshot.roles[0];
+  role.name = 'ra-guard';
+  role.aclOrder = ['“RA‑GUARD”', 'ra-guard-custom', 'global-sacl'];
+  role.bindingRaw = [' session-acl “RA‑GUARD” position 1', 'access-list session ra-guard-custom position 2', 'ACCESS-LIST  SESSION "global-sacl"'];
+  const own = p.snapshot.rules[0];
+  own.acl = 'ra-guard-custom';
+  own.raw = 'any alias ra-guard any permit';
+  p.snapshot.rules.push({...own, id:'shared', acl:'“RA‑GUARD”', ordinal:2, service:'unresolved-service'});
+  p.annotations.rules.shared = {...note('common-only text'), status:'needs_review'};
+  p.changes.push({type:'rule_added', controllerId:'c', roleId:'role', ruleId:'shared', message:'hidden change', previousRaw:''});
+  p.unresolvedAnnotations.push({id:'orphan', kind:'rule', controllerId:'c', controllerName:'Controller', roleName:role.name,
+    acl:'global-sacl', raw:'hidden orphan', annotation:note(), reason:'missing', candidateIds:['shared'], sourceProjectId:'other', sourceSnapshotId:'older'});
+  const original = copy(p);
+  for (const type of ['all','selected','review']) {
+    const scope = {type,roleIds:['role']};
+    const visible = Core.buildExportModel(p,{...scope,showCommonAcl:false},time);
+    assert.equal(visible.showCommonAcl,false);
+    assert.deepEqual(visible.rules.map(r=>r.id),type==='review'?[]:['rule']);
+    assert.deepEqual(visible.changes,[]);
+    assert.deepEqual(visible.unresolvedAnnotations,[]);
+    assert.equal(visible.summary.annotatedRuleCount,0);
+    assert.equal(visible.summary.needsReviewCount,0);
+    if (type==='review') assert.equal(visible.roles.length,0);
+    else {
+      assert.equal(visible.roles[0].name,role.name);
+      assert.deepEqual(visible.roles[0].aclOrder,['ra-guard-custom']);
+      assert.deepEqual(visible.roles[0].bindingRaw,[role.bindingRaw[1]]);
+    }
+    const all = Core.buildExportModel(p,{...scope,showCommonAcl:true},time);
+    assert.equal(all.rules.length,2);
+    assert.equal(all.changes.length,1);
+    assert.equal(all.unresolvedAnnotations.length,1);
+    assert.deepEqual(all.roles[0].bindingRaw,role.bindingRaw);
+  }
+  assert.deepEqual(p,original);
+});
+test('historical rule evidence follows its original ACL, including legacy changes without an ACL name', () => {
+  const previous = project(), current = project('new');
+  previous.snapshot.rules.push({...previous.snapshot.rules[0],id:'shared',acl:'ra-guard',ordinal:2,raw:'hidden previous raw'});
+  current.snapshot.rules = [];
+  const reconciled = Core.reconcileProjects(current,previous,{now:time}).project;
+  const removed = reconciled.changes.filter(c=>c.type==='rule_not_observed');
+  const legacy = {...removed[0],previousRaw:'unattributed legacy raw'};
+  delete legacy.previousAcl;
+  reconciled.changes.push(legacy);
+  const previousLines = showCommonAcl => Core.buildExportModel(reconciled,{type:'all',showCommonAcl},time)
+    .changes.filter(c=>c.type==='rule_not_observed').map(c=>c.previousRaw);
+  assert.deepEqual(previousLines(false),[previous.snapshot.rules[0].raw,'']);
+  assert.deepEqual(previousLines(true),[previous.snapshot.rules[0].raw,'hidden previous raw','unattributed legacy raw']);
+});
 test('previous duplicate remains ambiguous even if one occurrence survives', () => {
   const result=reuse((cur,old)=>old.snapshot.rules.push({...old.snapshot.rules[0],id:'former-duplicate',ordinal:2}));assert.equal(result.summary.reused,0);assert.deepEqual(result.project.unresolvedAnnotations[0].candidateIds,['rule']);
 });

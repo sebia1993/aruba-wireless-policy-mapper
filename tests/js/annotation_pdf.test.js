@@ -71,6 +71,21 @@ test('PDF model scope remains the authoritative source, no stale DOM or extra co
   assert.ok(output.includes('192.0.2.2'));
 });
 
+test('hidden common ACLs have no PDF appendix, count or included-policy guidance',()=>{
+  const report={...model(),showCommonAcl:false};
+  const detailed=Pdf.documentDefinition(report);
+  const headings=detailed.content.filter(item=>item.style==='sectionHeading').map(item=>item.text);
+  assert.equal(headings.length,6);
+  assert.match(headings[5],/^6\. Alias/);
+  assert.doesNotMatch(allText(detailed.content),/공통 정책 규칙|공통 0건|ra-guard|공통 ACL 규칙은 다음 부록/);
+  assert.doesNotMatch(allText(Pdf.documentDefinition(report,{profile:'simple'}).content),/공통 ACL도 보고 범위에 포함/);
+  report.rules=[];
+  assert.match(allText(Pdf.documentDefinition(report).content),/표시할 전용 ACL 규칙이 없습니다/);
+  assert.match(allText(Pdf.documentDefinition(report,{profile:'simple'}).content),/표시할 ACL 규칙이 없습니다/);
+  const inclusive=Pdf.documentDefinition({...report,showCommonAcl:true});
+  assert.ok(inclusive.content.some(item=>item.style==='sectionHeading' && item.text.startsWith('6. 공통 ACL')));
+});
+
 function aclTables(report,profile){
   return Pdf.documentDefinition(report,{profile}).content
     .map(item=>item.table)

@@ -16,7 +16,7 @@
   const STATUSES = ['unreviewed', 'reviewed', 'reused', 'needs_review'];
   // No controller service-object definitions are collected in this schema.
   const KNOWN_SERVICES = new Set(['any', 'ip']);
-  // Visual classification only: keep collected names, notes and ACL order unchanged.
+  // Compare ACL names without rewriting the collected spelling.
   const COMMON_ACL_NAMES = new Set(['global-sacl', 'ra-guard', 're-guard', 'logon-control']);
   function normalizedAclName(value) {
     let name=String(value==null?'':value)
@@ -130,7 +130,7 @@
     arr(s.issues,'$.snapshot.issues');s.issues.forEach((v,i)=>{const path='$.snapshot.issues['+i+']';obj(v,path,['controllerId','roleId','message']);ref(controllers,v.controllerId,path+'.controllerId');ref(roles,v.roleId,path+'.roleId',true);if(v.roleId && roles.get(v.roleId).controllerId!==v.controllerId)fail(path,'role/controller mismatch');str(v.message,path+'.message');});
     obj(p.annotations,'$.annotations',['roles','rules']);for(const kind of ['roles','rules']){const map=kind==='roles'?roles:rules;obj(p.annotations[kind],'$.annotations.'+kind);for(const [key,v]of Object.entries(p.annotations[kind])){ref(map,key,'$.annotations.'+kind+'.'+key);record(v,'$.annotations.'+kind+'.'+key,kind==='roles');}}
     const unresolvedIds=new Set();arr(p.unresolvedAnnotations,'$.unresolvedAnnotations');p.unresolvedAnnotations.forEach((u,i)=>{const path='$.unresolvedAnnotations['+i+']';obj(u,path,['id','kind','controllerId','controllerName','roleName','acl','raw','annotation','reason','candidateIds','sourceProjectId','sourceSnapshotId']);id(u.id,path+'.id');if(unresolvedIds.has(u.id))fail(path,'duplicate unresolved identifier');unresolvedIds.add(u.id);choice(u.kind,['role','rule'],path+'.kind');id(u.controllerId,path+'.controllerId',true);['controllerName','roleName','acl','raw','reason'].forEach(k=>str(u[k],path+'.'+k));record(u.annotation,path+'.annotation',u.kind==='role');strings(u.candidateIds,path+'.candidateIds');u.candidateIds.forEach(x=>id(x,path+'.candidateIds'));id(u.sourceProjectId,path+'.sourceProjectId');id(u.sourceSnapshotId,path+'.sourceSnapshotId');});
-    arr(p.changes,'$.changes');p.changes.forEach((c,i)=>{const path='$.changes['+i+']';obj(c,path,['type','controllerId','roleId','ruleId','message','previousRaw']);str(c.type,path+'.type',false,4096);ref(controllers,c.controllerId,path+'.controllerId',true);ref(roles,c.roleId,path+'.roleId',true);ref(rules,c.ruleId,path+'.ruleId',true);if(c.roleId && c.controllerId && roles.get(c.roleId).controllerId!==c.controllerId)fail(path,'role/controller mismatch');if(c.ruleId && ((c.roleId && rules.get(c.ruleId).roleId!==c.roleId)||(c.controllerId&&rules.get(c.ruleId).controllerId!==c.controllerId)))fail(path,'rule context mismatch');str(c.message,path+'.message');str(c.previousRaw,path+'.previousRaw');});
+    arr(p.changes,'$.changes');p.changes.forEach((c,i)=>{const path='$.changes['+i+']';obj(c,path,['type','controllerId','roleId','ruleId','message','previousRaw'],['previousAcl']);if(Object.hasOwn(c,'previousAcl'))str(c.previousAcl,path+'.previousAcl');str(c.type,path+'.type',false,4096);ref(controllers,c.controllerId,path+'.controllerId',true);ref(roles,c.roleId,path+'.roleId',true);ref(rules,c.ruleId,path+'.ruleId',true);if(c.roleId && c.controllerId && roles.get(c.roleId).controllerId!==c.controllerId)fail(path,'role/controller mismatch');if(c.ruleId && ((c.roleId && rules.get(c.ruleId).roleId!==c.roleId)||(c.controllerId&&rules.get(c.ruleId).controllerId!==c.controllerId)))fail(path,'rule context mismatch');str(c.message,path+'.message');str(c.previousRaw,path+'.previousRaw');});
     arr(p.importHistory,'$.importHistory');p.importHistory.forEach((h,i)=>{const path='$.importHistory['+i+']';obj(h,path,['projectId','snapshotId','importedAt','reused','needsReview','unresolved']);id(h.projectId,path+'.projectId');id(h.snapshotId,path+'.snapshotId');timestamp(h.importedAt,path+'.importedAt');['reused','needsReview','unresolved'].forEach(k=>integer(h[k],path+'.'+k,0));});
     return p;
   }
@@ -247,7 +247,7 @@
       if(context.length)current.changes.push({type:'role_context_changed',controllerId:role.controllerId,roleId:role.id,ruleId:'',message:context.join(' '),previousRaw:''});
       const oldRaw=new Set(oldRows.map(r=>JSON.stringify([r.acl,raw(r)]))),newRaw=new Set(newRows.map(r=>JSON.stringify([r.acl,raw(r)])));
       for(const r of newRows)if(!oldRaw.has(JSON.stringify([r.acl,raw(r)])))current.changes.push({type:'rule_added',controllerId:role.controllerId,roleId:role.id,ruleId:r.id,message:'이번 수집본에서 새롭게 확인된 원문 규칙입니다.',previousRaw:''});
-      for(const r of oldRows)if(!newRaw.has(JSON.stringify([r.acl,raw(r)]))){const c=curControllers.get(role.controllerId);current.changes.push({type:'rule_not_observed',controllerId:role.controllerId,roleId:role.id,ruleId:'',message:c.coverage==='completed'&&role.contextComplete?'이전 원문 규칙이 이번 수집본에 보이지 않습니다. 제거 여부를 확인해야 합니다.':'수집이 불완전하거나 수집 범위가 불명확하여 이전 원문 규칙의 존재 여부를 확인할 수 없습니다.',previousRaw:r.raw});}
+      for(const r of oldRows)if(!newRaw.has(JSON.stringify([r.acl,raw(r)]))){const c=curControllers.get(role.controllerId);current.changes.push({type:'rule_not_observed',controllerId:role.controllerId,roleId:role.id,ruleId:'',message:c.coverage==='completed'&&role.contextComplete?'이전 원문 규칙이 이번 수집본에 보이지 않습니다. 제거 여부를 확인해야 합니다.':'수집이 불완전하거나 수집 범위가 불명확하여 이전 원문 규칙의 존재 여부를 확인할 수 없습니다.',previousRaw:r.raw,previousAcl:r.acl});}
     }
     for(const role of current.snapshot.roles)if(!matchedRoleIds.has(role.id))current.changes.push({type:'role_added',controllerId:role.controllerId,roleId:role.id,ruleId:'',message:'새롭게 확인된 역할이거나 이전 컨트롤러 및 역할과 단일하게 연결할 수 없는 항목입니다.',previousRaw:''});
     current.importHistory.push({projectId:previous.projectId,snapshotId:previous.snapshot.id,importedAt:now,...summary});current.revision++;current.updatedAt=now;
@@ -255,8 +255,38 @@
   }
   function emptyRecord(updatedAt){return {text:'',status:'unreviewed',updatedAt,confirmedAt:'',reasons:[],source:null};}
   function pending(a){return !!a&&(a.status==='reused'||a.status==='needs_review'||(a.status==='unreviewed'&&(a.text.trim()!==''||!!a.manualSsid||!!a.deviceType)));}
+  // Work on the validated export copy so scope selection, review rows and counts
+  // all see the same rules. The editable project keeps every original record.
+  function omitCommonAcls(project) {
+    const snapshot = project.snapshot;
+    const hiddenIds = new Set(snapshot.rules.filter(rule => isCommonAclName(rule.acl)).map(rule => rule.id));
+    snapshot.rules = snapshot.rules.filter(rule => !hiddenIds.has(rule.id));
+    for (const role of snapshot.roles) {
+      role.aclOrder = role.aclOrder.filter(name => !isCommonAclName(name));
+      role.bindingRaw = role.bindingRaw.filter(line => {
+        const binding = /^\s*(?:session-acl|access-list\s+session)\s+(.+?)\s*$/i.exec(line);
+        return !binding || !isCommonAclName(binding[1].replace(/\s+position\s+\d+$/i, ''));
+      });
+    }
+    project.unresolvedAnnotations = project.unresolvedAnnotations.filter(item => item.kind !== 'rule' || !isCommonAclName(item.acl));
+    for (const item of project.unresolvedAnnotations) {
+      if (item.kind === 'rule') item.candidateIds = item.candidateIds.filter(id => !hiddenIds.has(id));
+    }
+    project.changes = project.changes.filter(change => !hiddenIds.has(change.ruleId) && !isCommonAclName(change.previousAcl));
+    for (const change of project.changes) {
+      // Older projects did not identify the ACL of a disappeared rule.
+      if (change.type === 'rule_not_observed' && !change.previousAcl) change.previousRaw = '';
+    }
+  }
   function buildExportModel(value,scope,now){
-    const p=validateProject(value),exportedAt=nowValue(now);scope=safeCopy(scope||{type:'all'});obj(scope,'scope');for(const key of Object.keys(scope))if(!['type','roleIds'].includes(key))fail('scope.'+key,'unknown field');choice(scope.type,['all','selected','review'],'scope.type');const ids=scope.roleIds===undefined?[]:scope.roleIds;strings(ids,'scope.roleIds');const byId=new Map(p.snapshot.roles.map(r=>[r.id,r]));for(const id of ids)if(!byId.has(id))fail('scope.roleIds','unknown role ID');
+    const p=validateProject(value),exportedAt=nowValue(now);
+    scope=safeCopy(scope||{type:'all'});
+    obj(scope,'scope',['type'],['roleIds','showCommonAcl']);
+    choice(scope.type,['all','selected','review'],'scope.type');
+    const showCommonAcl = scope.showCommonAcl === undefined ? true : scope.showCommonAcl;
+    boolean(showCommonAcl,'scope.showCommonAcl');
+    if (!showCommonAcl) omitCommonAcls(p);
+    const ids=scope.roleIds===undefined?[]:scope.roleIds;strings(ids,'scope.roleIds');const byId=new Map(p.snapshot.roles.map(r=>[r.id,r]));for(const id of ids)if(!byId.has(id))fail('scope.roleIds','unknown role ID');
     let roles=p.snapshot.roles,rules=p.snapshot.rules;
     if(scope.type==='selected'){const selected=new Set(ids);roles=roles.filter(r=>selected.has(r.id));rules=rules.filter(r=>selected.has(r.roleId));}
     if(scope.type==='review'){
@@ -280,7 +310,7 @@
     const changes=p.changes.filter(c=>scope.type==='all'||scope.type==='review'||(c.ruleId?ruleIds.has(c.ruleId):c.roleId?roleIds.has(c.roleId):controllerIds.has(c.controllerId)));
     const exportedRoles=roles.map(r=>({...r,controllerName:controllerMap.get(r.controllerId).name,annotation:p.annotations.roles[r.id]||emptyRecord(p.updatedAt)}));
     const exportedRules=rules.map(r=>({...r,controllerName:controllerMap.get(r.controllerId).name,roleName:byId.get(r.roleId).name,annotation:p.annotations.rules[r.id]||emptyRecord(p.updatedAt)}));
-    return {projectId:p.projectId,snapshotId:p.snapshot.id,revision:p.revision,collectedAt:p.snapshot.collectedAt,updatedAt:p.updatedAt,exportedAt,scopeLabel:scope.type==='all'?'전체 정책':scope.type==='review'?'변경 및 검토 항목':'선택한 역할 ('+roles.length+')',controllers:p.snapshot.controllers.filter(c=>controllerIds.has(c.id)),roles:exportedRoles,rules:exportedRules,aliases:p.snapshot.aliases.filter(a=>controllerIds.has(a.controllerId)),localNetworks:p.snapshot.localNetworks.filter(n=>roleIds.has(n.roleId)),changes,unresolvedAnnotations:unresolved,issues:p.snapshot.issues.filter(i=>roleIds.has(i.roleId)||(!i.roleId&&controllerIds.has(i.controllerId))),summary:{controllerCount:controllerIds.size,roleCount:roles.length,ruleCount:rules.length,annotatedRuleCount:exportedRules.filter(r=>r.annotation.text.trim()!=='').length,needsReviewCount:exportedRoles.filter(r=>pending(r.annotation)).length+exportedRules.filter(r=>pending(r.annotation)).length+unresolved.length}};
+    return {projectId:p.projectId,snapshotId:p.snapshot.id,revision:p.revision,collectedAt:p.snapshot.collectedAt,updatedAt:p.updatedAt,exportedAt,showCommonAcl,scopeLabel:scope.type==='all'?'전체 정책':scope.type==='review'?'변경 및 검토 항목':'선택한 역할 ('+roles.length+')',controllers:p.snapshot.controllers.filter(c=>controllerIds.has(c.id)),roles:exportedRoles,rules:exportedRules,aliases:p.snapshot.aliases.filter(a=>controllerIds.has(a.controllerId)),localNetworks:p.snapshot.localNetworks.filter(n=>roleIds.has(n.roleId)),changes,unresolvedAnnotations:unresolved,issues:p.snapshot.issues.filter(i=>roleIds.has(i.roleId)||(!i.roleId&&controllerIds.has(i.controllerId))),summary:{controllerCount:controllerIds.size,roleCount:roles.length,ruleCount:rules.length,annotatedRuleCount:exportedRules.filter(r=>r.annotation.text.trim()!=='').length,needsReviewCount:exportedRoles.filter(r=>pending(r.annotation)).length+exportedRules.filter(r=>pending(r.annotation)).length+unresolved.length}};
   }
   return Object.freeze({parseProject,validateProject,reconcileProjects,buildExportModel,isCommonAclName});
 }));

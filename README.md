@@ -166,7 +166,7 @@ SSID → Role → ACL 상세와 Access Check의 이전 HTML 예시는 [2026-06-3
 - 전체/선택 Role/변경·확인 범위의 실제 XLSX 및 **인쇄 창 없는 오프라인 한글 텍스트 PDF 직접 다운로드**. 간단 보고서는 규칙과 행별 주석을 보여주며, 상세 보고서는 핵심 요약→Role 현황→확인 필요→전용·공통 ACL·Alias 부록 순서로 구성
 - 현재 작업을 담은 독립 HTML 편집기 저장
 - `통합 정책·주석`의 수집 신뢰도·원본 근거 요약, 고급 접힘 영역에서 원본 전체 보고서·선택 Role PNG 저장(원본 수집본이 일치할 때만 사용 가능)
-- `global-sacl`, `ra-guard`, `re-guard`, `logon-control` 공통 ACL은 Role의 주석 화면에서 기본 숨김, `공통 ACL 함께 보기`로 복원. 정확한 ACL 이름만 분류하며 원본·저장·보고 데이터는 변하지 않습니다.
+- `global-sacl`, `ra-guard`, `re-guard`, `logon-control` 공통 ACL은 기본으로 숨깁니다. `공통 ACL 함께 보기`를 켜면 HTML 규칙표와 Excel·PDF 보고서에 해당 규칙과 주석이 함께 표시됩니다. 작업 JSON과 주석 포함 HTML에는 모든 규칙과 주석이 보존됩니다.
 - Access Check
 - 부분 수집 시 영향 Role/SSID와 권장 조치
 
@@ -210,7 +210,7 @@ SSID → Role → ACL 상세와 Access Check의 이전 HTML 예시는 [2026-06-3
 일반 사용자는 GitHub **Releases**의 Windows 통합 ZIP을 사용합니다.
 
 ```text
-wlc-role-acl-collector_v0.5.1_windows.zip
+wlc-role-acl-collector_v0.5.2_windows.zip
 ```
 
 압축을 완전히 푼 뒤 목적에 맞는 실행 경로를 선택합니다.
