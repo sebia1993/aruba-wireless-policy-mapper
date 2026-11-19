@@ -21,6 +21,17 @@ def _new_app() -> AppTest:
     return app
 
 
+def test_portfolio_demo_offers_role_network_sample_before_collection():
+    app = _new_app()
+    downloads = [
+        button for button in app.get("download_button") if "샘플" in button.label
+    ]
+    assert len(downloads) == 1
+    assert not downloads[0].disabled
+    assert downloads[0].proto.url.endswith(".xlsx")
+    assert "demo_last_result" not in app.session_state
+
+
 def test_portfolio_demo_runs_real_collection_and_report_pipeline():
     app = _new_app()
 

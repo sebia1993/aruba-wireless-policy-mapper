@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import streamlit as st
 
 from wlc_role_acl_collector import web_ssh_hostkey
 from wlc_role_acl_collector.config import default_port_for_protocol
 from wlc_role_acl_collector.diagnostics import classify_error_message
+from wlc_role_acl_collector.streamlit_ui import render_role_network_sample_download
 from wlc_role_acl_collector.web_logic import (
     WebCollectionRequest,
     WebCollectionResult,
@@ -87,7 +90,25 @@ def _render_input_form() -> tuple[bool, WebCollectionRequest]:
             "Telnet은 계정과 장비 출력이 암호화되지 않습니다. SSH에서 Telnet으로 자동 전환하지 않으며, "
             "격리된 관리망에서 위험을 승인한 경우에만 직접 선택하세요."
         )
+    st.subheader("선택 입력 파일")
+    app_dir = Path(__file__).resolve().parent
+    # The portable ZIP places app/app.py beside a top-level config directory.
+    config_dir = app_dir / "config"
+    if app_dir.name == "app" and not config_dir.is_dir():
+        config_dir = app_dir.parent / "config"
+    render_role_network_sample_download(config_dir)
     with st.form("collection_form", clear_on_submit=False):
+        role_networks_file = st.file_uploader(
+            "사내 Role 대역표 Excel",
+            type=["xlsx", "xlsm"],
+            help="샘플의 Role_Networks 시트에서 Role 이름과 네트워크 대역을 수정한 뒤 업로드하세요.",
+        )
+        export_role_networks = st.checkbox(
+            "보고서에 사내 Role 대역 비교 결과 포함",
+            value=role_networks_file is not None,
+            help="체크하면 생성되는 HTML/Excel에 업로드한 내부 대역 정보가 포함됩니다.",
+        )
+
         col1, col2 = st.columns(2)
         with col1:
             host = st.text_input("WLC IP", placeholder="192.0.2.10")
@@ -112,18 +133,6 @@ def _render_input_form() -> tuple[bool, WebCollectionRequest]:
             password = st.text_input("장비 PW", type="password")
         with cred3:
             enable_password = st.text_input("Enable password (선택)", type="password")
-
-        st.subheader("선택 입력 파일")
-        role_networks_file = st.file_uploader(
-            "사내 Role 대역표 Excel",
-            type=["xlsx", "xlsm"],
-            help="Role_Networks Sheet가 있으면 우선 읽고, 없으면 첫 번째 Sheet를 읽습니다.",
-        )
-        export_role_networks = st.checkbox(
-            "보고서에 사내 Role 대역 비교 결과 포함",
-            value=role_networks_file is not None,
-            help="체크하면 생성되는 HTML/Excel에 업로드한 내부 대역 정보가 포함됩니다.",
-        )
 
         submitted = st.form_submit_button("수집 실행", type="primary")
 

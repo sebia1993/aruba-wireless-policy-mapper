@@ -47,7 +47,7 @@ set "WLC_WEB_PORT=8763"
 -----------------
 
 예제 파일은 config\role_networks.example.xlsx 입니다.
-웹앱 화면에서 사내 Role 대역표 Excel 파일을 업로드하면 보고서에 내부 대역 비교 결과를 포함할 수 있습니다.
+웹앱의 선택 입력 파일에서 '사내 Role 대역표 샘플 다운로드 (.xlsx)'를 누르세요. Role_Networks 시트의 예시 행을 사내 Role 이름과 대역으로 바꾸고 업로드하면 보고서에 내부 대역 비교 결과를 포함할 수 있습니다.
 Excel에 Role_Networks Sheet가 있으면 해당 Sheet를 우선 사용하고, 없으면 첫 번째 Sheet를 사용합니다.
 
 접속 방식은 입력 폼 위에서 먼저 선택합니다. SSH는 포트 22, Telnet은 포트 23이 자동 기본값입니다.
