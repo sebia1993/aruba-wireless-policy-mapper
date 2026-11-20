@@ -16,6 +16,7 @@ from wlc_role_acl_collector.report import (
     _build_frames,
     _html2canvas_source,
     _is_role_related_acl,
+    _local_role_network_html,
     _role_image_export_script,
     _write_html,
     build_parsed_controllers,
@@ -488,6 +489,15 @@ def test_write_report_does_not_export_local_role_network_mapping_by_default(tmp_
     assert "10.31.0.0/24" not in html
     project = json.loads(re.search(r'<script type="application/json" id="annotation-project-data">(.*?)</script>', html, re.S).group(1))
     assert project["snapshot"]["localNetworks"] == []
+
+
+@pytest.mark.parametrize("rows", [[], [{"status": "Local mapping missing", "local_role_network": "", "subnet_mask": ""}]])
+def test_source_role_panel_explains_missing_excel_role_without_a_network_pill(rows):
+    panel = _local_role_network_html(rows, enabled=True)
+    assert "대역표에 이 Role이 없습니다" in panel
+    assert "입력 시트의 Role 이름" in panel
+    assert 'class="local-subnet-pill"' not in panel
+    assert _local_role_network_html(rows, enabled=False) == ""
 
 
 def test_write_report_exports_local_role_network_mapping_when_enabled(tmp_path):

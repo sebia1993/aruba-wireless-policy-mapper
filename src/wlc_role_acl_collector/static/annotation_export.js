@@ -92,7 +92,17 @@
       summary.push(['컨트롤러', x.id, '이름: ' + str(x.name) + '\n호스트: ' + str(x.host) + '\n포트: ' + str(x.port) + '\n구성 범위: ' + str(x.scope) + '\n식별 확인: ' + str(x.identityKnown) + '\n수집 상태: ' + str(x.coverage) + '\n실패 명령:\n' + list(x.failedCommands)]);
     });
     (m.issues || []).forEach(function (x) { summary.push(['수집 이슈', str(x.controllerId) + ' / ' + str(x.roleId), x.message]); });
-    (m.localNetworks || []).forEach(function (x) { summary.push(['포함된 로컬 네트워크', str(x.controllerId) + ' / ' + str(x.roleId), '네트워크: ' + str(x.network) + '\n서브넷 마스크: ' + str(x.subnetMask) + '\n상태: ' + str(x.status) + '\n메모: ' + str(x.notes)]); });
+    const rolesById = new Map(roles.map(role=>[role.id,role]));
+    for (const row of m.localNetworks || []) {
+      const role=rolesById.get(row.roleId), network=str(row.network).trim(), mask=str(row.subnetMask).trim();
+      const identity=[role?.name, str(row.controllerId)+' / '+str(row.roleId)].filter(Boolean).join('\n');
+      const lines=[];
+      if (network) lines.push('네트워크: '+network);
+      if (network && mask) lines.push('서브넷 마스크: '+mask);
+      lines.push('상태: '+core.localNetworkStatusLabel(row.status));
+      if (row.notes) lines.push('메모: '+row.notes);
+      summary.push([network?'포함된 로컬 네트워크':'사내 Role 대역표 비교',identity,lines.join('\n')]);
+    }
     var changes = (m.changes || []).map(function (x) {
       var controller=c.find(function(item){return item.id===x.controllerId;}), role=roles.find(function(item){return item.id===x.roleId;}), rule=rules.find(function(item){return item.id===x.ruleId;});
       return ['변경', '', x.type, x.controllerId, controller?controller.name:'', x.roleId, role?role.name:'', x.ruleId, rule?rule.acl:'', rule?rule.raw:'', x.message, x.previousRaw, '', '', '', '', '', '', '', '', '', '', '', ''];

@@ -27,6 +27,34 @@ function mount(project = fixture(), storage, overrides = {}) {
   })};
 }
 
+test('old and new snapshots distinguish mapping status from actual networks on the selected Role', () => {
+  const p=fixture(), env=mount(p), doc=env.window.document;
+  try {
+    const panel=()=>doc.querySelector('#ann-role-detail .ann-local');
+    const banner=()=>[...doc.querySelectorAll('.ann-warning')].map(e=>e.textContent).join(' ');
+    assert.equal(panel(),null);
+    const missing={controllerId:'controller-a',roleId:'role-a',network:'',subnetMask:'',status:'Local mapping missing',notes:''};
+    p.snapshot.localNetworks=[missing];
+    assert.ok(env.app.openText(JSON.stringify(p)));
+    assert.equal(panel().querySelector('strong').textContent,'사내 Role 대역표 비교');
+    assert.match(panel().textContent,/대역표에 이 Role이 없습니다.*입력 시트의 Role 이름/);
+    assert.doesNotMatch(panel().textContent,/\/|Local mapping missing/);
+    assert.doesNotMatch(banner(),/내부망 대역( 정보)?[이가] 포함/);
+    assert.equal(env.app.getProject().snapshot.localNetworks[0].status,'Local mapping missing');
+    const second={...p.snapshot.roles[0],id:'role-other',name:'OTHER'};
+    p.snapshot.roles.push(second);
+    p.snapshot.localNetworks.push({...missing,roleId:second.id,network:'192.0.2.0/24',status:'Mismatch'},
+      {...missing,roleId:second.id,network:'198.51.100.0/24',subnetMask:'255.255.255.0',status:'Matched'});
+    assert.ok(env.app.openText(JSON.stringify(p)));
+    assert.doesNotMatch(panel().textContent,/192\.0\.2\.0/);
+    doc.querySelector('[data-open-role="role-other"]').click();
+    assert.equal(panel().querySelector('strong').textContent,'포함된 내부망 대역');
+    assert.match(panel().textContent,/192\.0\.2\.0\/24.*WLC와 대역 불일치/);
+    assert.match(panel().textContent,/198\.51\.100\.0\/24.*255\.255\.255\.0.*WLC와 대역 일치/);
+    assert.doesNotMatch(panel().textContent,/\/24\s+\//);
+  } finally { env.close(); }
+});
+
 test('recovery keys isolate project, snapshot, revision and base timestamp', () => {
   const p = fixture(), key = Editor.recoveryKey(p);
   for (const change of [x=>x.projectId='another',x=>x.snapshot.id='another',x=>x.revision++,x=>x.updatedAt='2026-11-16T02:00:00Z']) {

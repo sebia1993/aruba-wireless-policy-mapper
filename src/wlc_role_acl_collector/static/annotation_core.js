@@ -35,6 +35,17 @@
   }
   function isCommonAclName(acl){return COMMON_ACL_NAMES.has(normalizedAclName(acl));}
 
+  const localNetworkStatuses = new Map([
+    ['Matched','WLC와 대역 일치'],
+    ['Mismatch','WLC와 대역 불일치'],
+    ['Local mapping loaded','대역표에 등록됨 · 비교할 WLC 대역 정보 없음'],
+    ['Local mapping missing','대역표에 이 Role이 없습니다. 입력 시트의 Role 이름을 확인하세요.'],
+    ['Role not collected','이 WLC에서 Role 미수집']
+  ]);
+  function localNetworkStatusLabel(status) {
+    return localNetworkStatuses.get(status) || status || '비교 상태 미확인';
+  }
+
   // Collected endpoints may already have had their CLI quotes removed.
   function aliasReference(field) {
     const match = /^alias\s+(.+)$/i.exec(String(field || '').trim());
@@ -362,5 +373,5 @@
     const exportedRules=rules.map(r=>({...r,controllerName:controllerMap.get(r.controllerId).name,roleName:byId.get(r.roleId).name,annotation:p.annotations.rules[r.id]||emptyRecord(p.updatedAt)}));
     return {projectId:p.projectId,snapshotId:p.snapshot.id,revision:p.revision,collectedAt:p.snapshot.collectedAt,updatedAt:p.updatedAt,exportedAt,showCommonAcl,scopeLabel:scope.type==='all'?'전체 정책':scope.type==='review'?'변경 및 검토 항목':'선택한 역할 ('+roles.length+')',controllers:p.snapshot.controllers.filter(c=>controllerIds.has(c.id)),roles:exportedRoles,rules:exportedRules,aliases:referencedAliases(p.snapshot.aliases,rules),localNetworks:p.snapshot.localNetworks.filter(n=>roleIds.has(n.roleId)),changes,unresolvedAnnotations:unresolved,issues:p.snapshot.issues.filter(i=>roleIds.has(i.roleId)||(!i.roleId&&controllerIds.has(i.controllerId))),summary:{controllerCount:controllerIds.size,roleCount:roles.length,ruleCount:rules.length,annotatedRuleCount:exportedRules.filter(r=>r.annotation.text.trim()!=='').length,needsReviewCount:exportedRoles.filter(r=>pending(r.annotation)).length+exportedRules.filter(r=>pending(r.annotation)).length+unresolved.length}};
   }
-  return Object.freeze({parseProject,validateProject,reconcileProjects,buildExportModel,isCommonAclName,aliasReference,aliasMembers,createAliasLookup});
+  return Object.freeze({parseProject,validateProject,reconcileProjects,buildExportModel,isCommonAclName,localNetworkStatusLabel,aliasReference,aliasMembers,createAliasLookup});
 }));

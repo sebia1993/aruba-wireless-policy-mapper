@@ -152,3 +152,36 @@ def test_streamlit_runtime_blocks_non_loopback_binding(monkeypatch):
 
     with pytest.raises(RuntimeError, match="stopped"):
         namespace["_enforce_loopback_binding"]()
+
+
+def test_role_network_inclusion_starts_off_and_remains_the_submitted_selection(monkeypatch):
+    from io import BytesIO
+
+    import streamlit as st
+    from wlc_role_acl_collector import web_logic
+
+    uploaded = BytesIO(b"test")
+    uploaded.name = "uploaded.xlsx"
+    current = None
+    monkeypatch.setattr(st, "file_uploader", lambda *args, **kwargs: current)
+
+    received = []
+
+    def capture(request, **kwargs):
+        received.append(request.export_local_role_networks)
+        return _successful_web_result("captured")
+
+    monkeypatch.setattr(web_logic, "run_web_collection", capture)
+    app = AppTest.from_file(str(APP_PATH)).run(timeout=20)
+    assert not app.checkbox[0].value
+    next(item for item in app.text_input if item.label == "WLC IP").set_value("192.0.2.10")
+    next(item for item in app.text_input if item.label == "장비 ID").set_value("test")
+    next(item for item in app.text_input if item.label == "장비 PW").set_value("synthetic")
+    current = uploaded
+    app.button[0].click().run(timeout=20)
+    app.checkbox[0].check()
+    app.button[0].click().run(timeout=20)
+    app.checkbox[0].uncheck()
+    app.button[0].click().run(timeout=20)
+    assert not app.exception
+    assert received == [False, True, False]
