@@ -180,7 +180,7 @@ test('compact Excel disambiguates controllers with the same display name by actu
   assert.notEqual(labels[0],labels[1]);
 });
 
-test('both XLSX profiles add adjacent Alias summaries for each visible direction and resolve by controller', async () => {
+test('both XLSX profiles add adjacent full Alias definitions for each visible direction and resolve by controller', async () => {
   const p=fixture();
   const [first]=p.snapshot.rules;
   const [controller]=p.snapshot.controllers;
@@ -210,10 +210,10 @@ test('both XLSX profiles add adjacent Alias summaries for each visible direction
     const off=await read({type:'all',showCommonAcl:false});
     const sheet=off.getWorksheet(name), headers=sheet.getRow(1).values;
     const src=headers.indexOf('출발지'),dst=headers.indexOf('목적지');
-    assert.deepEqual(headers.slice(src,dst+2),['출발지','출발지 Alias 요약','목적지','목적지 Alias 요약']);
+    assert.deepEqual(headers.slice(src,dst+2),['출발지','출발지 Alias 상세','목적지','목적지 Alias 상세']);
     assert.equal(sheet.getRow(2).getCell(src).value,'alias "APP SERVERS"');
-    assert.equal(sheet.getRow(2).getCell(src+1).value,'192.0.2.10 외 1개');
-    assert.equal(sheet.getRow(3).getCell(dst+1).value,'203.0.113.5');
+    assert.equal(sheet.getRow(2).getCell(src+1).value,'description 설명\nhost 192.0.2.10\nnetwork 198.51.100.0/24');
+    assert.equal(sheet.getRow(3).getCell(dst+1).value,'host 203.0.113.5');
     assert.match(sheet.getRow(4).getCell(dst+1).value,/구성원 미수집/);
     assert.equal(sheet.getRow(2).getCell(dst+1).value || '', '');
     assert.equal(sheet.getRow(2).getCell(src).hyperlink,undefined);
@@ -222,16 +222,107 @@ test('both XLSX profiles add adjacent Alias summaries for each visible direction
     }
     const selected=await read({type:'selected',roleIds:[role.id],showCommonAcl:false});
     const selectedHeaders=selected.getWorksheet(name).getRow(1).values;
-    assert.ok(selectedHeaders.includes('출발지 Alias 요약'));
-    assert.ok(!selectedHeaders.includes('목적지 Alias 요약'));
+    assert.ok(selectedHeaders.includes('출발지 Alias 상세'));
+    assert.ok(!selectedHeaders.includes('목적지 Alias 상세'));
     const otherRole=await read({type:'selected',roleIds:['role-b'],showCommonAcl:false});
     const otherHeaders=otherRole.getWorksheet(name).getRow(1).values;
-    assert.ok(!otherHeaders.includes('출발지 Alias 요약'));
-    assert.ok(otherHeaders.includes('목적지 Alias 요약'));
+    assert.ok(!otherHeaders.includes('출발지 Alias 상세'));
+    assert.ok(otherHeaders.includes('목적지 Alias 상세'));
     const on=await read({type:'all',showCommonAcl:true});
     const onSheet=on.getWorksheet(name);
     const missingRow=onSheet.getSheetValues().find(row=>row?.includes('alias MISSING'));
-    assert.match(missingRow[onSheet.getRow(1).values.indexOf('목적지 Alias 요약')],/정의 미수집/);
+    assert.match(missingRow[onSheet.getRow(1).values.indexOf('목적지 Alias 상세')],/정의 미수집/);
+  }
+});
+
+test('round-tripped Alias cells preserve ordered definitions, evidence and record boundaries on long lists', async () => {
+  const report=model(), rule=report.rules[0], alias=report.aliases[0];
+  rule.source='alias office';
+  rule.destination='alias INFO';
+  rule.annotation.text='=일반 텍스트';
+  const lines=Array.from({length:150},(_,i)=>'host 192.0.2.'+(i+1));
+  const hosts=lines.map(line=>({type:'host',value:line.slice(5),raw:line}));
+  const description='운영😀'.repeat(8500);
+  alias.entries=[
+    {type:'description',value:description,raw:''}, ...hosts,
+    {type:'network',value:'198.51.100.0/24',raw:'network 198.51.100.0 255.255.255.0'},
+    {type:'range',value:'192.0.2.2 192.0.2.6',raw:''},
+    {type:'name',value:'api.example',raw:'name api.example'},
+    {type:'raw',value:'=original()',raw:'=original()'}
+  ];
+  report.aliases.push({...alias,id:'meta',name:'INFO',entries:[{type:'description',value:'사내 설명',raw:''}]});
+  report.rules.push({...rule,id:'next',source:'any',destination:'alias DUPLICATE'});
+  report.aliases.push({...alias,id:'duplicate-1',name:'DUPLICATE'},{...alias,id:'duplicate-2',name:'DUPLICATE'});
+  const expected=['description '+description,...lines,'network 198.51.100.0/24','원문: network 198.51.100.0 255.255.255.0',
+    'range 192.0.2.2 192.0.2.6','name api.example','=original()'].join('\n');
+  for(const [profile,sheetName] of [['simple','ACL 간단 보고'],['detailed','ACL 상세']]) {
+    const book=new ExcelJS.Workbook();
+    await book.xlsx.load(await exporter.workbookBytes(report,ExcelJS,{profile}));
+    const sheet=book.getWorksheet(sheetName), headers=sheet.getRow(1).values;
+    const source=headers.indexOf('출발지 Alias 상세'),dest=headers.indexOf('목적지 Alias 상세');
+    const note=headers.indexOf(profile==='simple'?'행별 주석':'주석');
+    const record=headers.indexOf(profile==='simple'?'_레코드 번호':'레코드 번호');
+    const part=headers.indexOf(profile==='simple'?'_조각 / 전체':'조각 / 전체');
+    assert.ok(source>0 && dest>0);
+    const rows=sheet.getRows(2,sheet.rowCount-1).filter(row=>row.getCell(record).value==='1');
+    assert.ok(rows.length>1,'all Alias lines should be viewable across continuation rows');
+    let sourceText='',destText='',noteText='';
+    rows.forEach((row,i)=>{
+      const cell=row.getCell(source), value=cell.value||'';
+      assert.equal(row.getCell(part).value,(i+1)+'/'+rows.length);
+      assert.ok(value.length<=32767);
+      assert.ok(row.height<=409 && row.height>=13*value.trimEnd().split('\n').length);
+      assert.ok(!/[\uD800-\uDBFF]$/.test(value) && !/^[\uDC00-\uDFFF]/.test(value));
+      assert.notEqual(cell.type,ExcelJS.ValueType.Formula);
+      sourceText+=value;destText+=row.getCell(dest).value||'';noteText+=row.getCell(note).value||'';
+    });
+    assert.equal(sourceText,expected);assert.equal(destText,'구성원 미수집\ndescription 사내 설명');
+    assert.equal(noteText,rule.annotation.text);
+    assert.equal(sheet.getRow(sheet.rowCount).getCell(dest).value,'정의 중복 · 확인 필요');
+  }
+});
+
+test('Alias continuation rows retain filterable rule identity without copying notes or details', async () => {
+  const report=model(), rule=report.rules[0];
+  rule.source='alias office';rule.destination='any';
+  report.aliases[0].entries=Array.from({length:16},(_,i)=>({type:'host',value:'192.0.2.'+(i+1),raw:''}));
+  rule.annotation.text='x'.repeat(32767*2)+'note-tail';
+  for(const [profile,sheetName] of [['simple','ACL 간단 보고'],['detailed','ACL 상세']]) {
+    const book=new ExcelJS.Workbook();
+    await book.xlsx.load(await exporter.workbookBytes(report,ExcelJS,{profile}));
+    const sheet=book.getWorksheet(sheetName), headers=sheet.getRow(1).values;
+    const cell=(row,field)=>sheet.getRow(row).getCell(headers.indexOf(field)).value || '';
+    assert.equal(sheet.rowCount,4);
+    const identity=['컨트롤러','Role','ACL','출발지','목적지'];
+    if(profile==='detailed') identity.push('규칙 ID','컨트롤러 ID','Role ID','시퀀스','발생 순번');
+    for(const field of identity) {
+      assert.ok(cell(2,field),field);
+      assert.equal(cell(3,field),cell(2,field),profile+' filter on '+field);
+      if(profile==='detailed') assert.equal(cell(4,field),'',field+' on note-only continuation');
+    }
+    const notes=profile==='simple'?'행별 주석':'주석';
+    assert.equal([2,3,4].map(i=>cell(i,notes)).join(''),rule.annotation.text);
+    assert.equal([2,3,4].map(i=>cell(i,'출발지 Alias 상세')).join(''),report.aliases[0].entries.map(e=>'host '+e.value).join('\n'));
+    assert.equal(cell(4,'출발지 Alias 상세'),'');
+  }
+});
+
+test('both Excel profiles detect a repeated Alias exceeding the worksheet row limit before writing ACL rows', () => {
+  const report=model();
+  report.aliases[0].entries=Array.from({length:12000},(_,i)=>({type:'host',value:'10.0.'+(i>>>8)+'.'+(i%256),raw:''}));
+  const rule={...report.rules[0],source:'alias office',annotation:null};
+  report.rules=Array.from({length:1050},(_,i)=>({...rule,id:'rule-'+i,ordinal:i+1}));
+  class GuardedWorkbook extends ExcelJS.Workbook {
+    addWorksheet(name,options) {
+      const sheet=super.addWorksheet(name,options);
+      if(name==='ACL 간단 보고' || name==='ACL 상세') {
+        sheet.addRow=()=>{throw new Error('Started writing the oversized ACL sheet');};
+      }
+      return sheet;
+    }
+  }
+  for(const profile of ['simple','detailed']) {
+    assert.throws(()=>exporter.createWorkbook(report,{Workbook:GuardedWorkbook},{profile}),/1,048,576.*보고 범위/);
   }
 });
 
