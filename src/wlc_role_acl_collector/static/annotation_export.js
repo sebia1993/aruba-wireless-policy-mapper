@@ -21,6 +21,7 @@
     return [a.text, a.status, a.updatedAt, a.confirmedAt, list(a.reasons), s.projectId, s.snapshotId, s.recordId, s.confirmedAt];
   }
   var annotationHeaders = ['주석', '확인 상태', '주석 수정 시각', '확인 시각', '검토 사유', '원본 프로젝트 ID', '원본 스냅샷 ID', '원본 주석 ID', '원본 확인 시각'];
+  const aclFilterFields = new Set(['규칙 ID','컨트롤러 ID','컨트롤러','Role ID','Role','ACL','시퀀스','발생 순번','출발지','목적지']);
   const addressColumns = [
     {header:'출발지', read:rule => rule.source},
     {header:'목적지', read:rule => rule.destination}
@@ -81,7 +82,7 @@
       ['보고서', '수집본 생성 시각', m.collectedAt], ['보고서', '프로젝트 수정 시각', m.updatedAt], ['보고서', '내보내기 시각', m.exportedAt],
       ['보고서', '내보내기 범위', m.scopeLabel], ['안내', '확인 상태', 'reviewed=확인됨; unreviewed=미확인; reused=이전 주석 재사용; needs_review=재검토 필요'],
       ['안내', '수집 완전성', 'completed=완료; partial=일부 수집; failed=실패; unknown=알 수 없음. 불완전한 수집에서 항목 부재는 삭제 증거가 아닙니다.'],
-      ['안내', '연속 행', 'Excel 셀 한도(UTF-16 32767자)를 넘으면 같은 레코드 번호의 조각 순서대로 각 열을 이어 붙이세요. 빈 셀은 빈 문자열입니다.'],
+      ['안내', '연속 행', '긴 주석과 Alias 상세는 같은 레코드 번호의 조각 순서대로 이어 읽으세요. Alias가 여러 행이면 필터로도 전체 목록을 볼 수 있도록 규칙 식별값을 반복합니다.'],
       ['안내', '보고서 수치', m.showCommonAcl === false ? '선택한 보고 범위에서 공통 ACL을 제외하고 집계했습니다.' : '선택한 보고 범위에서 공통 ACL을 포함해 집계했습니다.'],
       ['안내', 'Alias 범위', '보고서에 표시한 규칙의 출발지 또는 목적지가 참조하는 장비별 Alias 정의를 포함합니다.']
     ];
@@ -253,13 +254,20 @@
       checkWorksheetRowLimit(data.rows);
     });
     reports.forEach(function (data) {
+      const filterColumns = data.name==='ACL 상세' ? data.headers.flatMap((h,i)=>aclFilterFields.has(h) ? [i] : []) : [];
       var sheet = book.addWorksheet(data.name, {views:[{state:'frozen',ySplit:1}],pageSetup:{paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}});
       sheet.columns = [{width:12},{width:12}].concat(data.headers.map(function (h) { return {width:h.endsWith(' Alias 상세') ? ALIAS_COLUMN_WIDTH : /주석$|내용|원문|규칙$|사유/.test(h) ? 54 : /시각|ID/.test(h) ? 28 : 24}; }));
       sheet.addRow(['레코드 번호','조각 / 전체'].concat(data.headers));
       data.rows.forEach(function (values, index) {
         var parts = values.map(workbookCellParts), count = Math.max.apply(null, parts.map(function (p) { return p.length; }));
+        const aliasPartCount = values.reduce((max,v)=>Array.isArray(v) ? Math.max(max,v.length) : max,0);
         for (var i = 0; i < count; i++) {
           const visible = parts.map(p => p[i] || '');
+          if (i>0 && i<aliasPartCount) {
+            for (const column of filterColumns) {
+              if (parts[column].length===1) visible[column]=parts[column][0];
+            }
+          }
           var row = sheet.addRow([str(index + 1), str(i + 1) + '/' + str(count)].concat(visible));
           row.eachCell({includeEmpty:true}, function (cell) {
             // Strings, including '=...', remain literal string cells (no formulas or hyperlinks).

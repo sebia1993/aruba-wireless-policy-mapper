@@ -282,6 +282,31 @@ test('round-tripped Alias cells preserve ordered definitions, evidence and recor
   }
 });
 
+test('Alias continuation rows retain filterable rule identity without copying notes or details', async () => {
+  const report=model(), rule=report.rules[0];
+  rule.source='alias office';rule.destination='any';
+  report.aliases[0].entries=Array.from({length:16},(_,i)=>({type:'host',value:'192.0.2.'+(i+1),raw:''}));
+  rule.annotation.text='x'.repeat(32767*2)+'note-tail';
+  for(const [profile,sheetName] of [['simple','ACL 간단 보고'],['detailed','ACL 상세']]) {
+    const book=new ExcelJS.Workbook();
+    await book.xlsx.load(await exporter.workbookBytes(report,ExcelJS,{profile}));
+    const sheet=book.getWorksheet(sheetName), headers=sheet.getRow(1).values;
+    const cell=(row,field)=>sheet.getRow(row).getCell(headers.indexOf(field)).value || '';
+    assert.equal(sheet.rowCount,4);
+    const identity=['컨트롤러','Role','ACL','출발지','목적지'];
+    if(profile==='detailed') identity.push('규칙 ID','컨트롤러 ID','Role ID','시퀀스','발생 순번');
+    for(const field of identity) {
+      assert.ok(cell(2,field),field);
+      assert.equal(cell(3,field),cell(2,field),profile+' filter on '+field);
+      if(profile==='detailed') assert.equal(cell(4,field),'',field+' on note-only continuation');
+    }
+    const notes=profile==='simple'?'행별 주석':'주석';
+    assert.equal([2,3,4].map(i=>cell(i,notes)).join(''),rule.annotation.text);
+    assert.equal([2,3,4].map(i=>cell(i,'출발지 Alias 상세')).join(''),report.aliases[0].entries.map(e=>'host '+e.value).join('\n'));
+    assert.equal(cell(4,'출발지 Alias 상세'),'');
+  }
+});
+
 test('both Excel profiles detect a repeated Alias exceeding the worksheet row limit before writing ACL rows', () => {
   const report=model();
   report.aliases[0].entries=Array.from({length:12000},(_,i)=>({type:'host',value:'10.0.'+(i>>>8)+'.'+(i%256),raw:''}));
