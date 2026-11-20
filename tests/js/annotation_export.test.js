@@ -47,6 +47,31 @@ test('detailed Excel reports which common ACL visibility its counts reflect', ()
     assert.doesNotMatch(row.at(-1),/숨긴 행도 보고 범위에 포함/);
   }
 });
+test('detailed Excel labels a missing mapping as comparison and exports only collected address fields', async () => {
+  const m=model(), [role]=m.roles, base={controllerId:role.controllerId,roleId:role.id,subnetMask:'',notes:''};
+  m.localNetworks=[
+    {...base,network:'',status:'Local mapping missing',notes:'kept evidence'},
+    {...base,network:'192.0.2.0/24',status:'Local mapping loaded'},
+    {...base,network:'198.51.100.0/24',subnetMask:'255.255.255.0',status:'Role not collected'}
+  ];
+  const book=new ExcelJS.Workbook();
+  await book.xlsx.load(await exporter.workbookBytes(m,ExcelJS));
+  const rows=book.getWorksheet('보고 요약').getSheetValues();
+  const missing=rows.find(row=>row?.includes('사내 Role 대역표 비교'));
+  assert.ok(missing);
+  assert.ok(missing.join(' ').includes(role.name));
+  assert.match(missing.at(-1),/대역표에 이 Role이 없습니다/);
+  assert.match(missing.at(-1),/kept evidence/);
+  assert.doesNotMatch(missing.at(-1),/네트워크:|서브넷 마스크:|Local mapping missing/);
+  const mapped=rows.filter(row=>row?.includes('포함된 로컬 네트워크')).map(row=>row.at(-1));
+  assert.equal(mapped.length,2);
+  assert.match(mapped[0],/192\.0\.2\.0\/24/);
+  assert.match(mapped[0],/비교할 WLC 대역 정보 없음/);
+  assert.doesNotMatch(mapped[0],/서브넷 마스크:/);
+  assert.match(mapped[1],/255\.255\.255\.0/);
+  assert.match(mapped[1],/이 WLC에서 Role 미수집/);
+});
+
 test('print view is complete inert HTML with full notes and all report sections', () => {
   assert.equal(typeof exporter.printHtml,'function');
   const html=exporter.printHtml(model());

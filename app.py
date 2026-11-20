@@ -101,11 +101,12 @@ def _render_input_form() -> tuple[bool, WebCollectionRequest]:
         role_networks_file = st.file_uploader(
             "사내 Role 대역표 Excel",
             type=["xlsx", "xlsm"],
-            help="샘플의 Role_Networks 시트에서 Role 이름과 네트워크 대역을 수정한 뒤 업로드하세요.",
+            help="샘플의 Role_Networks 시트에서 예시 Role 이름을 WLC에서 수집하는 실제 Role 이름으로 바꾸고 네트워크 대역을 입력하세요. 같은 Role에 대역이 여러 개면 행을 추가하세요.",
         )
         export_role_networks = st.checkbox(
             "보고서에 사내 Role 대역 비교 결과 포함",
-            value=role_networks_file is not None,
+            value=False,
+            key="export_local_role_networks",
             help="체크하면 생성되는 HTML/Excel에 업로드한 내부 대역 정보가 포함됩니다.",
         )
 
@@ -347,6 +348,25 @@ def _render_result(result: WebCollectionResult, *, previous: bool = False) -> No
         metric_cols[4].metric("실패 명령", int(summary.get("failed_command_count", 0)))
         if result.messages:
             st.write(" / ".join(result.messages))
+        comparison = summary.get("role_name_comparison")
+        if comparison:
+            st.markdown("**사내 대역표 Role 이름 비교**")
+            st.text(
+                f"시트 {comparison['sheet']} · Excel Role {comparison['excel_count']}개 · "
+                f"수집 Role {comparison['collected_count']}개 · 이름 일치 {comparison['matched_count']}개"
+            )
+            if comparison["wlc_only_count"]:
+                st.text(
+                    f"대역표에 없는 수집 Role {comparison['wlc_only_count']}개 (최대 5개 표시) · "
+                    + ", ".join(comparison["wlc_only_examples"])
+                )
+            if comparison["excel_only_count"]:
+                st.text(
+                    f"이번 수집에서 찾지 못한 Excel Role {comparison['excel_only_count']}개 (최대 5개 표시) · "
+                    + ", ".join(comparison["excel_only_examples"])
+                )
+            if comparison["wlc_only_count"] or comparison["excel_only_count"]:
+                st.caption("대역을 표시할 Role 이름을 대역표에 입력하고 파일을 다시 업로드한 뒤 수집을 실행하세요.")
         if summary.get("failed_commands"):
             st.warning(f"실패 명령: {summary['failed_commands']}")
             st.info(f"영향 영역: {summary.get('collection_impacts', '일부 수집 항목')}")

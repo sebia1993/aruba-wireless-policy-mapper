@@ -25,7 +25,7 @@ from .diagnostic_codes import classify_message_to_code
 from .diagnostics import classify_error_message
 from .diagnostics import summarize_collection_failure
 from .models import CollectionResult, Controller, ControllerCredentials, ParsedController
-from .report import build_parsed_controllers, create_run_dir, write_raw_result, write_reports
+from .report import build_parsed_controllers, collected_role_names, create_run_dir, write_raw_result, write_reports
 from .role_networks import (
     RoleNetworkDefinitionError,
     RoleNetworkLoadSummary,
@@ -300,7 +300,7 @@ def _build_success_summary(
     alias_count = sum(len(item.netdestination_aliases) for item in parsed)
     health = assess_collection_results([result])
     impact_scope = infer_collection_impact_scope_for_parsed([result], parsed)
-    return {
+    summary = {
         "controller": result.controller.name,
         "host": result.controller.host,
         "ssid_count": ssid_count,
@@ -320,6 +320,26 @@ def _build_success_summary(
         "recommended_action": health.recommended_action_ko,
         "role_network_rows": role_network_summary.network_count if role_network_summary else 0,
     }
+    if role_network_summary:
+        uploaded = {row.role.casefold(): row.role for row in role_network_summary.definitions}
+        collected = {name.casefold(): name for item in parsed for name in sorted(collected_role_names(item))}
+        wlc_only = sorted(collected.keys() - uploaded.keys())
+        excel_only = sorted(uploaded.keys() - collected.keys())
+
+        def examples(keys: list[str], names: dict[str, str]) -> list[str]:
+            return [names[key] if len(names[key]) <= 100 else names[key][:99] + "…" for key in keys[:5]]
+
+        summary["role_name_comparison"] = {
+            "sheet": role_network_summary.sheet_name,
+            "collected_count": len(collected),
+            "excel_count": len(uploaded),
+            "matched_count": len(collected.keys() & uploaded.keys()),
+            "wlc_only_count": len(wlc_only),
+            "wlc_only_examples": examples(wlc_only, collected),
+            "excel_only_count": len(excel_only),
+            "excel_only_examples": examples(excel_only, uploaded),
+        }
+    return summary
 
 
 def _build_failure_summary(

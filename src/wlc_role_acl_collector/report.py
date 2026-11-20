@@ -493,6 +493,15 @@ def _group_local_role_networks(
     return grouped
 
 
+def collected_role_names(parsed: ParsedController) -> set[str]:
+    """Return Role names observed on this controller before applying a local workbook."""
+    return (
+        set(parsed.role_policies)
+        | set(parsed.user_role_observations)
+        | {mapping.role for mapping in parsed.ssid_role_mappings if mapping.role}
+    )
+
+
 def _local_network_status_by_role(
     parsed: ParsedController,
     local_lookup: dict[str, list[RoleNetworkDefinition]],
@@ -501,11 +510,7 @@ def _local_network_status_by_role(
     if not local_mapping_enabled:
         return {}
 
-    collected_roles = (
-        set(parsed.role_policies)
-        | set(parsed.user_role_observations)
-        | {mapping.role for mapping in parsed.ssid_role_mappings if mapping.role}
-    )
+    collected_roles = collected_role_names(parsed)
     collected_role_keys = {role.casefold() for role in collected_roles}
     local_roles = {
         definitions[0].role
@@ -3298,7 +3303,7 @@ def _local_role_network_html(rows: list[dict[str, Any]], enabled: bool) -> str:
 
     if not rows:
         status = "Local mapping missing"
-        notes = "Role was collected from WLC but was not found in the local Role network Excel."
+        notes = ""
         networks: list[str] = []
     else:
         status = str(rows[0].get("status", "") or "Local mapping loaded")
@@ -3313,13 +3318,17 @@ def _local_role_network_html(rows: list[dict[str, Any]], enabled: bool) -> str:
         f'<span class="local-subnet-pill"><strong>LOCAL</strong><span>{escape(network)}</span></span>'
         for network in dict.fromkeys(networks)
     )
-    if not network_html:
-        network_html = '<span class="notice">No local network is defined for this Role.</span>'
+    label = status
+    if status == "Local mapping missing":
+        label = "대역표에 이 Role이 없습니다"
+        notes = "입력 시트의 Role 이름을 WLC에서 수집한 이름과 비교하세요."
+    elif not network_html:
+        network_html = '<span class="notice">표시할 대역 정보가 없습니다.</span>'
 
     return f"""
     <div class="local-network">
       <div class="local-network-title">Local Role Network</div>
-      <span class="local-network-status {_local_network_status_class(status)}">{escape(status)}</span>
+      <span class="local-network-status {_local_network_status_class(status)}">{escape(label)}</span>
       {network_html}
       <div class="local-network-notes">{escape(notes)}</div>
     </div>

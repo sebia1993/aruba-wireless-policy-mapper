@@ -362,3 +362,43 @@ def _role_network_workbook_bytes() -> bytes:
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
+
+
+@pytest.mark.parametrize(
+    "names, expected",
+    [
+        ([" GUEST-LOGON ", "guest-logon", "Excel-Only"], (1, ["corp-employee", "logon"], ["Excel-Only"])),
+        (["Example", "Example"], (0, ["corp-employee", "guest-logon", "logon"], ["Example"])),
+        (["guest-logon", "corp-employee", "LOGON"], (3, [], [])),
+    ],
+)
+def test_uploaded_sheet_reports_unique_role_name_matches_even_when_export_omitted(names, expected):
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "LocalSheet"
+    worksheet.append(["Role 이름", "네트워크 대역"])
+    for i, name in enumerate(names):
+        worksheet.append([name, f"203.0.{i}.0/24"])
+    output = BytesIO()
+    workbook.save(output)
+    result = run_web_collection(WebCollectionRequest(
+        host="192.0.2.10", controller_name="sample_controller", username="", password="",
+        role_networks_filename="local.xlsx", role_networks_bytes=output.getvalue(),
+        export_local_role_networks=False, offline_raw_dir=Path(__file__).parent / "fixtures",
+    ))
+    assert result.success
+    coverage = result.summary["role_name_comparison"]
+    matched, wlc_only, excel_only = expected
+    assert coverage == {
+        "sheet": "LocalSheet", "excel_count": len({name.strip().casefold() for name in names}),
+        "collected_count": 3, "matched_count": matched,
+        "wlc_only_count": len(wlc_only), "wlc_only_examples": wlc_only,
+        "excel_only_count": len(excel_only), "excel_only_examples": excel_only,
+    }
+    assert b"203.0.0.0/24" not in result.artifacts["html"].data
+    with BytesIO(result.artifacts["xlsx"].data) as src:
+        saved = load_workbook(src, read_only=True)
+        try:
+            assert "Local_Role_Networks" not in saved.sheetnames
+        finally:
+            saved.close()
