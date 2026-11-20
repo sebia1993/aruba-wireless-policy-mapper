@@ -151,6 +151,7 @@ class RoleNetworkDefinition:
     subnet_mask: str
     source_file: str = ""
     source_row: int = 0
+    description: str = ""
 
 
 @dataclass

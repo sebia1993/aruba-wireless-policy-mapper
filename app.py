@@ -101,13 +101,13 @@ def _render_input_form() -> tuple[bool, WebCollectionRequest]:
         role_networks_file = st.file_uploader(
             "사내 Role 대역표 Excel",
             type=["xlsx", "xlsm"],
-            help="샘플의 Role_Networks 시트에서 예시 Role 이름을 WLC에서 수집하는 실제 Role 이름으로 바꾸고 네트워크 대역을 입력하세요. 같은 Role에 대역이 여러 개면 행을 추가하세요.",
+            help="Role_Networks 시트에 네트워크 대역과 설명을 입력하세요. IP로 대역을 찾을 때는 Role 이름을 비워도 됩니다. Role별 할당 대역을 비교할 때는 수집된 Role 이름도 입력하세요.",
         )
         export_role_networks = st.checkbox(
             "보고서에 사내 Role 대역 비교 결과 포함",
             value=False,
             key="export_local_role_networks",
-            help="체크하면 생성되는 HTML/Excel에 업로드한 내부 대역 정보가 포함됩니다.",
+            help="체크하면 보고서에 업로드한 내부 대역과 설명이 포함됩니다.",
         )
 
         col1, col2 = st.columns(2)
@@ -366,7 +366,9 @@ def _render_result(result: WebCollectionResult, *, previous: bool = False) -> No
                     + ", ".join(comparison["excel_only_examples"])
                 )
             if comparison["wlc_only_count"] or comparison["excel_only_count"]:
-                st.caption("대역을 표시할 Role 이름을 대역표에 입력하고 파일을 다시 업로드한 뒤 수집을 실행하세요.")
+                st.caption("Role 이름은 할당 대역을 비교할 때 사용합니다. IP 대역 설명은 Role 이름이 달라도 주소로 찾습니다.")
+        elif summary.get("role_network_rows"):
+            st.caption("Role 이름이 없는 대역표입니다. 보고서에 포함하면 주소를 기준으로 대역 설명을 찾습니다.")
         if summary.get("failed_commands"):
             st.warning(f"실패 명령: {summary['failed_commands']}")
             st.info(f"영향 영역: {summary.get('collection_impacts', '일부 수집 항목')}")

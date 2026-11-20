@@ -61,6 +61,8 @@ def build_annotation_project(
     else:
         _from_frames(snapshot, frames)
     _local_networks(snapshot, _rows(frames, "Local_Role_Networks"))
+    if "Local_Role_Networks" in frames:
+        _network_references(snapshot, frames)
     return {
         "format": "aruba-policy-annotations", "schemaVersion": 1,
         "projectId": f"project-{uuid.uuid4().hex}", "revision": 0,
@@ -215,6 +217,40 @@ def _local_networks(snapshot: dict[str, Any], rows: list[dict[str, Any]]) -> Non
         if role is None:
             continue
         snapshot["localNetworks"].append({"controllerId": cid, "roleId": role["id"], "network": _text(row.get("local_role_network")), "subnetMask": _text(row.get("subnet_mask")), "status": _text(row.get("status")), "notes": _text(row.get("notes"))})
+
+
+def _network_references(snapshot: dict[str, Any], frames: Mapping[str, Any]) -> None:
+    """Copy only references resolved in this opt-in report and tied to its source records."""
+    roles = {(r["controllerId"], r["name"]): r for r in snapshot["roles"]}
+    for row in _rows(frames, "Role_Network_Context"):
+        role = roles.get((_text(row.get("controller_id")), _text(row.get("role"))))
+        lines = _text(row.get("network_references")).splitlines()
+        if role is not None and lines:
+            role["networkReferences"] = _unique([*role.get("networkReferences", []), *lines])
+
+    # The same operand may occur in many rules within a controller.
+    operands: dict[tuple[str, str], str] = {}
+    for row in _rows(frames, "Role_ACL_Detail"):
+        for field in ("source", "destination"):
+            reference = _text(row.get(field + "_network_reference"))
+            if reference:
+                operands[(_text(row.get("controller_id")), _text(row.get(field)))] = reference
+    for rule in snapshot["rules"]:
+        for field in ("source", "destination"):
+            reference = operands.get((rule["controllerId"], rule[field]))
+            if reference:
+                rule[field + "NetworkReference"] = reference
+
+    entries = {
+        (_text(row.get("controller_id")), _text(row.get("alias")), _text(row.get("entry_type")), _text(row.get("value"))): reference
+        for row in _rows(frames, "Alias_Detail")
+        if (reference := _text(row.get("network_reference")))
+    }
+    for alias in snapshot["aliases"]:
+        for entry in alias["entries"]:
+            reference = entries.get((alias["controllerId"], alias["name"], entry["type"], entry["value"]))
+            if reference:
+                entry["networkReference"] = reference
 
 
 def _issue(snapshot: dict[str, Any], cid: str, rid: str, message: str) -> None:

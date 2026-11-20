@@ -18,6 +18,23 @@ function allText(node){
   return '';
 }
 
+test('simple and detailed PDFs identify Role, direct endpoint, short and appendix Alias network references',()=>{
+  const p=fixture(),role=p.snapshot.roles[0],rule=p.snapshot.rules[0];
+  role.networkReferences=['WLC 설정 · 역할 참조'];
+  rule.source='host 192.0.2.7';rule.sourceNetworkReference='출발지 참조';rule.destination='alias SMALL';
+  p.snapshot.rules.push({...rule,id:'second',ordinal:2,destination:'alias LARGE'});
+  for(const [name,size] of [['SMALL',1],['LARGE',4]]){
+    p.snapshot.aliases.push({id:name,name,controllerId:role.controllerId,entries:Array.from({length:size},(_,i)=>({
+      type:'host',value:'192.0.2.'+(i+1),raw:'host 192.0.2.'+(i+1),networkReference:name+' 참조 '+i}))});
+  }
+  p.snapshot.rules.push({...rule,id:'common',acl:'ra-guard',ordinal:3,sourceNetworkReference:'HIDDEN LABEL'});
+  for(const profile of ['simple','detailed']){
+    const text=allText(Pdf.documentDefinition(model(p,{type:'all',showCommonAcl:false}),{profile}).content);
+    for(const ref of [role.networkReferences[0],rule.sourceNetworkReference,'SMALL 참조 0','LARGE 참조 3']) assert.ok(text.includes(ref),ref);
+    assert.ok(!text.includes('HIDDEN LABEL'));
+  }
+});
+
 test('management PDF uses searchable A4 content with Korean summary, evidence and appendix',()=>{
   const p=fixture();
   p.annotations.roles['role-a']={...p.annotations.rules['rule-a'],manualSsid:'corp-ssid',deviceType:'macbook',text:'상급 보고용 설명'};

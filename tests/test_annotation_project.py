@@ -129,6 +129,43 @@ def test_only_explicit_local_network_frame_is_exported_with_scoped_references():
     assert "PRIVATE_PATH" not in json.dumps(project)
 
 
+@pytest.mark.parametrize("from_frames", [True, False])
+def test_ip_catalogue_projects_scoped_references_without_implying_a_role_assignment(from_frames):
+    from wlc_role_acl_collector.controller_identity import controller_identity
+    from wlc_role_acl_collector.models import RoleNetworkContext, RoleNetworkDefinition
+    from wlc_role_acl_collector.report import _build_frames
+
+    item, other = parsed("192.0.2.10"), parsed("198.51.100.10")
+    definition = RoleNetworkDefinition("", "192.0.2.0/24", "255.255.255.0", description="project label")
+    for controller, subnet in [(item, "192.0.2.0/25"), (other, "198.51.100.0/25")]:
+        controller.role_network_contexts = [RoleNetworkContext("same", "staff", "42", subnet, "vlan 42",
+            configured_subnet=subnet, observed_networks=["192.0.2.0/24"] if controller is item else [])]
+        controller.role_policies["staff"].rules[0].source = "host " + controller.controller.host
+
+    def make(include):
+        frames = _build_frames([item, other], [], [definition], export_local_role_networks=include)
+        return build(frames, parsed_controllers=None if from_frames else [item, other])["snapshot"]
+
+    snapshot = make(True)
+    first_id = next(c["id"] for c in snapshot["controllers"] if c["id"] == controller_identity(item.controller))
+    for role in snapshot["roles"]:
+        if role["controllerId"] == first_id and role["name"] == "staff":
+            assert role["networkReferences"] == [
+                "WLC 설정 대역 192.0.2.0/25 → 192.0.2.0/24 · project label",
+                "단말 관측 추정 대역 192.0.2.0/24 → 192.0.2.0/24 · project label",
+            ]
+        else:
+            assert "networkReferences" not in role
+    assert snapshot["localNetworks"] == []
+    for rule in snapshot["rules"]:
+        assert rule.get("sourceNetworkReference") == ("192.0.2.0/24 · project label" if rule["controllerId"] == first_id else None)
+        assert "destinationNetworkReference" not in rule
+    for alias in snapshot["aliases"]:
+        assert alias["entries"][0].get("networkReference") == ("192.0.2.0/24 · project label" if alias["controllerId"] == first_id else None)
+    private = json.dumps(make(False))
+    assert "project label" not in private and "etworkReference" not in private
+
+
 def test_timestamps_are_timezone_aware_and_invalid_naive_timestamps_fail():
     value = build({}, collected_at=datetime(2026, 11, 16, tzinfo=timezone.utc))
     assert datetime.fromisoformat(value["createdAt"]).tzinfo is not None

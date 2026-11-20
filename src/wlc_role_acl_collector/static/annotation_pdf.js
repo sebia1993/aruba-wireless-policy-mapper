@@ -58,7 +58,7 @@
 
   function shortAliasText(found,detailed){
     const memberText=entry=>[entry.type,entry.value].filter(Boolean).join(' ');
-    const lines=found.members.length ? found.members.map(memberText) : [found.summary];
+    const lines=found.members.length ? found.members.map(entry=>withNetworkReference(memberText(entry),entry.networkReference)) : [found.summary];
     if(detailed){
       const members=new Set(found.members);
       for(const entry of found.alias.entries){
@@ -67,6 +67,10 @@
       }
     }
     return lines.join('\n');
+  }
+
+  function withNetworkReference(text,reference){
+    return reference ? text+'\nIP 대역 참조 · '+reference : text;
   }
 
   function reportAliases(model,detailed=false) {
@@ -86,9 +90,9 @@
       }
     }
     function operand(rule,field){
-      const value=nonempty(field,'미확인');
-      const found=lookup(rule.controllerId,field);
-      if(!found)return [value];
+      const value=nonempty(rule[field],'미확인');
+      const found=lookup(rule.controllerId,rule[field]);
+      if(!found)return [withNetworkReference(value,rule[field+'NetworkReference'])];
       if(!found.alias)return [value+'\n'+found.summary];
       const {display,code}=definitions.get(found.alias.id);
       expandedChars+=display.length;
@@ -108,17 +112,17 @@
       content.push(heading);
       if(detailed){
         content.push(para('컨트롤러 ID: '+controllerId+'   |   Alias ID: '+alias.id));
-        const rows=alias.entries.map(entry=>[entry.type,entry.value,entry.raw]);
+        const rows=alias.entries.map(entry=>[entry.type,withNetworkReference(entry.value,entry.networkReference),entry.raw]);
         content.push(rowsTable(['유형','값','수집 원문'],rows,[72,145,'*']));
       }else{
-        content.push(rowsTable(['유형','구성원'],found.members.map(entry=>[entry.type,entry.value]),[105,'*']));
+        content.push(rowsTable(['유형','구성원'],found.members.map(entry=>[entry.type,withNetworkReference(entry.value,entry.networkReference)]),[105,'*']));
       }
     }
   }
 
   function policyText(rule,aliases){
-    return ['동작: '+action(rule)+'\n출발지: ',...aliases.operand(rule,rule.source),
-      '\n목적지: ',...aliases.operand(rule,rule.destination),'\n서비스: '+nonempty(rule.service,'미확인')+
+    return ['동작: '+action(rule)+'\n출발지: ',...aliases.operand(rule,'source'),
+      '\n목적지: ',...aliases.operand(rule,'destination'),'\n서비스: '+nonempty(rule.service,'미확인')+
       '\n원문: '+nonempty(rule.raw,'수집 원문 없음')];
   }
 
@@ -163,6 +167,9 @@
     if(incomplete)content.push(para('주의: 수집 미완료 또는 확인되지 않은 컨트롤러가 포함되어 누락된 규칙이 있을 수 있습니다.',
       {color:COLORS.alert,bold:true}));
     content.push(para(model.showCommonAcl===false?'공통 ACL은 이 보고서에서 제외했습니다.':'공통 ACL도 보고 범위에 포함됩니다.'));
+    const referencedRoles=model.roles.filter(role=>role.networkReferences?.length);
+    if(referencedRoles.length)content.push(rowsTable(['컨트롤러 / Role','IP 대역 참조'],
+      referencedRoles.map(role=>[controllerLabel(role)+' / '+role.name,role.networkReferences.join('\n')]),[150,'*']));
     const groups=[];
     for(const rule of rules){
       const key=JSON.stringify([rule.controllerId,rule.roleId,rule.acl]);
@@ -178,8 +185,8 @@
         '   |   ACL: '+nonempty(first.acl,'미확인'),
         style:'groupHeading',margin:[0,11,0,4]});
       const rows=group.rules.map(rule=>{
-        const cells=[nonempty(rule.sequence,nonempty(rule.ordinal,'?')),aliases.operand(rule,rule.source),
-          aliases.operand(rule,rule.destination),nonempty(rule.service,'미확인'),nonempty(rule.action,'미확인')];
+        const cells=[nonempty(rule.sequence,nonempty(rule.ordinal,'?')),aliases.operand(rule,'source'),
+          aliases.operand(rule,'destination'),nonempty(rule.service,'미확인'),nonempty(rule.action,'미확인')];
         if(includeNotes)cells.push(aclNote(rule));
         return cells.map(value=>bodyCell(value));
       });
@@ -290,6 +297,7 @@
     for(const r of roles){
       const own=exclusive.filter(rule=>related(rule,r));
       content.push({text:roleTarget(r),style:'roleHeading',margin:[0,12,0,4]});
+      if(r.networkReferences?.length)content.push(para('IP 대역 참조\n'+r.networkReferences.join('\n')));
       content.push(para('ACL 적용 순서: '+((r.aclOrder||[]).map(str).join(' → ')||'정보 없음')+
         '\nRole 원문 바인딩: '+((r.bindingRaw||[]).map(str).join('\n')||'정보 없음')));
       if(!own.length)content.push(para('이 보고 범위에서 표시할 전용 ACL 규칙이 없습니다.'));
