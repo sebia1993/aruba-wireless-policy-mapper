@@ -25,14 +25,52 @@
     {header:'출발지', read:rule => rule.source},
     {header:'목적지', read:rule => rule.destination}
   ];
+  function aliasEntryText(entry) {
+    const raw = entry.raw || '';
+    const type = entry.type.trim();
+    const value = entry.value;
+    const definition = (!type || type.toLowerCase()==='raw') ? value : [type,value].filter(Boolean).join(' ');
+    if (!raw.trim()) return definition;
+    if (!definition.trim() || raw.trim()===definition.trim()) return raw;
+    return definition+'\n원문: '+raw;
+  }
+  const ALIAS_COLUMN_WIDTH = 54;
+  // Allow space for full-width Korean text, wrapping and cell padding.
+  const ALIAS_CHARS_PER_LINE = 20;
+  const ALIAS_LINES_PER_PART = 12;
+  function aliasCellParts(found) {
+    const entries = found.alias.entries.map(aliasEntryText).filter(text => text.trim());
+    if (!found.members.length) entries.unshift(found.summary);
+    const parts = [];
+    let current = '', usedLines = 0;
+    // Keep separators intact so joining continuation cells restores the original text.
+    for (const [line] of entries.join('\n').matchAll(/[^\n]*\n|[^\n]+/g)) {
+      for (const piece of chunks(line, ALIAS_CHARS_PER_LINE * ALIAS_LINES_PER_PART)) {
+        const lines = Math.max(1,Math.ceil(piece.length / ALIAS_CHARS_PER_LINE));
+        if (usedLines + lines > ALIAS_LINES_PER_PART) {
+          parts.push(current);
+          current = ''; usedLines = 0;
+        }
+        current += piece; usedLines += lines;
+      }
+    }
+    parts.push(current);
+    return parts;
+  }
   function excelAddressColumns(model) {
     const lookup = core.createAliasLookup(model.aliases || []);
+    const cachedParts = new Map();
     return addressColumns.flatMap(column => {
       const aliasFor = rule => lookup(rule.controllerId, column.read(rule));
       if (!(model.rules || []).some(aliasFor)) return [column];
       return [column, {
-        header:column.header + ' Alias 요약',
-        read:rule => aliasFor(rule)?.summary || ''
+        header:column.header + ' Alias 상세', width:ALIAS_COLUMN_WIDTH,
+        read:rule => {
+          const found = aliasFor(rule);
+          if (!found?.alias) return [found?.summary || ''];
+          if (!cachedParts.has(found.alias)) cachedParts.set(found.alias,aliasCellParts(found));
+          return cachedParts.get(found.alias);
+        }
       }];
     });
   }
@@ -85,16 +123,43 @@
       })}
     ];
   }
-  function chunks(value) {
+  function chunks(value,limit=LIMIT) {
     var text = str(value), result = [], start = 0;
     do {
-      var end = Math.min(start + LIMIT, text.length);
+      var end = Math.min(start + limit, text.length);
       if (end < text.length && /[\uD800-\uDBFF]/.test(text.charAt(end - 1)) && /[\uDC00-\uDFFF]/.test(text.charAt(end))) end--;
       result.push(text.slice(start, end)); start = end;
     } while (start < text.length);
     return result;
   }
 
+  // Alias cells already contain display-sized parts shared by repeated references.
+  function workbookCellParts(value) { return Array.isArray(value) ? value : chunks(value); }
+  function checkWorksheetRowLimit(records) {
+    let total = 1; // Header row.
+    for (const cells of records) {
+      let count = 1;
+      for (const value of cells) {
+        if (Array.isArray(value)) count = Math.max(count,value.length);
+        else if (typeof value==='string' && value.length>LIMIT) count = Math.max(count,chunks(value).length);
+      }
+      total += count;
+      if (total > 1048576) throw new Error('Excel 시트의 1,048,576행 한도를 초과합니다. 보고 범위를 줄여 다시 저장하세요.');
+    }
+  }
+  function workbookRowHeight(cells,values,minimum,maximum,wrapWidth) {
+    let height = minimum;
+    cells.forEach((value,i) => {
+      const lines = str(value).split('\n');
+      if (Array.isArray(values[i])) {
+        const displayLines = lines.reduce((n,line) => n+Math.max(1,Math.ceil(line.length/ALIAS_CHARS_PER_LINE)),0);
+        height = Math.max(height,18*displayLines);
+      } else {
+        height = Math.max(height,Math.min(maximum,15*(Math.ceil(str(value).length/wrapWidth)+lines.length)));
+      }
+    });
+    return height;
+  }
 
   function compactControllerLabel(rule, byId, counts) {
     var controller=byId.get(rule.controllerId);
@@ -125,7 +190,7 @@
     var includeNotes = rules.some(function(rule){return hasNoteText(record(rule.annotation).text);});
     const addresses = excelAddressColumns(model);
     var headers = ['컨트롤러','Role','ACL','순서'].concat(addresses.map(column => column.header), ['서비스','동작']);
-    var widths = [24,26,26,12].concat(addresses.map(() => 30), [24,14]);
+    var widths = [24,26,26,12].concat(addresses.map(column => column.width || 30), [24,14]);
     var noteIndex = headers.length;
     if (includeNotes) {
       headers.push('행별 주석');
@@ -134,15 +199,19 @@
     // Keep the continuation fields immediately after the visible report columns.
     sheet.columns = widths.map(function(width){return {width:width};})
       .concat([{width:12,hidden:true},{width:14,hidden:true}]);
-    sheet.addRow(headers.concat(['_레코드 번호','_조각 / 전체']));
-    rules.forEach(function(rule,index){
+    const records=rules.map(function(rule){
       var values=[compactControllerLabel(rule,byId,counts),rule.roleName,rule.acl,rule.sequence || rule.ordinal]
         .concat(addresses.map(column => column.read(rule)), [rule.service,rule.action]);
       if (includeNotes) values.push(record(rule.annotation).text);
-      var parts=values.map(chunks), count=Math.max.apply(null,parts.map(function(p){return p.length;}));
+      return values;
+    });
+    checkWorksheetRowLimit(records);
+    sheet.addRow(headers.concat(['_레코드 번호','_조각 / 전체']));
+    records.forEach(function(values,index){
+      var parts=values.map(workbookCellParts), count=Math.max.apply(null,parts.map(function(p){return p.length;}));
       for(var i=0;i<count;i++){
         var visible=parts.map(function(p,j){
-          return p[i] || (i>0 && j!==noteIndex && p.length===1 ? p[0] : '');
+          return p[i] || (i>0 && j!==noteIndex && !Array.isArray(values[j]) && p.length===1 ? p[0] : '');
         });
         var row=sheet.addRow(visible.concat([str(index+1),str(i+1)+'/'+str(count)]));
         row.eachCell({includeEmpty:true},function(cell){
@@ -153,9 +222,7 @@
           cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:index%2?'FFF0F5FA':'FFFFFFFF'}};
           cell.border={bottom:{style:'hair',color:{argb:'FFD7E0EA'}}};
         });
-        row.height=Math.min(175,Math.max(28,15*Math.max.apply(null,visible.map(function(v){
-          return Math.ceil(str(v).length/50)+str(v).split('\n').length;
-        }))));
+        row.height=workbookRowHeight(visible,values,28,175,50);
       }
     });
     var header=sheet.getRow(1);
@@ -175,20 +242,25 @@
     book.creator = 'Aruba Wireless Policy Mapper';
     book.subject = 'Offline annotation report';
     book.title = '무선 정책 주석 보고서';
-    datasets(model, excelAddressColumns(model)).forEach(function (data) {
+    const reports = datasets(model, excelAddressColumns(model));
+    reports.forEach(function (data) {
       // These freshly built rows are private to this workbook. The print layout uses the full dataset.
       var noteIndex = data.headers.indexOf('주석');
       if (noteIndex >= 0 && !data.rows.some(function(row){return hasNoteText(row[noteIndex]);})) {
         data.headers.splice(noteIndex, 1);
         data.rows.forEach(function(row){row.splice(noteIndex, 1);});
       }
+      checkWorksheetRowLimit(data.rows);
+    });
+    reports.forEach(function (data) {
       var sheet = book.addWorksheet(data.name, {views:[{state:'frozen',ySplit:1}],pageSetup:{paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}});
-      sheet.columns = [{width:12},{width:12}].concat(data.headers.map(function (h) { return {width:/주석$|내용|원문|규칙$|사유/.test(h) ? 54 : /시각|ID/.test(h) ? 28 : 24}; }));
+      sheet.columns = [{width:12},{width:12}].concat(data.headers.map(function (h) { return {width:h.endsWith(' Alias 상세') ? ALIAS_COLUMN_WIDTH : /주석$|내용|원문|규칙$|사유/.test(h) ? 54 : /시각|ID/.test(h) ? 28 : 24}; }));
       sheet.addRow(['레코드 번호','조각 / 전체'].concat(data.headers));
       data.rows.forEach(function (values, index) {
-        var parts = values.map(chunks), count = Math.max.apply(null, parts.map(function (p) { return p.length; }));
+        var parts = values.map(workbookCellParts), count = Math.max.apply(null, parts.map(function (p) { return p.length; }));
         for (var i = 0; i < count; i++) {
-          var row = sheet.addRow([str(index + 1), str(i + 1) + '/' + str(count)].concat(parts.map(function (p) { return p[i] || ''; })));
+          const visible = parts.map(p => p[i] || '');
+          var row = sheet.addRow([str(index + 1), str(i + 1) + '/' + str(count)].concat(visible));
           row.eachCell({includeEmpty:true}, function (cell) {
             // Strings, including '=...', remain literal string cells (no formulas or hyperlinks).
             cell.numFmt = '@'; cell.alignment = {vertical:'top',wrapText:true};
@@ -196,7 +268,7 @@
             cell.fill = {type:'pattern',pattern:'solid',fgColor:{argb:index % 2 ? 'FFF0F5FA' : 'FFFFFFFF'}};
             cell.border = {bottom:{style:'hair',color:{argb:'FFD7E0EA'}}};
           });
-          row.height = Math.min(180, Math.max(32, 15 * Math.max.apply(null, values.map(function (v) { return Math.ceil(str(v).length / 45) + str(v).split('\n').length; }))));
+          row.height = workbookRowHeight(visible,values,32,180,45);
         }
       });
       var header = sheet.getRow(1);
