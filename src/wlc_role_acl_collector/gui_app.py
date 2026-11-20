@@ -136,12 +136,13 @@ Sheet 선택 기준
 - 작성가이드 같은 안내 Sheet가 첫 번째에 있어도 Role_Networks Sheet가 있으면 안내 Sheet는 읽지 않습니다.
 
 필수 컬럼
-- Role 이름: WLC에서 수집되는 Role 이름과 정확히 맞춰 작성합니다.
 - 네트워크 대역: 10.40.1.0/24 같은 CIDR 형식을 권장합니다.
 
 선택 컬럼
+- Role 이름: Role별 할당 대역도 비교할 때 입력합니다. IP 대역 설명만 조회할 때는 비워도 됩니다.
+- 설명: 해당 대역에 속한 WLC 대역, ACL 주소와 Alias 구성원에 표시할 이름을 입력합니다.
 - 서브넷마스크: CIDR을 쓰지 않고 10.40.1.0처럼 네트워크 주소만 쓸 때 입력합니다.
-- 설명, 소유부서, 비고, 마지막 확인일: 사내 관리용으로 자유롭게 입력합니다.
+- 소유부서, 비고, 마지막 확인일: 사내 관리용으로 자유롭게 입력합니다.
 
 작성 예시
 Role 이름        네트워크 대역       설명
@@ -2592,7 +2593,8 @@ def _result_report_summary_from_parsed(
                 roles.add((controller_name, context.role.casefold()))
                 collected_role_names.add(context.role.casefold())
 
-    if not role_networks:
+    local_lookup = _role_network_lookup_for_summary(role_networks)
+    if not local_lookup:
         return ResultReportSummary(
             ssid_count=len(ssids),
             role_count=len(roles),
@@ -2603,10 +2605,12 @@ def _result_report_summary_from_parsed(
             affected_ssid_count=impact_scope.ssid_count if impact_scope else 0,
             collection_impact_text=health.impact_text_ko,
             recommended_action=health.recommended_action_ko,
-            note="사내 Role 대역표를 선택하면 일치/불일치 항목 수가 함께 표시됩니다.",
+            note=(
+                "IP 대역 참조를 사용합니다. 이름으로 비교할 Role은 없습니다."
+                if role_networks else "사내 Role 대역표를 선택하면 일치/불일치 항목 수가 함께 표시됩니다."
+            ),
         )
 
-    local_lookup = _role_network_lookup_for_summary(role_networks)
     matched_count = 0
     mismatched_count = 0
 
@@ -2643,6 +2647,8 @@ def _role_network_lookup_for_summary(role_networks: list[RoleNetworkDefinition])
     lookup: dict[str, list[str]] = {}
     for definition in role_networks:
         role_key = definition.role.casefold()
+        if not role_key:
+            continue
         lookup.setdefault(role_key, [])
         if definition.network not in lookup[role_key]:
             lookup[role_key].append(definition.network)

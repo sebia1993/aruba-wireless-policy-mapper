@@ -319,7 +319,13 @@ def test_result_report_summary_counts_collection_and_role_network_matches():
     assert no_mapping_summary.failed_command_count == 0
     assert "사내 Role 대역표" in no_mapping_summary.note
 
+    address_only = RoleNetworkDefinition(role="", network="10.30.0.0/24", subnet_mask="", description="Guest")
+    catalogue_summary = _result_report_summary_from_parsed(parsed, [address_only], [result])
+    assert (catalogue_summary.matched_count, catalogue_summary.mismatched_count) == (0, 0)
+    assert "IP 대역 참조" in catalogue_summary.note
+
     role_networks = [
+        address_only,
         RoleNetworkDefinition(role="guest-logon", network="10.30.0.0/24", subnet_mask=""),
         RoleNetworkDefinition(role="corp-employee", network="10.40.99.0/24", subnet_mask=""),
         RoleNetworkDefinition(role="missing-role", network="10.99.0.0/24", subnet_mask=""),

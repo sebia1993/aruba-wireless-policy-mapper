@@ -17,6 +17,24 @@ function project(id = 'old') {
       aliases:[],localNetworks:[],issues:[]}, annotations:{roles:{},rules:{}},unresolvedAnnotations:[],changes:[],importHistory:[]};
 }
 const copy = x => JSON.parse(JSON.stringify(x));
+test('IP network references are optional display data when validating and reusing notes', () => {
+  const old=project(), current=project('new');
+  old.annotations.rules.rule=note();
+  const entry={type:'host',value:'192.0.2.8',raw:'host 192.0.2.8'};
+  old.snapshot.aliases.push({id:'a',name:'office',controllerId:'c',entries:[entry]});
+  current.snapshot.aliases.push({id:'a',name:'office',controllerId:'c',entries:[{...entry,networkReference:'new'}]});
+  current.snapshot.roles[0].networkReferences=['WLC 설정 · 새 대역'];
+  current.snapshot.rules[0].sourceNetworkReference='updated display label';
+  assert.deepEqual(Core.parseProject(JSON.stringify(current)),current);
+  const imported=Core.reconcileProjects(current,old);
+  assert.equal(imported.project.annotations.rules.rule.status,'reused');
+  for(const [row,key,value] of [[current.snapshot.roles[0],'networkReferences',[0]],
+    [current.snapshot.rules[0],'destinationNetworkReference',{}],[current.snapshot.aliases[0].entries[0],'networkReference',7]]) {
+    const prior=row[key]; row[key]=value;
+    assert.throws(()=>Core.validateProject(current),new RegExp(key));
+    if(prior===undefined)delete row[key]; else row[key]=prior;
+  }
+});
 test('resolve Alias report fields using the controller and full collected name', () => {
   const address = (type,value) => ({type,value,raw:type+' '+value});
   const definition = (controllerId,name,entries) => ({controllerId,name,entries});

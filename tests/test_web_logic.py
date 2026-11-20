@@ -370,6 +370,7 @@ def _role_network_workbook_bytes() -> bytes:
         ([" GUEST-LOGON ", "guest-logon", "Excel-Only"], (1, ["corp-employee", "logon"], ["Excel-Only"])),
         (["Example", "Example"], (0, ["corp-employee", "guest-logon", "logon"], ["Example"])),
         (["guest-logon", "corp-employee", "LOGON"], (3, [], [])),
+        (["guest-logon", ""], (1, ["corp-employee", "logon"], [])),
     ],
 )
 def test_uploaded_sheet_reports_unique_role_name_matches_even_when_export_omitted(names, expected):
@@ -390,7 +391,7 @@ def test_uploaded_sheet_reports_unique_role_name_matches_even_when_export_omitte
     coverage = result.summary["role_name_comparison"]
     matched, wlc_only, excel_only = expected
     assert coverage == {
-        "sheet": "LocalSheet", "excel_count": len({name.strip().casefold() for name in names}),
+        "sheet": "LocalSheet", "excel_count": len({name.strip().casefold() for name in names if name.strip()}),
         "collected_count": 3, "matched_count": matched,
         "wlc_only_count": len(wlc_only), "wlc_only_examples": wlc_only,
         "excel_only_count": len(excel_only), "excel_only_examples": excel_only,

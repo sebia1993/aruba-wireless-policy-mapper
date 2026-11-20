@@ -35,6 +35,7 @@ from .collection_health import (
     infer_collection_impact_scope,
 )
 from .models import CollectionResult, ParsedController, RoleNetworkDefinition
+from .role_networks import NetworkReferenceIndex
 
 
 def timestamp_slug() -> str:
@@ -280,7 +281,7 @@ def _build_frames(
     for parsed in parsed_controllers:
         scoped_rows = [ssid_rows, role_network_rows, local_network_rows, acl_rows, alias_rows, unresolved_rows]
         row_starts = [len(rows) for rows in scoped_rows]
-        local_status_by_role = _local_network_status_by_role(parsed, local_lookup, local_mapping_enabled)
+        local_status_by_role = _local_network_status_by_role(parsed, local_lookup, bool(local_lookup))
         local_network_rows.extend(
             _local_network_rows(parsed, local_lookup, local_status_by_role, local_mapping_enabled)
         )
@@ -378,12 +379,12 @@ def _build_frames(
                     "source_interpretation": _acl_field_interpretation(
                         rule.source,
                         local_networks=local_status["networks"],
-                        local_mapping_enabled=local_mapping_enabled,
+                        local_mapping_enabled=bool(local_lookup),
                     ),
                     "destination_interpretation": _acl_field_interpretation(
                         rule.destination,
                         local_networks=local_status["networks"],
-                        local_mapping_enabled=local_mapping_enabled,
+                        local_mapping_enabled=bool(local_lookup),
                     ),
                     "service": rule.service,
                     "role_user_network": _role_network_summary(parsed, policy.role),
@@ -455,6 +456,19 @@ def _build_frames(
             }
         )
 
+    if local_mapping_enabled:
+        catalogue = NetworkReferenceIndex(local_role_networks)
+        for row in role_network_rows:
+            row["network_references"] = "\n".join(catalogue.role_references(
+                row["configured_subnet"], row["observed_networks"].split(", ")
+            ))
+        for row in acl_rows:
+            for field in ("source", "destination"):
+                row[field + "_network_reference"] = catalogue.lookup(row[field])
+        for row in alias_rows:
+            kind = row["entry_type"].strip().lower()
+            row["network_reference"] = catalogue.lookup(f"{kind} {row['value']}") if kind in {"host", "network", "range"} else ""
+
     frames = {
         "Overview": pd.DataFrame(overview_rows),
         "SSID_Role_Map": pd.DataFrame(ssid_rows),
@@ -488,8 +502,13 @@ def _group_local_role_networks(
     definitions: list[RoleNetworkDefinition],
 ) -> dict[str, list[RoleNetworkDefinition]]:
     grouped: dict[str, list[RoleNetworkDefinition]] = {}
+    seen: set[tuple[str, str]] = set()
     for definition in definitions:
-        grouped.setdefault(definition.role.casefold(), []).append(definition)
+        role = definition.role.casefold()
+        key = (role, definition.network)
+        if role and key not in seen:
+            grouped.setdefault(role, []).append(definition)
+            seen.add(key)
     return grouped
 
 
@@ -710,6 +729,11 @@ def _write_html(
             if not _row_controller_key(row):
                 row["controller_id"] = only_controller
     local_network_lookup = _group_local_network_rows(local_network_rows)
+    role_reference_lookup: dict[tuple[str, str], list[str]] = {}
+    for row in role_network_rows:
+        if row.get("network_references"):
+            key = (_row_controller_key(row), str(row["role"]))
+            role_reference_lookup.setdefault(key, []).extend(str(row["network_references"]).splitlines())
     role_user_counts = _role_observed_user_counts(role_network_rows)
     raw_command_rows = frames["Raw_Commands"].to_dict(orient="records")
     user_table_counts_reliable = _user_table_counts_reliable(raw_command_rows)
@@ -749,6 +773,7 @@ def _write_html(
             "user_count": role_user_counts.get(key, 0),
             "panel_id": f"role-panel-{index}",
             "local_networks": local_network_lookup.get(key, []),
+            "network_references": role_reference_lookup.get(key, []),
             "aliases": _group_by_alias([row for row in alias_rows if _row_controller_key(row) == key[0]]),
         }
         for index, (key, rows) in enumerate(
@@ -763,6 +788,7 @@ def _write_html(
         frames,
         role_items,
         local_network_rows,
+        local_networks_enabled=local_role_networks_enabled,
         unresolved_count=unresolved_count,
         raw_command_rows=raw_command_rows,
     )
@@ -798,7 +824,7 @@ def _write_html(
     access_check_controls = _access_check_controls_html(
         access_check_data,
         history_enabled=access_history_enabled,
-        local_role_networks_enabled=local_role_networks_enabled,
+        local_role_networks_enabled=local_role_networks_enabled and bool(local_network_rows),
     )
     access_check_css = _access_check_css()
     access_check_script = _access_check_script(history_enabled=access_history_enabled)
@@ -822,7 +848,8 @@ def _write_html(
             <span>{len(item['rows'])} rules / {item['user_count']} observed users{_other_acl_meta_text(int(item['other_acl_count']))}</span>
           </div>
           {_role_description_html(str(item['role']), role_key=str(item['role_key']))}
-          {_local_role_network_html(item['local_networks'], local_role_networks_enabled)}
+          {_network_references_html(item['network_references'])}
+          {_local_role_network_html(item['local_networks'], local_role_networks_enabled and bool(local_network_rows), has_ip_reference=bool(item['network_references']))}
           {_other_acl_toggle_html(str(item['panel_id']), int(item['other_acl_count']))}
           <div class="acl-table-scroll" role="region" tabindex="0"
             aria-label="{escape(str(item['role']))} ACL table">
@@ -2137,15 +2164,15 @@ def _internal_role_network_banner_html(rows: list[dict[str, Any]], *, enabled: b
         f"<li>{escape(status)} {count}</li>"
         for status, count in sorted(status_counts.items(), key=lambda item: item[0].casefold())
     )
+    counts = (
+        f"<ul><li>Role {len(role_names)}개</li><li>대역 {network_count}개</li>{status_items}</ul>"
+        if rows else ""
+    )
     return f"""
     <section class="internal-network-banner" aria-label="Internal Role network notice">
       <strong>내부망 전용 보고서</strong>
-      <p>사내 Role 대역표가 포함되어 실제 네트워크 대역과 WLC 수집값 비교 상태를 표시합니다. 회사 외부 공유 전 반드시 내용을 확인하세요.</p>
-      <ul>
-        <li>Role {len(role_names)}개</li>
-        <li>대역 {network_count}개</li>
-        {status_items}
-      </ul>
+      <p>사내 Role 대역표가 포함되어 주소로 찾은 IP 대역 참조를 표시합니다. 회사 외부 공유 전 반드시 내용을 확인하세요.</p>
+      {counts}
     </section>
     """
 
@@ -2155,6 +2182,7 @@ def _executive_summary_html(
     role_items: list[dict[str, Any]],
     local_network_rows: list[dict[str, Any]],
     *,
+    local_networks_enabled: bool,
     unresolved_count: int,
     raw_command_rows: list[dict[str, Any]],
 ) -> str:
@@ -2203,11 +2231,12 @@ def _executive_summary_html(
         if dynamic_roles
         else "현재 보고서 기준 동적 Role 가능성이 표시된 항목은 없습니다."
     )
-    local_text = (
-        f"사내 Role 대역표 비교 확인 필요 {len(local_attention_roles)}건"
-        if local_network_rows
-        else "사내 Role 대역표를 선택하지 않아 내부 대역 비교는 생략되었습니다."
-    )
+    if local_network_rows:
+        local_text = f"사내 Role 대역표 비교 확인 필요 {len(local_attention_roles)}건"
+    elif local_networks_enabled:
+        local_text = "IP 대역 참조를 사용합니다. 이름으로 비교할 Role은 없습니다."
+    else:
+        local_text = "사내 Role 대역표를 선택하지 않아 내부 대역 비교는 생략되었습니다."
     if collection_health.status == COLLECTION_FAILED:
         conclusion_text = "필수 수집 데이터가 없어 이 보고서를 정책 판단에 사용하면 안 됩니다. 재수집이 필요합니다."
         badge_status = "failed"
@@ -2412,7 +2441,7 @@ def _access_check_controls_html(
 def _access_check_local_network_note(enabled: bool) -> str:
     if not enabled:
         return ""
-    return "<span>사내 Role 대역표 기준으로 Source IP가 해당 Role 대역 밖이면 경고를 함께 표시합니다.</span>"
+    return "<span>대역표에 같은 이름의 Role이 있고 Source IP가 해당 Role 대역 밖이면 경고를 함께 표시합니다.</span>"
 
 
 def _access_check_css() -> str:
@@ -3111,8 +3140,8 @@ def _acl_rows_html(
               <td>{escape(str(row.get('acl', '')))}</td>
               <td>{escape(str(row.get('sequence', '')))}</td>
               <td>{_action_badge_html(str(row.get('action', '')))}</td>
-              <td>{_acl_field_html(str(row.get('source', '')), source_id, str(row.get('source_interpretation', '')))}</td>
-              <td>{_acl_field_html(str(row.get('destination', '')), destination_id, str(row.get('destination_interpretation', '')))}</td>
+              <td>{_acl_field_html(str(row.get('source', '')), source_id, str(row.get('source_interpretation', '')), str(row.get('source_network_reference', '')))}</td>
+              <td>{_acl_field_html(str(row.get('destination', '')), destination_id, str(row.get('destination_interpretation', '')), str(row.get('destination_network_reference', '')))}</td>
               <td>{_service_badge_html(str(row.get('service', '')))}</td>
               <td class="raw raw-column">{escape(str(row.get('raw_rule', '')))}</td>
               <td class="comment-cell">
@@ -3166,7 +3195,7 @@ def _service_badge_html(service: str) -> str:
     return f'<span class="rule-badge service-badge">{escape(label)}</span>'
 
 
-def _acl_field_html(value: str, detail_id: str, interpretation: str = "") -> str:
+def _acl_field_html(value: str, detail_id: str, interpretation: str = "", network_reference: str = "") -> str:
     alias = _alias_name_from_field(value)
     if not alias:
         field = escape(value)
@@ -3176,9 +3205,20 @@ def _acl_field_html(value: str, detail_id: str, interpretation: str = "") -> str
             f'<button class="alias-link" type="button" data-detail-id="{escape(detail_id)}" '
             f'aria-controls="{escape(detail_id)}" aria-expanded="false">{escape(alias)}</button>'
         )
-    if not interpretation:
-        return field
-    return f'{field}<div class="notice">{escape(interpretation)}</div>'
+    if interpretation:
+        field += f'<div class="notice">{escape(interpretation)}</div>'
+    return field + _ip_reference_html(network_reference)
+
+
+def _ip_reference_html(reference: str) -> str:
+    return f'<small class="notice">대역표 참조 · {escape(reference)}</small>' if reference else ""
+
+
+def _network_references_html(references: list[str]) -> str:
+    if not references:
+        return ""
+    lines = "<br>".join(escape(line) for line in dict.fromkeys(references))
+    return f'<div class="local-network"><strong>IP 대역표 참조</strong><div>{lines}</div></div>'
 
 
 def _inline_alias_detail_html(
@@ -3217,6 +3257,7 @@ def _alias_chips_html(rows: list[dict[str, Any]]) -> str:
             <span class="alias-chip">
               <span class="alias-type alias-type-{kind}">{kind.upper()}</span>
               <span>{escape(value)}</span>
+              {_ip_reference_html(str(row.get("network_reference", "")))}
             </span>
         """)
     if not has_members:
@@ -3297,7 +3338,7 @@ def _summary_entity_list(values: tuple[str, ...], *, limit: int = 5) -> str:
     return text
 
 
-def _local_role_network_html(rows: list[dict[str, Any]], enabled: bool) -> str:
+def _local_role_network_html(rows: list[dict[str, Any]], enabled: bool, *, has_ip_reference: bool = False) -> str:
     if not enabled:
         return ""
 
@@ -3320,6 +3361,8 @@ def _local_role_network_html(rows: list[dict[str, Any]], enabled: bool) -> str:
     )
     label = status
     if status == "Local mapping missing":
+        if has_ip_reference:
+            return '<div class="notice">대역표에 같은 이름의 Role이 없습니다.</div>'
         label = "대역표에 이 Role이 없습니다"
         notes = "입력 시트의 Role 이름을 WLC에서 수집한 이름과 비교하세요."
     elif not network_html:

@@ -132,4 +132,5 @@ body { margin:0; background:#eef2f6; color:#172033; font-family:"Segoe UI","Malg
 }
 
 /* Advanced legacy source uses the same common ACL visibility as the Role editor. */
+.ann-network-reference{display:block;color:#405874;overflow-wrap:anywhere;white-space:pre-line}
 #ann-source-slot #source-report .toggle-other-acls{display:none!important}

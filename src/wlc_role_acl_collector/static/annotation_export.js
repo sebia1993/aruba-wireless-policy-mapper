@@ -23,17 +23,17 @@
   var annotationHeaders = ['주석', '확인 상태', '주석 수정 시각', '확인 시각', '검토 사유', '원본 프로젝트 ID', '원본 스냅샷 ID', '원본 주석 ID', '원본 확인 시각'];
   const aclFilterFields = new Set(['규칙 ID','컨트롤러 ID','컨트롤러','Role ID','Role','ACL','시퀀스','발생 순번','출발지','목적지']);
   const addressColumns = [
-    {header:'출발지', read:rule => rule.source},
-    {header:'목적지', read:rule => rule.destination}
+    {header:'출발지', read:rule => rule.source, reference:rule=>rule.sourceNetworkReference},
+    {header:'목적지', read:rule => rule.destination, reference:rule=>rule.destinationNetworkReference}
   ];
   function aliasEntryText(entry) {
     const raw = entry.raw || '';
     const type = entry.type.trim();
     const value = entry.value;
     const definition = (!type || type.toLowerCase()==='raw') ? value : [type,value].filter(Boolean).join(' ');
-    if (!raw.trim()) return definition;
-    if (!definition.trim() || raw.trim()===definition.trim()) return raw;
-    return definition+'\n원문: '+raw;
+    let text=definition;
+    if (raw.trim()) text=!definition.trim() || raw.trim()===definition.trim() ? raw : definition+'\n원문: '+raw;
+    return entry.networkReference ? text+'\nIP 대역 참조 · '+entry.networkReference : text;
   }
   const ALIAS_COLUMN_WIDTH = 54;
   // Allow space for full-width Korean text, wrapping and cell padding.
@@ -42,10 +42,13 @@
   function aliasCellParts(found) {
     const entries = found.alias.entries.map(aliasEntryText).filter(text => text.trim());
     if (!found.members.length) entries.unshift(found.summary);
+    return displayCellParts(entries.join('\n'));
+  }
+  function displayCellParts(text) {
     const parts = [];
     let current = '', usedLines = 0;
     // Keep separators intact so joining continuation cells restores the original text.
-    for (const [line] of entries.join('\n').matchAll(/[^\n]*\n|[^\n]+/g)) {
+    for (const [line] of text.matchAll(/[^\n]*\n|[^\n]+/g)) {
       for (const piece of chunks(line, ALIAS_CHARS_PER_LINE * ALIAS_LINES_PER_PART)) {
         const lines = Math.max(1,Math.ceil(piece.length / ALIAS_CHARS_PER_LINE));
         if (usedLines + lines > ALIAS_LINES_PER_PART) {
@@ -63,8 +66,8 @@
     const cachedParts = new Map();
     return addressColumns.flatMap(column => {
       const aliasFor = rule => lookup(rule.controllerId, column.read(rule));
-      if (!(model.rules || []).some(aliasFor)) return [column];
-      return [column, {
+      const columns=[column], rules=model.rules || [];
+      if (rules.some(aliasFor)) columns.push({
         header:column.header + ' Alias 상세', width:ALIAS_COLUMN_WIDTH,
         read:rule => {
           const found = aliasFor(rule);
@@ -72,7 +75,12 @@
           if (!cachedParts.has(found.alias)) cachedParts.set(found.alias,aliasCellParts(found));
           return cachedParts.get(found.alias);
         }
-      }];
+      });
+      if (rules.some(column.reference)) columns.push({
+        header:column.header+' IP 대역 참조',width:ALIAS_COLUMN_WIDTH,
+        read:rule=>displayCellParts(column.reference(rule)||'')
+      });
+      return columns;
     });
   }
   function datasets(m, addresses = addressColumns) {
@@ -118,7 +126,7 @@
         changes.push(['확인 필요', x.id, isRule ? 'rule' : 'role', x.controllerId, x.controllerName, isRule ? x.roleId : x.id, isRule ? x.roleName : x.name, isRule ? x.id : '', x.acl, x.raw, list(a.reasons), '', '', '', ''].concat(annotationColumns(a)));
       }
     });
-    return [
+    const sheets = [
       {name:'보고 요약', headers:['분류', '항목 / 식별자', '내용'], rows:summary},
       {name:'Role 설명', headers:['Role ID','컨트롤러 ID','컨트롤러','Role','수집 SSID','Role 유형','ACL 바인딩 순서','원문 바인딩','문맥 수집 완료','관측 사용자 수','SSID 명 (직접 입력)','단말 구분'].concat(annotationHeaders), rows:roles.map(function (x) { return [x.id,x.controllerId,x.controllerName,x.name,list(x.ssids),list(x.roleTypes),list(x.aclOrder),list(x.bindingRaw),x.contextComplete,x.observedUsers,str(record(x.annotation).manualSsid),deviceLabel(record(x.annotation).deviceType)].concat(annotationColumns(x.annotation)); })},
       {name:'ACL 상세',
@@ -133,6 +141,28 @@
         return entries.map(function (entry, i) { return [x.id,x.controllerId,controller ? controller.name : '',x.name,x.entries && x.entries.length ? i + 1 : '',entry.type,entry.value,entry.raw]; });
       })}
     ];
+    if (roles.some(r=>r.networkReferences?.length)) {
+      const roleSheet=sheets[1];
+      roleSheet.headers.push('Role IP 대역 참조');
+      roleSheet.rows.forEach((row,i)=>row.push(list(roles[i].networkReferences)));
+    }
+    // Fixed base columns in the legacy print layout precede all optional references.
+    if (addresses===addressColumns) {
+      const aclSheet=sheets[2];
+      for (const column of addressColumns.filter(col=>rules.some(col.reference))) {
+        aclSheet.headers.push(column.header+' IP 대역 참조');
+        aclSheet.rows.forEach((row,i)=>row.push(str(column.reference(rules[i]))));
+      }
+    }
+    if (aliases.some(a=>a.entries?.some(e=>e.networkReference))) {
+      const aliasSheet=sheets[4];
+      aliasSheet.headers.push('IP 대역 참조');
+      let index=0;
+      for (const alias of aliases) {
+        for (const entry of alias.entries?.length ? alias.entries : [{}]) aliasSheet.rows[index++].push(str(entry.networkReference));
+      }
+    }
+    return sheets;
   }
   function chunks(value,limit=LIMIT) {
     var text = str(value), result = [], start = 0;
@@ -200,8 +230,12 @@
     var rules = model.rules || [];
     var includeNotes = rules.some(function(rule){return hasNoteText(record(rule.annotation).text);});
     const addresses = excelAddressColumns(model);
+    const roleReferences=new Map((model.roles||[]).filter(role=>role.networkReferences?.length)
+      .map(role=>[role.id,displayCellParts(list(role.networkReferences))]));
     var headers = ['컨트롤러','Role','ACL','순서'].concat(addresses.map(column => column.header), ['서비스','동작']);
     var widths = [24,26,26,12].concat(addresses.map(column => column.width || 30), [24,14]);
+    const showRoleReference=rules.some(rule=>roleReferences.has(rule.roleId));
+    if (showRoleReference) {headers.push('Role IP 대역 참조');widths.push(ALIAS_COLUMN_WIDTH);}
     var noteIndex = headers.length;
     if (includeNotes) {
       headers.push('행별 주석');
@@ -213,6 +247,7 @@
     const records=rules.map(function(rule){
       var values=[compactControllerLabel(rule,byId,counts),rule.roleName,rule.acl,rule.sequence || rule.ordinal]
         .concat(addresses.map(column => column.read(rule)), [rule.service,rule.action]);
+      if (showRoleReference) values.push(roleReferences.get(rule.roleId) || ['']);
       if (includeNotes) values.push(record(rule.annotation).text);
       return values;
     });
@@ -261,12 +296,17 @@
         data.headers.splice(noteIndex, 1);
         data.rows.forEach(function(row){row.splice(noteIndex, 1);});
       }
+      for (const [index,header] of data.headers.entries()) {
+        if(header==='Role IP 대역 참조'||header==='IP 대역 참조'){
+          for(const row of data.rows) row[index]=displayCellParts(row[index]);
+        }
+      }
       checkWorksheetRowLimit(data.rows);
     });
     reports.forEach(function (data) {
       const filterColumns = data.name==='ACL 상세' ? data.headers.flatMap((h,i)=>aclFilterFields.has(h) ? [i] : []) : [];
       var sheet = book.addWorksheet(data.name, {views:[{state:'frozen',ySplit:1}],pageSetup:{paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}});
-      sheet.columns = [{width:12},{width:12}].concat(data.headers.map(function (h) { return {width:h.endsWith(' Alias 상세') ? ALIAS_COLUMN_WIDTH : /주석$|내용|원문|규칙$|사유/.test(h) ? 54 : /시각|ID/.test(h) ? 28 : 24}; }));
+      sheet.columns = [{width:12},{width:12}].concat(data.headers.map(function (h) { return {width:h.endsWith(' Alias 상세') || h.endsWith('IP 대역 참조') ? ALIAS_COLUMN_WIDTH : /주석$|내용|원문|규칙$|사유/.test(h) ? 54 : /시각|ID/.test(h) ? 28 : 24}; }));
       sheet.addRow(['레코드 번호','조각 / 전체'].concat(data.headers));
       data.rows.forEach(function (values, index) {
         var parts = values.map(workbookCellParts), count = Math.max.apply(null, parts.map(function (p) { return p.length; }));
@@ -321,6 +361,8 @@
       return lines.join('\n');
     }
     function grouped(data, groups, controllerColumn) {
+      const references=data.headers.flatMap((h,i)=>h.endsWith('IP 대역 참조') ? [i] : []);
+      if(references.length)groups=groups.concat([['IP 대역 참조',...references]]);
       return table(groups.map(function (g) { return g[0]; }),data.rows.map(function (row) {
         return groups.map(function (g, index) {
           var content = g.slice(1).map(function (i) { return data.headers[i] + ': ' + str(row[i]); }).join('\n');

@@ -12,6 +12,29 @@ const target = path.join(staticDir, 'annotation_export.js');
 const exporter = fs.existsSync(target) ? require(target) : {};
 const ExcelJS = require(path.join(staticDir, 'exceljs.min.js'));
 const longNote = '한'.repeat(32766) + '😀' + '\n=1+1 끝';
+test('both XLSX profiles preserve endpoints and show scoped Role, address and Alias network references',async()=>{
+  const p=fixture(), role=p.snapshot.roles[0], rule=p.snapshot.rules[0];
+  role.networkReferences=['WLC 설정 · 역할 참조'];
+  rule.source='host 192.0.2.9';rule.sourceNetworkReference='192.0.2.0/24 · 출발 참조';rule.destination='alias Servers';
+  const ref='198.51.100.0/24 · 서버 참조';
+  p.snapshot.aliases.push({id:'servers',name:'Servers',controllerId:role.controllerId,entries:[{type:'host',value:'198.51.100.2',raw:'host 198.51.100.2',networkReference:ref}]});
+  p.snapshot.rules.push({...rule,id:'common',acl:'ra-guard',ordinal:2,sourceNetworkReference:'HIDDEN LABEL'});
+  const m=Core.buildExportModel(p,{type:'all',showCommonAcl:false});
+  const print=exporter.printHtml(m);
+  for(const label of [ref,role.networkReferences[0],rule.sourceNetworkReference]) assert.ok(print.includes(label));
+  for(const [profile,name] of [['simple','ACL 간단 보고'],['detailed','ACL 상세']]){
+    const book=new ExcelJS.Workbook();
+    await book.xlsx.load(await exporter.workbookBytes(m,ExcelJS,{profile}));
+    const acl=book.getWorksheet(name);
+    const cell=(sheet,header)=>sheet.getRow(2).getCell(sheet.getRow(1).values.indexOf(header)).value;
+    assert.equal(cell(acl,'출발지'),rule.source);
+    assert.equal(cell(acl,'출발지 IP 대역 참조'),rule.sourceNetworkReference);
+    assert.ok(cell(acl,'목적지 Alias 상세').includes(ref));
+    assert.equal(cell(profile==='simple'?acl:book.getWorksheet('Role 설명'),'Role IP 대역 참조'),role.networkReferences[0]);
+    assert.ok(!JSON.stringify(book.worksheets.map(s=>s.getSheetValues())).includes('HIDDEN LABEL'));
+    if(profile==='detailed') assert.equal(cell(book.getWorksheet('Alias 상세'),'IP 대역 참조'),ref);
+  }
+});
 function model() {
   const annotation = {text:longNote,status:'needs_review',updatedAt:'2026-11-16T12:00:00Z',confirmedAt:null,reasons:['규칙 순서 변경'],source:{projectId:'prior',snapshotId:'before',recordId:'old-rule',confirmedAt:'2026-11-15T00:00:00Z'}};
   return {projectId:'project-a',snapshotId:'snapshot-a',revision:7,collectedAt:'2026-11-16T10:00:00Z',updatedAt:'2026-11-16T12:00:00Z',exportedAt:'2026-11-16T13:00:00Z',scopeLabel:'선택 역할: selected',summary:{controllerCount:1,roleCount:1,ruleCount:1,annotatedRuleCount:1,needsReviewCount:1},controllers:[{id:'ctrl-a',name:'<controller>',host:'192.0.2.1',port:22,scope:'effective',identityKnown:true,coverage:'partial',failedCommands:['show rights']}],roles:[{id:'role-a',controllerId:'ctrl-a',controllerName:'<controller>',name:'selected',ssids:['ssid-a'],roleTypes:['user'],aclOrder:['acl-a'],bindingRaw:['access-list session acl-a'],contextComplete:false,observedUsers:2,annotation:{...annotation,text:'=1+1'}}],rules:[{id:'rule-a',controllerId:'ctrl-a',controllerName:'<controller>',roleId:'role-a',roleName:'selected',acl:'acl-a',sequence:'1',ordinal:1,raw:'any any any permit <script>alert(1)</script>',source:'any',destination:'any',service:'any',action:'permit',sourceInterpretation:'any',destinationInterpretation:'any',annotation}],aliases:[{id:'alias-a',controllerId:'ctrl-a',name:'office',entries:[{type:'host',value:'192.0.2.5',raw:'host 192.0.2.5'}]}],localNetworks:[],issues:[{controllerId:'ctrl-a',roleId:'role-a',message:'수집 불완전'}],changes:[{type:'changed',controllerId:'ctrl-a',roleId:'role-a',ruleId:'rule-a',message:'순서 변경',previousRaw:'old permit'}],unresolvedAnnotations:[{id:'orphan-a',kind:'rule',controllerId:'old-ctrl',controllerName:'old controller',roleName:'old role',acl:'old-acl',raw:'old deny',annotation:{...annotation,text:'unmatched note'},reason:'no exact match',candidateIds:['rule-a'],sourceProjectId:'prior',sourceSnapshotId:'before'}]};

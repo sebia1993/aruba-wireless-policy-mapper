@@ -107,6 +107,20 @@ def test_load_role_network_summary_counts_roles_networks_and_duplicates(tmp_path
     ]
 
 
+@pytest.mark.parametrize("with_role", [True, False])
+def test_network_reference_rows_allow_omitted_role_and_keep_distinct_descriptions(tmp_path, with_role):
+    path = tmp_path / "ranges.xlsx"
+    headers = ["네트워크 대역", "설명"]
+    rows = [["192.0.2.0/24", title] for title in ["사내망", "사내망", "업무망"]]
+    if with_role:
+        headers.append("Role 이름")
+    _write_workbook(path, [headers, *rows])
+    result = load_role_network_definitions_with_summary(path)
+    assert result.role_count == 0
+    assert result.duplicate_count == 1
+    assert [(d.role, d.description) for d in result.definitions] == [("", "사내망"), ("", "업무망")]
+
+
 def test_load_role_network_definitions_allows_cidr_without_subnet_mask_column(tmp_path):
     path = tmp_path / "role_networks.xlsx"
     _write_workbook(
@@ -124,6 +138,30 @@ def test_load_role_network_definitions_allows_cidr_without_subnet_mask_column(tm
         ("guest-logon", "10.30.0.0/24", "255.255.255.0"),
         ("corp-employee", "10.40.1.0/24", "255.255.255.0"),
     ]
+
+
+def test_network_reference_most_specific_whole_operand_and_tied_descriptions():
+    from wlc_role_acl_collector.models import RoleNetworkDefinition
+    from wlc_role_acl_collector.role_networks import NetworkReferenceIndex
+
+    index = NetworkReferenceIndex([
+        RoleNetworkDefinition("", cidr, "", description=label)
+        for cidr, label in [
+            ("192.0.2.0/24", "상위망"), ("192.0.2.128/25", "직원망"),
+            ("192.0.2.128/25", "업무망"), ("192.0.2.128/25", "직원망"),
+            ("0.0.0.0/1", ""),
+        ]
+    ])
+    for operand in ("host 192.0.2.160", "192.0.2.160", "network 192.0.2.161 255.255.255.224",
+                    "network 192.0.2.161/27", "host 192.0.2.159/32", "range 192.0.2.159 - 192.0.2.180"):
+        assert index.lookup(operand) == "192.0.2.128/25 · 직원망 / 업무망"
+    assert index.lookup("range 192.0.2.110 192.0.2.160") == "192.0.2.0/24 · 상위망"
+    assert index.lookup("host 192.0.2.132/24") == "192.0.2.0/24 · 상위망"
+    assert index.lookup("10.0.0.8") == "0.0.0.0/1"
+    for operand in ("192.0.2.0/23", "range 192.0.1.255 192.0.2.2", "range 192.0.2.5 192.0.2.1",
+                    "any", "user", "alias staff", "name 192.0.2.132",
+                    "host example.org", "network 192.0.2.132 garbage", "2001:db8::1"):
+        assert index.lookup(operand) == ""
 
 
 def test_packaged_role_network_template_contains_input_and_guide_sheets():

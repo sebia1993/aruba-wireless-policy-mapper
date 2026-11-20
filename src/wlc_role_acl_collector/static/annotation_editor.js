@@ -261,8 +261,13 @@
 
     function noticeHtml() {
       const incomplete=project.snapshot.controllers.filter(c=>c.coverage!=='completed');
+      const snapshot=project.snapshot;
+      const hasPrivateNetworks=snapshot.localNetworks.some(n=>n.network.trim())
+        || snapshot.roles.some(r=>r.networkReferences?.length)
+        || snapshot.rules.some(r=>r.sourceNetworkReference || r.destinationNetworkReference)
+        || snapshot.aliases.some(a=>a.entries.some(e=>e.networkReference));
       return (incomplete.length?'<p class="ann-warning">'+escapeHtml(incomplete.map(c=>c.name+': '+COVERAGE[c.coverage]).join(' / '))+' — 보이지 않는 규칙을 삭제된 정책으로 단정하지 않습니다.</p>':'')+
-        (project.snapshot.localNetworks.some(n=>n.network.trim())?'<p class="ann-warning">내부망 대역 정보가 포함된 작업입니다.</p>':'');
+        (hasPrivateNetworks?'<p class="ann-warning">내부망 대역 정보가 포함된 작업입니다.</p>':'');
     }
 
     function shell() {
@@ -335,8 +340,13 @@
       return lookupAlias(rule.controllerId, rule[field]);
     }
 
+    function networkReferenceHtml(reference) {
+      return reference ? '<small class="ann-network-reference">IP 대역 참조 · '+escapeHtml(reference)+'</small>' : '';
+    }
+
     function memberListHtml(entries) {
-      return '<ul>'+entries.map(entry => '<li>'+escapeHtml([entry.type,entry.value].filter(Boolean).join(' '))+'</li>').join('')+'</ul>';
+      return '<ul>'+entries.map(entry => '<li>'+escapeHtml([entry.type,entry.value].filter(Boolean).join(' '))+
+        networkReferenceHtml(entry.networkReference)+'</li>').join('')+'</ul>';
     }
 
     function aliasFieldHtml(value, alias, field, detailId) {
@@ -373,7 +383,10 @@
       if(!current){body.textContent='현재 Role에서 규칙 원본을 확인할 수 없습니다.';return;}
       const targetRole=role(current.roleId), targetController=controller(current.controllerId);
       const references=[];
+      const addressEvidence=[];
       for(const field of ['source','destination']){
+        const label=current[field+'NetworkReference'];
+        if(label)addressEvidence.push(fieldLabels[field]+' '+current[field]+' · '+label);
         const ref=ruleAlias(current,field);
         if(ref && !references.some(item=>item.name===ref.name))references.push({...ref,field:fieldLabels[field]});
       }
@@ -388,6 +401,7 @@
         '<span><strong>ACL</strong>'+escapeHtml(current.acl)+'</span><span><strong>시퀀스</strong>'+escapeHtml(current.sequence)+'</span>'+
         '<span><strong>Role 내 순서</strong>'+escapeHtml(current.ordinal)+'</span></div>'+
         '<strong class="ann-evidence-caption">수집 원문</strong><pre><code>'+escapeHtml(current.raw||'(수집 원문 없음)')+'</code></pre>'+
+        (addressEvidence.length?'<strong class="ann-evidence-caption">IP 대역 참조</strong><p>'+addressEvidence.map(escapeHtml).join('<br>')+'</p>':'')+
         '<strong class="ann-evidence-caption">참조 Alias</strong>'+aliasHtml+
         '<p class="ann-help">Role ACL 연결 순서: '+escapeHtml(targetRole?.aclOrder?.join(' → ')||'정보 없음')+
         '. 수집 범위: '+escapeHtml(COVERAGE[targetController?.coverage]||'미확인')+
@@ -410,8 +424,8 @@
           <span class="ann-sequence">#${escapeHtml(rule.sequence)} · Role 내 ${rule.ordinal}번째</span>
           <span class="ann-action ${rule.action==='deny'?'deny':''}">${escapeHtml(rule.action||'미확인')}</span></td>
         <td><dl class="ann-rule-fields">
-          <dt>출발지</dt><dd>${aliasFieldHtml(rule.source, sourceAlias, 'source', detailId)}</dd>
-          <dt>목적지</dt><dd>${aliasFieldHtml(rule.destination, destinationAlias, 'destination', detailId)}</dd>
+          <dt>출발지</dt><dd>${aliasFieldHtml(rule.source, sourceAlias, 'source', detailId)}${networkReferenceHtml(rule.sourceNetworkReference)}</dd>
+          <dt>목적지</dt><dd>${aliasFieldHtml(rule.destination, destinationAlias, 'destination', detailId)}${networkReferenceHtml(rule.destinationNetworkReference)}</dd>
           <dt>서비스</dt><dd>${escapeHtml(rule.service)}</dd>
         </dl><details class="ann-rule-evidence" data-rule-evidence="${escapeHtml(rule.id)}">
           <summary>ACL 원문 · Alias · 수집 근거</summary><div class="ann-rule-evidence-content" data-rule-evidence-body></div>
@@ -420,17 +434,19 @@
       </tr>${detail}`;
     }
 
-    function localNetworksHtml(rows) {
-      if (!rows.length) return '';
+    function localNetworksHtml(rows, references=[]) {
+      const referencePanel=references.length
+        ? '<div class="ann-local"><strong>IP 대역 참조</strong><p>'+references.map(escapeHtml).join('<br>')+'</p></div>' : '';
+      if (!rows.length) return referencePanel;
       const title = rows.some(row=>row.network.trim()) ? '포함된 내부망 대역' : '사내 Role 대역표 비교';
       const lines = rows.map(row=>{
         const status = core.localNetworkStatusLabel(row.status);
         const network = row.network.trim();
-        if (!network) return escapeHtml(status);
+        if (!network) return references.length && row.status==='Local mapping missing' ? '대역표에 같은 이름의 Role이 없습니다.' : escapeHtml(status);
         const mask = row.subnetMask.trim();
         return escapeHtml(network + (mask ? ' (마스크 '+mask+')' : '') + ' · '+status);
       });
-      return '<div class="ann-local"><strong>'+title+'</strong><p>'+lines.join('<br>')+'</p></div>';
+      return referencePanel+'<div class="ann-local"><strong>'+title+'</strong><p>'+lines.join('<br>')+'</p></div>';
     }
 
     function renderRole() {
@@ -447,10 +463,10 @@
         </div></div><p>수집 SSID: ${escapeHtml(r.ssids.join(', ')||'연결 정보 없음')} · 관측 사용자 ${r.observedUsers}명 · 전용 ${rows.length-commonAclRows.length}개 · 공통 ${commonAclRows.length}개 (전체 ${rows.length}개)</p></div><span class="ann-coverage ${c?.coverage==='completed'?'':'incomplete'}">${COVERAGE[c?.coverage]||'미확인'}</span></div>
         <section class="ann-collection-strip" aria-label="선택 Role 수집 근거"><div class="ann-collection-summary"><span><strong>수집 상태</strong>${escapeHtml(COVERAGE[c?.coverage]||'미확인')}</span><span><strong>Role 문맥</strong>${r.contextComplete?'확인':'추가 확인 필요'}</span><span><strong>ACL 연결</strong>${r.aclOrder.length}개</span><span><strong>Alias</strong>${aliases.length}개 (장비 기준)</span><span><strong>실패 명령</strong>${(c?.failedCommands||[]).length}개</span></div><p class="ann-help">수집 완료는 정책 적절성이나 실제 통신 성공을 보증하지 않습니다. ${!sourceAvailable()?'현재 작업 파일 기준이며 연결된 원본 보고서가 없어 접근 판정이 제한됩니다.':''}</p>${(c?.failedCommands||[]).length?'<p class="ann-collection-attention">실패 명령: '+escapeHtml(c.failedCommands.join(', '))+'</p>':''}</section>
         <div class="ann-role-note"><h3>보고용 Role 설명</h3><p class="ann-help">업무 목적 · 대상 사용자 · 주요 접근 범위 · 예외 및 확인 사항을 정리하세요.</p>${noteEditor('roles',r.id,r.name+' Role 설명')}</div>
-        ${localNetworksHtml(networks)}
+        ${localNetworksHtml(networks,r.networkReferences)}
         <div class="ann-section-title"><h3>ACL 원본 · 주석 통합</h3><label class="ann-common-toggle"><input type="checkbox" id="ann-show-common-acl" ${showCommonAcl?'checked':''}>공통 ACL 함께 보기 ${commonAclRows.length?'('+commonAclRows.length+')':''}</label></div><p class="ann-help">Excel과 PDF에도 이 설정을 적용합니다. 공통 ACL을 포함하려면 체크하세요. 작업 파일에는 전체 규칙과 주석이 저장됩니다.${!showCommonAcl&&commonAclRows.length?' '+commonAclRows.length+'개 공통 규칙이 화면에서 숨겨졌습니다.':''}</p>
         <div class="ann-table-scroll" tabindex="0" role="region" aria-label="${escapeHtml(r.name)} ACL 원본 및 주석 표"><table class="ann-rules"><thead><tr><th>ACL / 순서</th><th>수집 정책 (Source / Destination / Service)</th><th>주석 · 확인 상태</th></tr></thead><tbody>${visibleRows.map(ruleRowHtml).join('')||'<tr><td colspan="3">'+(rows.length && commonAclRows.length?'전용 ACL이 표시되지 않습니다. 공통 ACL '+commonAclRows.length+'개가 숨겨져 있습니다. 공통 ACL 함께 보기로 확인하세요.':'이 Role에 수집된 ACL 규칙이 없습니다.')+'</td></tr>'}</tbody></table></div>
-        <details class="ann-context"><summary>전체 ACL 연결 순서 · Alias 목록 · 수집 확인 사항</summary><h3>ACL 연결 순서</h3><p>${escapeHtml(r.aclOrder.join(' → ')||'연결 정보 없음')}</p><pre>${escapeHtml(r.bindingRaw.join('\n'))}</pre><h3>이 장비의 Alias</h3>${aliases.map(a=>'<div class="ann-alias"><strong>'+escapeHtml(a.name)+'</strong><ul>'+a.entries.map(e=>'<li>'+escapeHtml(e.type+' '+e.value)+'</li>').join('')+'</ul></div>').join('')||'<p>수집된 Alias가 없습니다.</p>'}<h3>확인 사항</h3><ul>${project.snapshot.issues.filter(i=>i.controllerId===r.controllerId&&(!i.roleId||i.roleId===r.id)).map(i=>'<li>'+escapeHtml(i.message)+'</li>').join('')||'<li>추가 수집 확인 사항이 없습니다.</li>'}</ul></details>`;
+        <details class="ann-context"><summary>전체 ACL 연결 순서 · Alias 목록 · 수집 확인 사항</summary><h3>ACL 연결 순서</h3><p>${escapeHtml(r.aclOrder.join(' → ')||'연결 정보 없음')}</p><pre>${escapeHtml(r.bindingRaw.join('\n'))}</pre><h3>이 장비의 Alias</h3>${aliases.map(a=>'<div class="ann-alias"><strong>'+escapeHtml(a.name)+'</strong>'+memberListHtml(a.entries)+'</div>').join('')||'<p>수집된 Alias가 없습니다.</p>'}<h3>확인 사항</h3><ul>${project.snapshot.issues.filter(i=>i.controllerId===r.controllerId&&(!i.roleId||i.roleId===r.id)).map(i=>'<li>'+escapeHtml(i.message)+'</li>').join('')||'<li>추가 수집 확인 사항이 없습니다.</li>'}</ul></details>`;
       // HTML parsing consumes an initial LF in textarea markup. The project is
       // authoritative, so assign DOM values explicitly after every render.
       for (const input of target.querySelectorAll('[data-note-id]')) input.value=record(input.dataset.noteKind,input.dataset.noteId).text;

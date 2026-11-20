@@ -498,6 +498,23 @@ def test_source_role_panel_explains_missing_excel_role_without_a_network_pill(ro
     assert "입력 시트의 Role 이름" in panel
     assert 'class="local-subnet-pill"' not in panel
     assert _local_role_network_html(rows, enabled=False) == ""
+    matched = _local_role_network_html(rows, enabled=True, has_ip_reference=True)
+    assert "대역표에 같은 이름의 Role이 없습니다." in matched
+    assert "입력 시트의 Role 이름" not in matched
+
+
+def test_cidr_catalog_without_named_roles_has_an_address_lookup_summary(tmp_path):
+    controller = Controller(name="sample_controller", host="192.0.2.10")
+    result = collect_from_offline_raw(controller, Path(__file__).parent / "fixtures")
+    files = write_reports(
+        parsed_controllers=build_parsed_controllers([result]), collection_results=[result], output_dir=tmp_path,
+        local_role_networks=[RoleNetworkDefinition(role="", network="10.30.0.0/24", subnet_mask="255.255.255.0")],
+        export_local_role_networks=True,
+    )
+    html = files["html"].read_text(encoding="utf-8")
+    banner = re.search(r'<section class="internal-network-banner".*?</section>', html, re.S).group()
+    assert "IP 대역 참조" in banner and "대역 0개" not in banner
+    assert "사내 Role 대역표를 선택하지 않아" not in html
 
 
 def test_write_report_exports_local_role_network_mapping_when_enabled(tmp_path):
@@ -555,6 +572,28 @@ def test_write_report_exports_local_role_network_mapping_when_enabled(tmp_path):
     assert "Mismatch" in html
     assert "Local mapping missing" in html
     assert "Local Role Network: 10.30.0.0/24, 10.31.0.0/24" in html
+
+
+def test_source_report_resolves_cidrs_for_vlan_rule_and_alias_without_a_role_name(tmp_path):
+    controller = Controller(name="sample_controller", host="192.0.2.10")
+    result = collect_from_offline_raw(controller, Path(__file__).parent / "fixtures")
+    label = "<site&range>"
+    definition = RoleNetworkDefinition("", "10.0.0.0/8", "255.0.0.0", description=label)
+    files = write_reports(parsed_controllers=build_parsed_controllers([result]), collection_results=[result],
+                          output_dir=tmp_path, local_role_networks=[definition], export_local_role_networks=True)
+    html = files["html"].read_text(encoding="utf-8")
+    assert "WLC 설정 대역 10.30.0.0/24 → 10.0.0.0/8 · &lt;site&amp;range&gt;" in html
+    assert '대역표 참조 · 10.0.0.0/8 · &lt;site&amp;range&gt;</small>' in html
+    assert '<span class="local-network-status status-missing">' not in html
+    assert '<site&range>' not in html
+    wb = load_workbook(files["xlsx"], read_only=True)
+    try:
+        for sheet, column in [("Role_ACL_Detail", "destination_network_reference"), ("Alias_Detail", "network_reference")]:
+            values = wb[sheet].values
+            col = next(values).index(column)
+            assert f"10.0.0.0/8 · {label}" in [row[col] for row in values]
+    finally:
+        wb.close()
 
 
 def test_acl_rows_keep_collection_order_and_hide_other_acls():

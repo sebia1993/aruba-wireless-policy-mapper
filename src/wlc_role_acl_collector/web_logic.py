@@ -320,8 +320,8 @@ def _build_success_summary(
         "recommended_action": health.recommended_action_ko,
         "role_network_rows": role_network_summary.network_count if role_network_summary else 0,
     }
-    if role_network_summary:
-        uploaded = {row.role.casefold(): row.role for row in role_network_summary.definitions}
+    if role_network_summary and role_network_summary.role_count:
+        uploaded = {row.role.casefold(): row.role for row in role_network_summary.definitions if row.role}
         collected = {name.casefold(): name for item in parsed for name in sorted(collected_role_names(item))}
         wlc_only = sorted(collected.keys() - uploaded.keys())
         excel_only = sorted(uploaded.keys() - collected.keys())

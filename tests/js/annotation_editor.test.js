@@ -55,6 +55,32 @@ test('old and new snapshots distinguish mapping status from actual networks on t
   } finally { env.close(); }
 });
 
+test('Role and endpoint IP references are rendered as text and follow the active rule and Alias', () => {
+  const p=fixture(), rule=p.snapshot.rules[0], role=p.snapshot.roles[0];
+  role.networkReferences=['WLC 설정 · 192.0.2.0/24 · 업무망'];
+  rule.source='host 192.0.2.8'; rule.sourceNetworkReference='192.0.2.0/24 · 프린터';
+  rule.destination='alias Servers';
+  const ref='198.51.100.0/24 · <img src=x>';
+  p.snapshot.aliases.push({controllerId:role.controllerId,id:'alias-s',name:'Servers',
+    entries:[{type:'host',value:'198.51.100.4',raw:'host 198.51.100.4',networkReference:ref}]});
+  p.snapshot.localNetworks.push({controllerId:role.controllerId,roleId:role.id,network:'',subnetMask:'',status:'Local mapping missing',notes:''});
+  const env=mount(p);
+  try {
+    const detail=env.window.document.querySelector('#ann-role-detail');
+    assert.match(detail.textContent,/IP 대역 참조.*WLC 설정/s);
+    assert.doesNotMatch(detail.querySelector('.ann-local').textContent,/대역표에 이 Role이 없습니다/);
+    assert.match(detail.querySelector('.ann-rules dd').textContent,/host 192.0.2.8.*프린터/s);
+    detail.querySelector('[data-alias-field="destination"]').click();
+    const card=detail.querySelector('.ann-alias-detail');
+    assert.ok(card.textContent.includes(ref));
+    assert.equal(card.querySelector('img'),null);
+    const evidence=detail.querySelector('[data-rule-evidence]');
+    evidence.open=true; evidence.dispatchEvent(new env.window.Event('toggle'));
+    assert.ok(evidence.textContent.includes(ref));
+    assert.ok(evidence.textContent.includes(rule.sourceNetworkReference));
+  } finally {env.close();}
+});
+
 test('recovery keys isolate project, snapshot, revision and base timestamp', () => {
   const p = fixture(), key = Editor.recoveryKey(p);
   for (const change of [x=>x.projectId='another',x=>x.snapshot.id='another',x=>x.revision++,x=>x.updatedAt='2026-11-16T02:00:00Z']) {
